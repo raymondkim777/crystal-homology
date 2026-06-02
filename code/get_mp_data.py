@@ -1,17 +1,17 @@
-import os
 import json
 from mp_api.client import MPRester
 from monty.json import MontyEncoder
 # from monty.serialization import loadfn, dumpfn
+from utils import open_write_file
 from dotenv import load_dotenv
 load_dotenv()
 
 
 CRYSTAL_SYSTEMS = [
-    # 'triclinic', 
-    # 'monoclinic', 
-    # 'trigonal', 
-    # 'hexagonal', 
+    'triclinic', 
+    'monoclinic', 
+    'trigonal', 
+    'hexagonal', 
     'orthorhombic', 
     'tetragonal', 
     'cubic'
@@ -21,14 +21,6 @@ FIELDS = [
     "symmetry", 
     "structure"
 ]
-
-
-def open_write_file(dir_path, file_name):
-    """Opens a file for writing, or creates new file if file doesn't exist."""
-    file_path = os.path.join(dir_path, file_name)
-    if not os.path.exists(os.path.dirname(file_path)):
-        os.makedirs(os.path.dirname(file_path))
-    return file_path
 
 
 def query_all_crystals_from_mp():

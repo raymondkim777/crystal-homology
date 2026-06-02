@@ -1,8 +1,8 @@
-import os
 import json
 import random
 from monty.json import MontyEncoder
 from monty.serialization import loadfn
+from utils import open_write_file
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -18,14 +18,6 @@ CRYSTAL_SYSTEMS = [
 ]
 MP_DATA_PATH = 'data/mp-raw'
 SUBSET_SIZE = 1000
-
-
-def open_write_file(dir_path, file_name):
-    """Opens a file for writing, or creates new file if file doesn't exist."""
-    file_path = os.path.join(dir_path, file_name)
-    if not os.path.exists(os.path.dirname(file_path)):
-        os.makedirs(os.path.dirname(file_path))
-    return file_path
 
 
 def choose_subset_of_mp_data():
