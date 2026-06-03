@@ -1,5 +1,5 @@
 ```
-conda create -n crystal python=3.13
+conda create -n crystal python=3.11
 pip install -r requirements.txt
 ```
 
