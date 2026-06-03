@@ -3,4 +3,6 @@
 __pycache__
 code/data/mp*
 code/data/cif
+code/data/struct-issues
 code/error.log
+logs
