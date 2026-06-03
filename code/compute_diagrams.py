@@ -66,7 +66,7 @@ def compute_persistence_diagrams(dims: tuple=(0, 1, 2)) -> None:
         filtration='max', 
         coeff=2, 
         max_edge_weight=MAX_DIST + 1,
-        infinity_values=None
+        infinity_values=None  # has to be None (same as max_edge_weight) else persistence lansdscape is infty
     )
 
     for system in CRYSTAL_SYSTEMS:
