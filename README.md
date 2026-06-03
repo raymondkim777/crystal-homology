@@ -10,3 +10,9 @@ cd code
 python get_mp_data.py
 python convert_subset_to_cif.py
 ```
+
+# Atomic Bond Network Creation
+
+```
+python create_bonds.py
+```
