@@ -18,7 +18,7 @@ CRYSTAL_SYSTEMS = [
 ]
 GRAPH_DIRECTORY = "data/graphs"
 DIAGRAM_DIRECTORY = "data/diagrams"
-MAX_DIST = 12.43843407284584
+MAX_DIST = 12.43843407284584  # computed from find_max_dist()
 
 
 def unpack_all_graphs() -> dict:
