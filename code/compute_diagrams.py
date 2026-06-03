@@ -66,7 +66,7 @@ def compute_persistence_diagrams(dims: tuple=(0, 1, 2)) -> None:
         filtration='max', 
         coeff=2, 
         max_edge_weight=MAX_DIST + 1,
-        infinity_values=np.inf
+        infinity_values=None
     )
 
     for system in CRYSTAL_SYSTEMS:
