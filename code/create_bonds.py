@@ -1,11 +1,11 @@
 import os
 from tqdm import tqdm
 import pickle
-from utils import open_write_file
+from utils import open_write_file, plot_graph
 from pymatgen.io.cif import CifParser
-from pymatgen.core.structure import Structure
+# from pymatgen.core.structure import Structure
 from pymatgen.analysis.local_env import CrystalNN
-from pymatgen.analysis.graphs import StructureGraph
+# from pymatgen.analysis.graphs import StructureGraph
 
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -24,7 +24,20 @@ CIF_DIRECTORY = "data/cif"
 GRAPH_DIRECTORY = "data/graphs"
 
 
-def get_structures_from_cif(filepath: str):
+def fetch_cif_filenames(system: str) -> list:
+    print(f"Fetching CIF files of {system} system...")
+    cif_files = []
+
+    # os.scandir() returns an iterator of DirEntry objects
+    with os.scandir(f"{CIF_DIRECTORY}/{system}") as entries:
+        for entry in entries:
+            if not entry.is_file():
+                continue
+            cif_files.append(entry.name)
+    return cif_files
+
+
+def get_structures_from_cif(filepath: str) -> list:
     cif_parser = CifParser(filepath)
     structures = cif_parser.parse_structures()
     for struct in structures:
@@ -32,39 +45,36 @@ def get_structures_from_cif(filepath: str):
         if check_result is not None:
             print(f"CIF Error: {filepath}")
             print(f"Error Message: {check_result}")
+            raise ValueError(f"Struct contained in {filepath} is invalid")
+    # TODO: look into which crystals have multiple structures
     return structures
     # return Structure.from_file(filepath)
 
 
-def construct_crystalnn_graph():
+def construct_crystalnn_graph() -> None:
     # first pass --> convert multigraph into simple graph
     # use minimum euclidean distance for edge weights
     # remove self connections
     
+    # parameters selected for structural bonds, not chemical bonds
     crystalnn = CrystalNN(distance_cutoffs=None, x_diff_weight=0, porous_adjustment=False)
     for system in CRYSTAL_SYSTEMS:
 
         system_graphs = dict()
-        
-        print(f"Fetching CIF files of {system} system...")
-        cif_files = []
-
-        # os.scandir() returns an iterator of DirEntry objects
-        with os.scandir(f"{CIF_DIRECTORY}/{system}") as entries:
-            for entry in entries:
-                if not entry.is_file():
-                    continue
-                cif_files.append(entry.name)
+        cif_files = fetch_cif_filenames(system)
                     
         print(f"Creating graphs of {system} system...")
-
         for filename in tqdm(cif_files):
-            structure_file = f"{CIF_DIRECTORY}/{system}/{filename}"
-            structures = get_structures_from_cif(structure_file)
+            structure_filename = f"{CIF_DIRECTORY}/{system}/{filename}"
+            structures = get_structures_from_cif(structure_filename)
 
             # transform into graph
             bonded_graph = crystalnn.get_bonded_structure(structures[0])
+            
+            # collapse multigraph into graph
             nx_graph = nx.DiGraph(bonded_graph.graph)
+
+            # TODO: store edge multiplicities as edge attr.
 
             # remove self connections
             for node in nx_graph.nodes:
@@ -86,7 +96,21 @@ def construct_crystalnn_graph():
             pickle.dump(system_graphs, f)
 
 
-def test_crystalnn():
+def check_structures() -> None:
+    for system in CRYSTAL_SYSTEMS:
+        struct_mult_list = []
+        cif_files = fetch_cif_filenames(system)
+        for filename in tqdm(cif_files):
+            structure_filename = f"{CIF_DIRECTORY}/{system}/{filename}"
+            structures = get_structures_from_cif(structure_filename)
+            if len(structures) > 1:
+                struct_mult_list.append(filename[:-4])
+        filepath = open_write_file(f'data/struct-issues', f"{system}")
+        with open(filepath, 'w') as f:
+            f.write("\n".join(struct_mult_list))
+
+
+def test_crystalnn() -> None:
     # parameters selected for structural bonds, not chemical bonds
     crystalnn = CrystalNN(distance_cutoffs=None, x_diff_weight=0, porous_adjustment=False)
 
@@ -133,16 +157,7 @@ def test_crystalnn():
     print("neighbors list:", list(nx_graph.neighbors(0)))
     print("edges:", nx_graph.edges([0]))
 
-    # Draw the graph with labels
-    pos = nx.spring_layout(nx_graph)
-
-    nx.draw(nx_graph, pos, with_labels=True, node_color='lightblue', edge_color='gray', node_size=800)
-    edge_labels = nx.get_edge_attributes(nx_graph, "weight")
-    formatted_labels = {edge: f"{weight:.3f}" for edge, weight in edge_labels.items()}
-    nx.draw_networkx_edge_labels(nx_graph, pos, edge_labels=formatted_labels)
-    
-    # Display the plot
-    # plt.show()
+    # plot_graph(nx_graph)
 
     graph_filepath = open_write_file('data/graphs', 'testgraph.pkl')
     with open(graph_filepath, 'wb') as f:
@@ -152,4 +167,5 @@ def test_crystalnn():
 
 if __name__ == "__main__":
     # test_crystalnn()
-    construct_crystalnn_graph()
+    # construct_crystalnn_graph()
+    check_structures()

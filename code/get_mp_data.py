@@ -23,7 +23,7 @@ FIELDS = [
 ]
 
 
-def query_all_crystals_from_mp():
+def query_all_crystals_from_mp() -> None:
     for system in CRYSTAL_SYSTEMS:
         print(f"Querying {system} system from Materials Project...")
 

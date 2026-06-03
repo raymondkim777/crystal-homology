@@ -1,1 +1,1 @@
-python create_bonds.py > error.log
+python create_bonds.py > logs/error.log

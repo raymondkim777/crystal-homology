@@ -20,7 +20,7 @@ MP_DATA_PATH = 'data/mp-raw'
 SUBSET_SIZE = 1000
 
 
-def choose_subset_of_mp_data():
+def choose_subset_of_mp_data() -> None:
     for system in CRYSTAL_SYSTEMS:
         print(f"Choosing subset of {system} system...")
         mp_raw_json_list = loadfn(f"data/mp-raw/{system}.json")
@@ -35,7 +35,7 @@ def choose_subset_of_mp_data():
             json.dump(mp_subset, f, cls=MontyEncoder, indent=4)
 
 
-def convert_summarydoc_to_cif():
+def convert_summarydoc_to_cif() -> None:
     for system in CRYSTAL_SYSTEMS:
         print(f"Converting {system} system files into CIF...")
         data_cif_dir = f'data/cif/{system}'
