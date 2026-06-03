@@ -1,11 +1,8 @@
+import pickle
 from gtda.diagrams import PersistenceLandscape
 import numpy as np
 
-class LandscapeGenerator:
-    def __init__(self, n_layers=5, resolution=100):
-        self.transformer = PersistenceLandscape(n_layers= n_layers, resolution=resolution)
-    
-    def generate(self, diagrams):
-
-        transformed = self.transformer.fit_transform([diagrams])
-        return transformed[0].flatten()
+def generate_landscape(diagrams, n_layers=2, n_bins=100):
+    transformer = PersistenceLandscape(n_layers=n_layers, n_bins=n_bins)
+    transformed = transformer.fit_transform([diagrams])
+    return transformed[0].flatten()
