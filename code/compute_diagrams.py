@@ -1,9 +1,8 @@
-import os
 import numpy as np
 import networkx as nx
 from tqdm import tqdm
 import pickle
-from utils import open_write_file, plot_graph
+from utils import open_write_file, plot_nxgraph
 from gtda.homology import FlagserPersistence
 from gtda.plotting import plot_diagram
 
@@ -66,7 +65,7 @@ def compute_persistence_diagrams(dims: tuple=(0, 1, 2)) -> None:
         filtration='max', 
         coeff=2, 
         max_edge_weight=MAX_DIST + 1,
-        infinity_values=None  # has to be None (same as max_edge_weight) else persistence lansdscape is infty
+        infinity_values=None
     )
 
     for system in CRYSTAL_SYSTEMS:
@@ -112,5 +111,5 @@ def test():
 
 
 if __name__ == "__main__":
-    test()
-    # compute_persistence_diagrams()
+    # test()
+    compute_persistence_diagrams()

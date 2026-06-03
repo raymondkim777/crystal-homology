@@ -11,7 +11,7 @@ def open_write_file(dir_path, file_name):
     return file_path
 
 
-def plot_graph(graph: nx.DiGraph) -> None:
+def plot_nxgraph(graph: nx.DiGraph) -> None:
     # Draw the graph with labels
     pos = nx.spring_layout(graph)
 

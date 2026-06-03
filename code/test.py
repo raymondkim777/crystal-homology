@@ -12,10 +12,10 @@ def plot_persistence_diagram(diagram) -> None:
     fig.show()
 
 
-with open('data/diagrams/cubic.pkl', 'rb') as file:
+with open('data/diagrams/trigonal.pkl', 'rb') as file:
     diagrams = pickle.load(file)
 
-index = 120
+index = 0
 keys_list = list(diagrams.keys())
 
 # print(type(diagrams[keys_list[index]]))
@@ -30,5 +30,5 @@ diagram_array = np.stack(tuple(diagrams.values()), axis=0)
 print(type(diagram_array))
 print(diagram_array.shape)
 
-landscape = generate_landscape(diagram_array)
+landscape = generate_landscape(diagram_array, plot=True, plot_index=index)
 print(landscape)

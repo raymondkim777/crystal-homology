@@ -1,7 +1,7 @@
 import os
 from tqdm import tqdm
 import pickle
-from utils import open_write_file, plot_graph
+from utils import open_write_file, plot_nxgraph
 from pymatgen.io.cif import CifParser
 # from pymatgen.core.structure import Structure
 from pymatgen.analysis.local_env import CrystalNN
@@ -157,7 +157,7 @@ def test_crystalnn() -> None:
     print("neighbors list:", list(nx_graph.neighbors(0)))
     print("edges:", nx_graph.edges([0]))
 
-    # plot_graph(nx_graph)
+    # plot_nxgraph(nx_graph)
 
     graph_filepath = open_write_file('data/graphs', 'testgraph.pkl')
     with open(graph_filepath, 'wb') as f:
