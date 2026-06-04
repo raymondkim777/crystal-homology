@@ -70,11 +70,18 @@ def construct_crystalnn_graph() -> None:
 
             # transform into graph
             bonded_graph = crystalnn.get_bonded_structure(structures[0])
-            
+
+            # save edge multiplicites
+            edge_mult_dict = dict()
+            for edge in bonded_graph.graph.edges:  # tuple
+                edge_collapsed = (edge[0], edge[1])  # three entries, third one is unique key
+                edge_mult_dict[edge_collapsed] = len(bonded_graph.graph[edge[0]][edge[1]])
+
             # collapse multigraph into graph
             nx_graph = nx.DiGraph(bonded_graph.graph)
 
-            # TODO: store edge multiplicities as edge attr.
+            # store edge multiplicities as edge attribute
+            nx.set_edge_attributes(nx_graph, values=edge_mult_dict, name='multiplicity')
 
             # remove self connections
             for node in nx_graph.nodes:
@@ -87,6 +94,10 @@ def construct_crystalnn_graph() -> None:
             for edge in nx_graph.edges:
                 distances_dict[edge] = distance_matrix[edge[0], edge[1]]
             nx.set_edge_attributes(nx_graph, values=distances_dict, name='weight')
+            
+            # remove to_jimage attribute
+            for u, v, data in nx_graph.edges(data=True):
+                data.pop("to_jimage", None)
 
             system_graphs[filename[:-4]] = nx_graph
         
@@ -167,5 +178,5 @@ def test_crystalnn() -> None:
 
 if __name__ == "__main__":
     # test_crystalnn()
-    # construct_crystalnn_graph()
-    check_structures()
+    construct_crystalnn_graph()
+    # check_structures()
