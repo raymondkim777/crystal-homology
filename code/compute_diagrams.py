@@ -19,6 +19,7 @@ CRYSTAL_SYSTEMS = [
 GRAPH_DIRECTORY = "data/graphs"
 DIAGRAM_DIRECTORY = "data/diagrams"
 MAX_DIST = 12.43843407284584  # computed from find_max_dist()
+DIMENSION_CNT = 3
 
 
 def unpack_all_graphs() -> dict:
@@ -55,7 +56,7 @@ def plot_persistence_diagram(diagram) -> None:
     fig.show()
 
 
-def compute_persistence_diagrams(dims: tuple=(0, 1, 2)) -> None:
+def compute_persistence_diagrams(dims: tuple=tuple(range(DIMENSION_CNT))) -> None:
     print(f"Unpacking all graphs...")
     graph_dict = unpack_all_graphs()
 
@@ -64,7 +65,7 @@ def compute_persistence_diagrams(dims: tuple=(0, 1, 2)) -> None:
         directed=True,
         filtration='max', 
         coeff=2, 
-        max_edge_weight=MAX_DIST + 1,
+        max_edge_weight=MAX_DIST,
         infinity_values=None
     )
 
