@@ -1,9 +1,17 @@
+# Environment Setup
+
 ```
 conda create -n crystal python=3.11
 pip install -r requirements.txt
 ```
 
-# Data Query & Preprocess
+# Pipeline
+
+Most of the intermediate files (besides CIF) are stored in `data/` as `.pkl` files.
+
+## Data Query & Preprocess
+
+Queries all material from Materials Project API, and take 1000 subset of each crystal system and convert to CIF. 
 
 ```
 cd code
@@ -11,24 +19,37 @@ python get_mp_data.py
 python convert_subset_to_cif.py
 ```
 
-Queried CIF files are stored in `data/cif`.
+Queried CIF files are stored in `data/cif` (not in repo).
 
-# Atomic Bond Network Creation
+## Atomic Bond Network Creation
+
+Uses CrystalNN to compute atomic bonds and create NetworkX graph. 
 
 ```
 python create_bonds.py
 ```
 
-Generated graphs are stored in `data/graphs` as .pkl files (included in git repo).
+Generated graphs are stored in `data/graphs` as `.pkl` files (included in repo).
 
-# Persistence Diagram Creation
+## Persistence Diagram Creation
+
+Generates persistence diagrams for all 7000 crystals. 
 
 ```
 python compute_diagrams.py
 ```
 
-Generated persistence diagrams are stored in `data/diagrams` as .pkl files (included in git repo).
+Generated persistence diagrams are stored in `data/diagrams` as `.pkl` files (included in repo).
 
-# Vectorizations
+## Vectorizations
 
-(Vectorization functions for landscape/image (using giotto-tda) is pushed, but automated code is not.)
+Generates persistence landscapes and images for all 7000 crystals.
+
+Add `--example` to plot the persistence diagram and landscape/image of an example material. (Edit code directly to select specific system, material, and dimensions to plot.)
+
+```
+python vectorizers.py --landscapes
+python vectorizers.py --image
+```
+
+Generated persistence landscapes/images are stored in `data/landscapes` and `data/images` as `.pkl` files (included in repo).

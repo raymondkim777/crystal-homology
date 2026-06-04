@@ -37,6 +37,7 @@ def _parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--landscape', action='store_true', help='generates persistence landscapes')
     parser.add_argument('--image', action='store_true', help='generates persistence images')
+    parser.add_argument('--example', action='store_true', help='display some examples')
     return parser.parse_args()
 
 
@@ -307,9 +308,11 @@ if __name__ == "__main__":
     args = _parse_args()
 
     if args.landscape:
-        # persistence_landscape()
-        plot_landscape_gtda('triclinic', 'mp-2856')
-        plot_landscape('triclinic', 'mp-2856', dim=2)
+        persistence_landscape()
+        if args.example:
+            plot_landscape_gtda('triclinic', 'mp-2856')
+            plot_landscape('triclinic', 'mp-2856', dim=2)
     if args.image:
-        # persistence_image()
-        plot_image('triclinic', 'mp-2856', dim=1)
+        persistence_image()
+        if args.example:
+            plot_image('triclinic', 'mp-2856', dim=1)
