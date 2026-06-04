@@ -1,9 +1,8 @@
-import os
 import numpy as np
 import networkx as nx
 from tqdm import tqdm
 import pickle
-from utils import open_write_file, plot_graph
+from utils import open_write_file, plot_nxgraph
 from gtda.homology import FlagserPersistence
 from gtda.plotting import plot_diagram
 
@@ -19,7 +18,7 @@ CRYSTAL_SYSTEMS = [
 ]
 GRAPH_DIRECTORY = "data/graphs"
 DIAGRAM_DIRECTORY = "data/diagrams"
-MAX_DIST = 12.43843407284584
+MAX_DIST = 12.43843407284584  # computed from find_max_dist()
 
 
 def unpack_all_graphs() -> dict:
@@ -66,7 +65,7 @@ def compute_persistence_diagrams(dims: tuple=(0, 1, 2)) -> None:
         filtration='max', 
         coeff=2, 
         max_edge_weight=MAX_DIST + 1,
-        infinity_values=np.inf
+        infinity_values=None
     )
 
     for system in CRYSTAL_SYSTEMS:
@@ -112,5 +111,5 @@ def test():
 
 
 if __name__ == "__main__":
-    test()
-    # compute_persistence_diagrams()
+    # test()
+    compute_persistence_diagrams()

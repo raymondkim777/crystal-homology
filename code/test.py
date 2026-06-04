@@ -1,22 +1,34 @@
+import numpy as np
 import pickle
 import networkx as nx
 import matplotlib.pyplot as plt
+from gtda.homology import FlagserPersistence
+from gtda.plotting import plot_diagram
+from persistence_landscape import generate_landscape
 
 
-with open('data/graphs/triclinic.pkl', 'rb') as f:
-    graph_list = pickle.load(f)
+def plot_persistence_diagram(diagram) -> None:
+    fig = plot_diagram(diagram)
+    fig.show()
 
-# print(sorted(list(graph_list.keys())))
 
-nx_graph = graph_list['mp-2856']
+with open('data/diagrams/trigonal.pkl', 'rb') as file:
+    diagrams = pickle.load(file)
 
-# Draw the graph with labels
-pos = nx.spring_layout(nx_graph)
+index = 0
+keys_list = list(diagrams.keys())
 
-nx.draw(nx_graph, pos, with_labels=True, node_color='lightblue', edge_color='gray', node_size=800)
-edge_labels = nx.get_edge_attributes(nx_graph, "weight")
-formatted_labels = {edge: f"{weight:.3f}" for edge, weight in edge_labels.items()}
-nx.draw_networkx_edge_labels(nx_graph, pos, edge_labels=formatted_labels)
+# print(type(diagrams[keys_list[index]]))
+# print(diagrams[keys_list[index]])
+# print(diagrams[keys_list[index]].shape)
+# print(keys_list[index])
+plot_persistence_diagram(diagrams[keys_list[index]])
 
-# Display the plot
-plt.show()
+# print(tuple(diagrams.values()))
+diagram_array = np.stack(tuple(diagrams.values()), axis=0) 
+
+print(type(diagram_array))
+print(diagram_array.shape)
+
+landscape = generate_landscape(diagram_array, plot=True, plot_index=index)
+print(landscape)
