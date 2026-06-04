@@ -21,6 +21,12 @@ IMAGE_DIRECTORY = "data/images"
 DIMENSION_CNT = 3
 MAX_DIST = 12.43843407284584  # computed from find_max_dist()
 
+# landscape
+
+# images
+IM_BANDWIDTH = 1.0
+IM_RESOLUTION = [20, 20]
+
 
 def _parse_args():
     parser = argparse.ArgumentParser()
@@ -76,7 +82,8 @@ def process_one_diagram(diagram: np.ndarray):
 
 def process_all_diagrams(diagrams: list):
     '''
-    Same as 'process_one_diagram', but for a list of diagrams.
+    Removes all diagram giotto-tda padding (b == d), organizes triplets into
+    separate dimensions, and removes dimension field. Applied to list of diagrams.
     Input: [diagram1, diagram2, ...] where diagram = [[b, d, dim], ...]
     Output: [[h0_diagram1, h0_diagram2, ...], [h1_diagram1, ...], ...] 
             where each Hn diagram is [[b, d], ...]
@@ -93,21 +100,44 @@ def process_all_diagrams(diagrams: list):
     return dimension_array
 
 
-def persistence_image(
-        resolution=[20, 20], 
-        bandwidth=1.0, 
-    ):
-    '''
-    Fits image transformers to all diagrams per dimension. 
-    Then generates persistence images for every diagram for each dimension. 
-    '''
+def fit_image_transformers(bandwidth, resolution):
     # persistence diagrams for all systems (giotto-tda format)
+    print("processing persistence diagrams...")
     all_diagrams = collect_all_diagrams()
     
     # convert all diagrams into gudhi format, separate into dimensions
     processed_diagrams = process_all_diagrams(all_diagrams)
 
     # define and fit image classes
+    print("fitting image transformer...")
+
+    transformers = []  # one per dimension
+    for dim in range(DIMENSION_CNT):
+        transformer = PersistenceImage(bandwidth=bandwidth, resolution=resolution)
+        transformer.fit(processed_diagrams[dim])
+        transformers.append(transformer)
+    return transformers
+
+
+def persistence_image(
+        bandwidth=IM_BANDWIDTH, 
+        resolution=IM_RESOLUTION, 
+    ):
+    '''
+    Fits image transformers to all diagrams per dimension. 
+    Then generates persistence images for every diagram for each dimension. 
+    '''
+    transformers = fit_image_transformers(bandwidth, resolution)
+
+    # persistence diagrams for all systems (giotto-tda format)
+    print("processing persistence diagrams...")
+    all_diagrams = collect_all_diagrams()
+    
+    # convert all diagrams into gudhi format, separate into dimensions
+    processed_diagrams = process_all_diagrams(all_diagrams)
+
+    # define and fit image classes
+    print("fitting image transformer...")
     transformers = []  # one per dimension
     for dim in range(DIMENSION_CNT):
         transformer = PersistenceImage(bandwidth=bandwidth, resolution=resolution)
@@ -115,6 +145,7 @@ def persistence_image(
         transformers.append(transformer)
     
     for system in CRYSTAL_SYSTEMS:
+        print(f"computing images for {system} system...")
         # process all diagrams in system
         system_diagrams = collect_system_diagrams(system)
         keys_list = list(system_diagrams.keys())
@@ -140,6 +171,21 @@ def persistence_image(
             pickle.dump(system_images, f)
 
 
+def plot_image(system: str, mat_id: str, dim: int=0):
+    transformers = fit_image_transformers(bandwidth=IM_BANDWIDTH, resolution=IM_RESOLUTION)
+    with open(f'data/images/{system}.pkl', 'rb') as file:
+        images = pickle.load(file)
+    image_to_plot = images[mat_id][dim]  # all three dimensions
+    
+    img_matrix = image_to_plot.reshape(IM_RESOLUTION)
+    plt.figure(figsize=(6, 6))
+    plt.imshow(img_matrix, cmap='viridis', origin='lower', 
+            extent=transformers[dim].im_range_fixed_, interpolation='nearest')
+    plt.title("Persistence Image (Dimension 1)")
+    plt.xlabel("Birth")
+    plt.ylabel("Death")
+    plt.colorbar(label="Pixel Intensity")
+    plt.show()
 
 
 if __name__ == "__main__":
@@ -149,3 +195,4 @@ if __name__ == "__main__":
         pass
     if args.image:
         persistence_image()
+        # plot_image('triclinic', 'mp-2856', dim=0)
