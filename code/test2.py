@@ -1,0 +1,33 @@
+import numpy as np
+import pickle
+import networkx as nx
+import matplotlib.pyplot as plt
+from gtda.homology import FlagserPersistence
+from gtda.plotting import plot_diagram
+from code.vectorizers_batch import diagrams_isolate_dim, remove_diagram_padding
+
+
+CRYSTAL_SYSTEMS = [
+    'triclinic', 
+    'monoclinic', 
+    'trigonal', 
+    'hexagonal', 
+    'orthorhombic', 
+    'tetragonal', 
+    'cubic'
+]
+
+
+for system in CRYSTAL_SYSTEMS:
+    with open(f'data/diagrams/triclinic.pkl', 'rb') as file:
+        diagrams = pickle.load(file)
+
+    keys_list = list(diagrams.keys())
+    diagram_array = np.stack(tuple(diagrams.values()), axis=0) 
+    diagrams_dims = diagrams_isolate_dim(diagram_array)
+    
+    diagram_list = diagrams_dims[2]
+    has_empty = any(len(d) == 0 for d in diagram_list)
+    print(f"Contains empty diagrams: {has_empty}")
+
+    break
