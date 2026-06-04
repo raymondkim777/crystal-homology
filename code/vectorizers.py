@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 import gudhi.representations as gdr
 import gtda.diagrams as gtd
 from gudhi.representations import Landscape, PersistenceImage
+
+from compute_diagrams import plot_persistence_diagram
 from utils import open_write_file
 
 CRYSTAL_SYSTEMS = [
@@ -17,11 +19,14 @@ CRYSTAL_SYSTEMS = [
     'cubic'
 ]
 
+LANDSCAPE_DIRECTORY = "data/landscapes"
 IMAGE_DIRECTORY = "data/images"
 DIMENSION_CNT = 3
 MAX_DIST = 12.43843407284584  # computed from find_max_dist()
 
 # landscape
+LA_LAYER = 5
+LA_RESOLUTION = 100
 
 # images
 IM_BANDWIDTH = 1.0
@@ -36,7 +41,7 @@ def _parse_args():
 
 
 def collect_system_diagrams(system: str) -> dict:
-    '''Collects all persistence diagrams from .pkl files from one system into one list.'''
+    '''Collects persistence diagrams from .pkl files from one system as a dict.'''
     with open(f'data/diagrams/{system}.pkl', 'rb') as file:
         diagrams = pickle.load(file)
     return diagrams
@@ -100,7 +105,36 @@ def process_all_diagrams(diagrams: list):
     return dimension_array
 
 
+def fit_landscape_transformers(num_landscapes, resolution):
+    '''
+    For each dimension, fits landscape transformers to all system persistence diagrams. 
+    '''
+    # persistence diagrams for all systems (giotto-tda format)
+    print("processing persistence diagrams...")
+    all_diagrams = collect_all_diagrams()
+    
+    # convert all diagrams into gudhi format, separate into dimensions
+    processed_diagrams = process_all_diagrams(all_diagrams)
+
+    # define and fit landscape classes
+    print("fitting landscape transformer...")
+
+    transformers = []  # one per dimension
+    for dim in range(DIMENSION_CNT):
+        transformer = Landscape(
+            num_landscapes=num_landscapes, 
+            resolution=resolution, 
+            sample_range=[0, MAX_DIST]
+        )
+        transformer.fit(processed_diagrams[dim])
+        transformers.append(transformer)
+    return transformers
+
+
 def fit_image_transformers(bandwidth, resolution):
+    '''
+    For each dimension, fits image transformers to all system persistence diagrams. 
+    '''
     # persistence diagrams for all systems (giotto-tda format)
     print("processing persistence diagrams...")
     all_diagrams = collect_all_diagrams()
@@ -119,30 +153,51 @@ def fit_image_transformers(bandwidth, resolution):
     return transformers
 
 
+
+def persistence_landscape(
+        num_landscapes=LA_LAYER, 
+        resolution=LA_RESOLUTION,
+    ):
+    '''
+    Generates persistence landscapes for every system persistence diagram for each dimension. 
+    '''
+    transformers = fit_landscape_transformers(num_landscapes, resolution)
+    
+    for system in CRYSTAL_SYSTEMS:
+        print(f"computing landscapes for {system} system...")
+        # process all diagrams in system
+        system_diagrams = collect_system_diagrams(system)
+        keys_list = list(system_diagrams.keys())
+        diagrams_by_dims = process_all_diagrams(list(system_diagrams.values()))
+
+        # generate persistence landscapes for all diagrams for each dimension
+        landscapes_by_dim = []  # [[h0_land1, h0_land2, ...], [h1_land1, ...], ...]
+        for dim in range(DIMENSION_CNT):
+            landscapes_by_dim.append(transformers[dim].transform(diagrams_by_dims[dim]))
+        
+        # match to id and organize by id -> dim
+        system_landscapes = dict()
+        for i in range(len(keys_list)):
+            key = keys_list[i]
+            system_landscapes[key] = {
+                dim: landscapes_by_dim[dim][i] 
+                for dim in range(DIMENSION_CNT)
+            }
+        
+        # save system images
+        landscape_path = open_write_file(LANDSCAPE_DIRECTORY, f"{system}.pkl")
+        with open(landscape_path, 'wb') as f:
+            pickle.dump(system_landscapes, f)
+
+
 def persistence_image(
         bandwidth=IM_BANDWIDTH, 
         resolution=IM_RESOLUTION, 
     ):
     '''
-    Fits image transformers to all diagrams per dimension. 
-    Then generates persistence images for every diagram for each dimension. 
+    Generates persistence images for every system persistence diagram for each dimension. 
     '''
     transformers = fit_image_transformers(bandwidth, resolution)
-
-    # persistence diagrams for all systems (giotto-tda format)
-    print("processing persistence diagrams...")
-    all_diagrams = collect_all_diagrams()
-    
-    # convert all diagrams into gudhi format, separate into dimensions
-    processed_diagrams = process_all_diagrams(all_diagrams)
-
-    # define and fit image classes
-    print("fitting image transformer...")
-    transformers = []  # one per dimension
-    for dim in range(DIMENSION_CNT):
-        transformer = PersistenceImage(bandwidth=bandwidth, resolution=resolution)
-        transformer.fit(processed_diagrams[dim])
-        transformers.append(transformer)
     
     for system in CRYSTAL_SYSTEMS:
         print(f"computing images for {system} system...")
@@ -171,7 +226,40 @@ def persistence_image(
             pickle.dump(system_images, f)
 
 
+def plot_landscape(system: str, mat_id: str, dim: int=0):
+    '''
+    Plots persistence diagram and landscape of given material id in given system, for given dimension. 
+    '''
+    diagram = collect_system_diagrams(system)[mat_id]
+    plot_persistence_diagram(diagram)
+
+    transformers = fit_landscape_transformers(num_landscapes=LA_LAYER, resolution=LA_RESOLUTION)
+    with open(f'data/landscapes/{system}.pkl', 'rb') as file:
+        landscapes = pickle.load(file)
+    landscape_to_plot = landscapes[mat_id][dim]  # all three dimensions
+    
+    x_values = np.linspace(*transformers[dim].sample_range_fixed_, LA_RESOLUTION)
+    plt.figure(figsize=(8, 5))  
+
+    for i in range(LA_LAYER):
+        y_values = landscape_to_plot[i * LA_RESOLUTION : (i + 1) * LA_RESOLUTION]
+        plt.plot(x_values, y_values, label=f"Landscape {i+1}")
+
+    plt.title(f"Persistence Landscape Dimension {dim}")
+    plt.xlabel("Parameter $t$")
+    plt.ylabel("$\lambda_k(t)$")
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.show()
+
+
 def plot_image(system: str, mat_id: str, dim: int=0):
+    '''
+    Plots persistence diagram and image of given material id in given system, for given dimension. 
+    '''
+    diagram = collect_system_diagrams(system)[mat_id]
+    plot_persistence_diagram(diagram)
+
     transformers = fit_image_transformers(bandwidth=IM_BANDWIDTH, resolution=IM_RESOLUTION)
     with open(f'data/images/{system}.pkl', 'rb') as file:
         images = pickle.load(file)
@@ -181,18 +269,47 @@ def plot_image(system: str, mat_id: str, dim: int=0):
     plt.figure(figsize=(6, 6))
     plt.imshow(img_matrix, cmap='viridis', origin='lower', 
             extent=transformers[dim].im_range_fixed_, interpolation='nearest')
-    plt.title("Persistence Image (Dimension 1)")
+    plt.title(f"Persistence Image (Dimension {dim})")
     plt.xlabel("Birth")
     plt.ylabel("Death")
     plt.colorbar(label="Pixel Intensity")
     plt.show()
 
 
+################   UNUSED FROM BELOW   ################
+
+
+# ONLY USED FOR CROSS REFERENCE
+def plot_landscape_gtda(
+        system: str, 
+        mat_id: str,
+        n_layers=LA_LAYER, 
+        n_bins=LA_RESOLUTION, 
+    ):
+
+    # all_diagrams = np.asarray(collect_all_diagrams())
+    system_diagrams_dict = collect_system_diagrams(system)
+
+    keys_list = list(system_diagrams_dict.keys())
+    system_diagrams = list(system_diagrams_dict.values())
+
+    transformer = gtd.PersistenceLandscape(n_layers=n_layers, n_bins=n_bins)
+    transformed = transformer.fit_transform(system_diagrams)
+    system_landscapes = {
+        keys_list[i] : transformed[i]
+        for i in range(len(keys_list))
+    }
+    fig = transformer.plot([system_landscapes[mat_id]])
+    fig.show()
+
+
 if __name__ == "__main__":
     args = _parse_args()
 
     if args.landscape:
-        pass
+        # persistence_landscape()
+        plot_landscape_gtda('triclinic', 'mp-2856')
+        plot_landscape('triclinic', 'mp-2856', dim=2)
     if args.image:
-        persistence_image()
-        # plot_image('triclinic', 'mp-2856', dim=0)
+        # persistence_image()
+        plot_image('triclinic', 'mp-2856', dim=1)
