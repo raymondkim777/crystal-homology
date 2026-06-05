@@ -7,7 +7,7 @@ pip install -r requirements.txt
 
 # Pipeline
 
-Most of the intermediate files (besides CIF) are stored in `data/` as `.pkl` files.
+Most of the intermediate files (besides CIF) are stored in `code/data/` as `.pkl` files.
 
 ## Data Query & Preprocess
 
@@ -19,7 +19,7 @@ python get_mp_data.py
 python convert_subset_to_cif.py
 ```
 
-Queried CIF files are stored in `data/cif` (not in repo).
+Queried CIF files are stored in `code/data/cif` (not in repo).
 
 ## Atomic Bond Network Creation
 
@@ -29,7 +29,7 @@ Uses CrystalNN to compute atomic bonds and create NetworkX graph.
 python create_bonds.py
 ```
 
-Generated graphs are stored in `data/graphs` as `.pkl` files (included in repo).
+Generated graphs are stored in `code/data/graphs` as `.pkl` files (included in repo).
 
 ## Persistence Diagram Creation
 
@@ -39,7 +39,7 @@ Generates persistence diagrams for all 7000 crystals.
 python compute_diagrams.py
 ```
 
-Generated persistence diagrams are stored in `data/diagrams` as `.pkl` files (included in repo).
+Generated persistence diagrams are stored in `code/data/diagrams` as `.pkl` files (included in repo).
 
 ## Vectorizations
 
@@ -52,4 +52,4 @@ python vectorizers.py --landscapes
 python vectorizers.py --image
 ```
 
-Generated persistence landscapes/images are stored in `data/landscapes` and `data/images` as `.pkl` files (included in repo).
+Generated persistence landscapes/images are stored in `code/data/landscapes` and `data/images` as `.pkl` files (included in repo).
