@@ -11,7 +11,7 @@ Most of the intermediate files (besides CIF) are stored in `code/data/` as `.pkl
 
 ## Data Query & Preprocess
 
-Queries all material from Materials Project API, and take 1000 subset of each crystal system and convert to CIF. 
+Queries all materials from Materials Project API, and takes 1000 subset of each crystal system and convert to CIF. 
 
 ```
 cd code
