@@ -34,3 +34,10 @@ with open(f'data/graphs/cubic.pkl', 'rb') as file:
     graphs = pickle.load(file)
 
 print(graphs['mp-97'].nodes(data=True))
+for node, data in graphs['mp-97'].nodes(data=True):
+    print(type(node))
+
+for node in graphs['mp-97'].nodes:
+    print(type(graphs['mp-97'].nodes[node]['specie']))
+print()
+print(graphs['mp-97'].edges(data=True))

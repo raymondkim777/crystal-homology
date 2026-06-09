@@ -2,20 +2,11 @@ import numpy as np
 import networkx as nx
 from tqdm import tqdm
 import pickle
-from utils import open_write_file, plot_nxgraph
+from utils import CRYSTAL_SYSTEMS, open_write_file, plot_nxgraph
 from gtda.homology import FlagserPersistence
 from gtda.plotting import plot_diagram
 
 
-CRYSTAL_SYSTEMS = [
-    'triclinic', 
-    'monoclinic', 
-    'trigonal', 
-    'hexagonal', 
-    'orthorhombic', 
-    'tetragonal', 
-    'cubic'
-]
 GRAPH_DIRECTORY = "data/graphs"
 DIAGRAM_DIRECTORY = "data/diagrams"
 MAX_DIST = 12.43843407284584  # computed from find_max_dist()

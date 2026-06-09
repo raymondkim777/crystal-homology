@@ -58,7 +58,8 @@ def construct_crystalnn_graph() -> None:
         for filename in tqdm(cif_files):
             structure_filename = f"{CIF_DIRECTORY}/{system}/{filename}"
             structures = get_structures_from_cif(structure_filename)
-
+            
+            # ! Turn into primitive structure? get_primitive_structure()
             # transform into graph
             bonded_graph = crystalnn.get_bonded_structure(structures[0])
 
@@ -71,13 +72,18 @@ def construct_crystalnn_graph() -> None:
             # collapse multigraph into graph
             nx_graph = nx.DiGraph(bonded_graph.graph)
 
-            # store edge multiplicities as edge attribute
-            nx.set_edge_attributes(nx_graph, values=edge_mult_dict, name='multiplicity')
-
-            # remove self connections
+            # edit nodes
             for node in nx_graph.nodes:
+
+                # change species identifier to species object, not label
+                nx_graph.nodes[node]['specie'] = structures[0][node].specie
+
+                # remove self connections
                 if nx_graph.has_edge(*(node, node)):
                     nx_graph.remove_edge(*(node, node))
+
+            # store edge multiplicities as edge attribute
+            nx.set_edge_attributes(nx_graph, values=edge_mult_dict, name='multiplicity')
 
             # add edge weights (min. Euc. distances)
             distance_matrix = structures[0].distance_matrix
@@ -131,6 +137,9 @@ def test_crystalnn() -> None:
     bonded_graph = crystalnn.get_bonded_structure(structures[0])
     # print(bonded_graph)
     # print(type(bonded_graph))
+    print(bonded_graph.graph.nodes(data=True))
+    print(structures[0][0].specie)
+    return
 
     nx_graph = bonded_graph.graph
     nx_graph = nx.DiGraph(nx_graph)
@@ -168,6 +177,6 @@ def test_crystalnn() -> None:
 
 
 if __name__ == "__main__":
-    # test_crystalnn()
-    construct_crystalnn_graph()
+    test_crystalnn()
+    # construct_crystalnn_graph()
     # check_structures()

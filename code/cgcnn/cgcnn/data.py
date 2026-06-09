@@ -1,6 +1,7 @@
 from __future__ import print_function, division
 
 import csv
+import pickle
 import functools
 import json
 import os
@@ -247,6 +248,130 @@ class AtomCustomJSONInitializer(AtomInitializer):
         super(AtomCustomJSONInitializer, self).__init__(atom_types)
         for key, value in elem_embedding.items():
             self._embedding[key] = np.array(value, dtype=float)
+
+
+class GraphData(Dataset):
+    """
+    The GraphDATA dataset is a wrapper for a dataset where the crystal structures
+    are stored in the form of NetworkX graphs. The dataset should have the following
+    directory structure:
+
+    root_dir
+    ├── id_prop.csv
+    ├── atom_init.json
+    └── graphs
+        ├── id0.pkl
+        ├── id1.pkl
+        ├── ...
+
+    id_prop.csv: a CSV file with two columns. The first column recodes a
+    unique ID for each crystal, and the second column recodes the value of
+    target property.
+
+    atom_init.json: a JSON file that stores the initialization vector for each
+    element.
+
+    ID.pkl: a Pickle file that encodes the crystal structure as an NX graph, 
+    where ID is the unique ID for the crystal.
+
+    Parameters
+    ----------
+    NEED TO CHANGE
+    root_dir: str
+        The path to the root directory of the dataset
+    max_num_nbr: int
+        The maximum number of neighbors while constructing the crystal graph
+    radius: float
+        The cutoff radius for searching neighbors
+    dmin: float
+        The minimum distance for constructing GaussianDistance
+    step: float
+        The step size for constructing GaussianDistance
+    random_seed: int
+        Random seed for shuffling the dataset
+
+    Returns
+    -------
+
+    atom_fea: torch.Tensor shape (n_i, atom_fea_len)
+    nbr_fea: torch.Tensor shape (n_i, M, nbr_fea_len)
+    nbr_fea_idx: torch.LongTensor shape (n_i, M)
+    target: torch.Tensor shape (1, )
+    cif_id: str or int
+    """
+    def __init__(
+            self, 
+            root_dir, 
+            max_num_nbr=24, 
+            dmin=0, 
+            dmax=12.5,  # 12.43843407284584
+            step=0.2,
+            random_seed=42
+    ):
+        self.root_dir = root_dir  # cgcnn/data/graph_data
+        self.max_num_nbr = max_num_nbr
+        assert os.path.exists(root_dir), 'root_dir does not exist!'
+        id_prop_file = os.path.join(self.root_dir, 'id_prop.csv')
+        assert os.path.exists(id_prop_file), 'id_prop.csv does not exist!'
+        with open(id_prop_file) as f:
+            reader = csv.reader(f)
+            self.id_prop_data = [row for row in reader]
+        random.seed(random_seed)
+        random.shuffle(self.id_prop_data)
+        atom_init_file = os.path.join(self.root_dir, 'atom_init.json')
+        assert os.path.exists(atom_init_file), 'atom_init.json does not exist!'
+        self.ari = AtomCustomJSONInitializer(atom_init_file)
+        self.gdf = GaussianDistance(dmin=dmin, dmax=dmax, step=step)
+        
+
+    def __len__(self):
+        return len(self.id_prop_data)
+    
+
+    @functools.lru_cache(maxsize=None)  # Cache loaded structures
+    def __getitem__(self, idx):
+        mp_id, target = self.id_prop_data[idx]
+        with open(os.path.join(self.root_dir, 'graphs', f'mp-{mp_id}.pkl'), 'rb') as file:
+            graph_dict = pickle.load(file)
+        print(graph_dict)
+
+        ########################
+        # graph_dict format:
+        # {
+        #     graph: <graph (undirected)>, 
+        #     system: <system>,
+        #     ... (additional properties to be added)
+        # }
+        ########################
+
+        # atom features (node features)
+        atom_fea = np.vstack(
+            [
+                self.ari.get_atom_fea(graph_dict['graph'].nodes[node].specie.number)
+                for node in graph_dict['graph'].nodes
+            ]
+        )
+        atom_fea = torch.Tensor(atom_fea)
+
+        # neighbor features (edge attributes)
+        nbr_fea_idx, nbr_fea = [], []
+        for node in range(len(graph_dict['graph'].nodes)):
+            nbr_list = list(graph_dict['graph'].neighbors(node))
+            nbr_fea_idx.append(nbr_list + [0] * (self.max_num_nbr - len(nbr_list)))
+            
+            dist = [graph_dict['graph'].edges[node, nbr]['weight']
+                    for nbr in nbr_list]
+            nbr_fea.append(dist + [0] * (self.max_num_nbr - len(nbr_list)))
+        nbr_fea_idx, nbr_fea = np.array(nbr_fea_idx), np.array(nbr_fea)
+        nbr_fea = self.gdf.expand(nbr_fea)
+
+        # TODO: fractional coordinates, crystal systems, (and other properties)
+
+        atom_fea = torch.Tensor(atom_fea)
+        nbr_fea = torch.Tensor(nbr_fea)
+        nbr_fea_idx = torch.LongTensor(nbr_fea_idx)
+        target = torch.Tensor([float(target)])
+        return (atom_fea, nbr_fea, nbr_fea_idx), target, mp_id
 
 
 class CIFData(Dataset):

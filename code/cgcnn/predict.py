@@ -11,13 +11,14 @@ from sklearn import metrics
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
 
-from cgcnn.data import CIFData
+from cgcnn.data import CIFData, GraphData
 from cgcnn.data import collate_pool
 from cgcnn.model import CrystalGraphConvNet
 
 parser = argparse.ArgumentParser(description='Crystal gated neural networks')
 parser.add_argument('modelpath', help='path to the trained model.')
 parser.add_argument('cifpath', help='path to the directory of CIF files.')
+parser.add_argument('datapath', help='path to the directory of data folder.')
 parser.add_argument('-b', '--batch-size', default=256, type=int,
                     metavar='N', help='mini-batch size (default: 256)')
 parser.add_argument('-j', '--workers', default=0, type=int, metavar='N',
@@ -49,7 +50,8 @@ def main():
     global args, model_args, best_mae_error
 
     # load data
-    dataset = CIFData(args.cifpath)
+    # dataset = CIFData(args.cifpath)
+    dataset = GraphData(args.datapath)
     collate_fn = collate_pool
     test_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True,
                              num_workers=args.workers, collate_fn=collate_fn,

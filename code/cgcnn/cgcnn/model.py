@@ -115,7 +115,7 @@ class CrystalGraphConvNet(nn.Module):
             self.softpluses = nn.ModuleList([nn.Softplus()
                                              for _ in range(n_h-1)])
         if self.classification:
-            self.fc_out = nn.Linear(h_fea_len, 2)
+            self.fc_out = nn.Linear(h_fea_len, 7)  # ! Changed 2 --> 7 (for systems)
         else:
             self.fc_out = nn.Linear(h_fea_len, 1)
         if self.classification:

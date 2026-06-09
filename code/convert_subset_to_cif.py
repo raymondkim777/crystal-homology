@@ -2,20 +2,11 @@ import json
 import random
 from monty.json import MontyEncoder
 from monty.serialization import loadfn
-from utils import open_write_file
+from utils import CRYSTAL_SYSTEMS, open_write_file
 from dotenv import load_dotenv
 load_dotenv()
 
 
-CRYSTAL_SYSTEMS = [
-    'triclinic', 
-    'monoclinic', 
-    'trigonal', 
-    'hexagonal', 
-    'orthorhombic', 
-    'tetragonal', 
-    'cubic'
-]
 MP_DATA_PATH = 'data/mp-raw'
 SUBSET_SIZE = 1000
 
