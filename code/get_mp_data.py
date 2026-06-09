@@ -41,10 +41,6 @@ def query_all_crystals_from_mp() -> None:
         with open(data_raw_path, 'w') as f:
             json.dump(mp_json_list, f, cls=MontyEncoder, indent=4)
 
-        
-# with MPRester(monty_decode=False, use_document_model=False) as mpr:
-#     pass
-
 
 if __name__ == "__main__":
     query_all_crystals_from_mp()

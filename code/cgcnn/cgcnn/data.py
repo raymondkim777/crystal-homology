@@ -333,7 +333,6 @@ class GraphData(Dataset):
         mp_id, target = self.id_prop_data[idx]
         with open(os.path.join(self.root_dir, 'graphs', f'mp-{mp_id}.pkl'), 'rb') as file:
             graph_dict = pickle.load(file)
-        print(graph_dict)
 
         ########################
         # graph_dict format:
@@ -347,7 +346,7 @@ class GraphData(Dataset):
         # atom features (node features)
         atom_fea = np.vstack(
             [
-                self.ari.get_atom_fea(graph_dict['graph'].nodes[node].specie.number)
+                self.ari.get_atom_fea(graph_dict['graph'].nodes[node]['specie'].number)
                 for node in graph_dict['graph'].nodes
             ]
         )

@@ -38,6 +38,6 @@ for node, data in graphs['mp-97'].nodes(data=True):
     print(type(node))
 
 for node in graphs['mp-97'].nodes:
-    print(type(graphs['mp-97'].nodes[node]['specie']))
+    print(graphs['mp-97'].nodes[node]['specie'].number)
 print()
 print(graphs['mp-97'].edges(data=True))

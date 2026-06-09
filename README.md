@@ -53,3 +53,21 @@ python vectorizers.py --image
 ```
 
 Generated persistence landscapes/images are stored in `code/data/landscapes` and `data/images` as `.pkl` files (included in repo).
+
+## CGCNN Prep
+
+Moves graph data over to `cgcnn/data/graph_data` folder as `.pkl` file and creates `id_prop.csv`. Also computes dataset bounds required as input for `GraphData` class.
+
+```
+python cgcnn_prep.py --save
+```
+If `--save` argument is not included, then `graph_data` and `id_prop.csv` are not created.
+
+## CGCNN Training
+
+Trains CGCNN to predict crystal systems via classification (first pass). 
+
+```
+cd cgcnn
+python main.py --task classification ---train-ratio 0.6 --val-ratio 0.2 --test-ratio 0.2 data/graph_data
+```

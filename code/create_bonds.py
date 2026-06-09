@@ -3,10 +3,9 @@ from tqdm import tqdm
 import pickle
 from utils import CRYSTAL_SYSTEMS, open_write_file, plot_nxgraph
 from pymatgen.io.cif import CifParser
-# from pymatgen.core.structure import Structure
 from pymatgen.analysis.local_env import CrystalNN
+# from pymatgen.core.structure import Structure
 # from pymatgen.analysis.graphs import StructureGraph
-
 import matplotlib.pyplot as plt
 import networkx as nx
 
@@ -59,7 +58,6 @@ def construct_crystalnn_graph() -> None:
             structure_filename = f"{CIF_DIRECTORY}/{system}/{filename}"
             structures = get_structures_from_cif(structure_filename)
             
-            # ! Turn into primitive structure? get_primitive_structure()
             # transform into graph
             bonded_graph = crystalnn.get_bonded_structure(structures[0])
 
@@ -177,6 +175,6 @@ def test_crystalnn() -> None:
 
 
 if __name__ == "__main__":
-    test_crystalnn()
-    # construct_crystalnn_graph()
+    # test_crystalnn()
+    construct_crystalnn_graph()
     # check_structures()

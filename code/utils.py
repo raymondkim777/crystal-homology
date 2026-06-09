@@ -4,14 +4,23 @@ import matplotlib.pyplot as plt
 
 
 CRYSTAL_SYSTEMS = [
-    'triclinic', 
-    'monoclinic', 
-    'trigonal', 
+    'cubic', 
     'hexagonal', 
+    'monoclinic', 
     'orthorhombic', 
     'tetragonal', 
-    'cubic'
+    'triclinic', 
+    'trigonal'
 ]
+# CRYSTAL_SYSTEMS = [
+#     'triclinic', 
+#     'monoclinic', 
+#     'trigonal', 
+#     'hexagonal', 
+#     'orthorhombic', 
+#     'tetragonal', 
+#     'cubic'
+# ]
 
 
 def open_write_file(dir_path, file_name):

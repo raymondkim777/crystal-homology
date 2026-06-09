@@ -7,7 +7,7 @@ import pickle
 from utils import CRYSTAL_SYSTEMS, open_write_file, plot_nxgraph
 
 
-CGCNN_DATAPATH = 'cgcnn/data/graph_data/graphs'
+CGCNN_DATAPATH = 'cgcnn/data/graph_data'
 
 
 def _parse_args():
@@ -22,11 +22,6 @@ def unpack_all_graphs() -> dict:
         with open(f'data/graphs/{system}.pkl', 'rb') as file:
             graph_dict[system] = pickle.load(file)
     return graph_dict
-
-
-# need to compute & print maximum neighbor count
-# need to save all graphs (with crystal system as graph attribute) 
-#   into cgcnn data folder as pickle file
 
 
 def graph_process(save=False) -> dict:
@@ -74,9 +69,18 @@ def graph_process(save=False) -> dict:
     if save:
         # save graphs to CGCNN data folder
         for mp_id, value in new_graph_dict.items():
-            cgcnn_datapath = open_write_file(CGCNN_DATAPATH, f'{mp_id}.pkl')
+            cgcnn_datapath = open_write_file(f"{CGCNN_DATAPATH}/graphs", f'{mp_id}.pkl')
             with open(cgcnn_datapath, 'wb') as f:
                 pickle.dump(value, f)
+        
+        # create id_prop.csv
+        system_to_int = {CRYSTAL_SYSTEMS[idx]: idx for idx in range(len(CRYSTAL_SYSTEMS))}
+        
+        csv_filepath = open_write_file(CGCNN_DATAPATH, 'id_prop.csv')
+        with open(csv_filepath, 'w') as f:
+            # CRYSTAL SYSTEM - classification
+            for mp_id, value in new_graph_dict.items():
+                f.write(f"{mp_id}, {system_to_int[value['system']]}\n")
 
 
 def bid_test():
