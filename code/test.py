@@ -44,7 +44,7 @@ def test():
     nbr_fea = []
     for nbr in all_nbrs:
         nbr_fea.append(list(map(lambda x: x[1], nbr)))
-    print(nbr_fea)
+    # print(nbr_fea)
 
 
     # print("asdfasdf\n")
@@ -54,9 +54,10 @@ def test():
 
 
 def test2():
-    a = (np.array([[1, 2, 2], [3, 4, 4]]), [[5, 6], [7, 8]], [[9, 10], [11, 12]]), 13, 14
-    structures, _, _ = a
-    print(structures[0].shape[-1])
+    a = np.array([0, 2, 4, 6, 8, 10, 12, 14, 16, 18])
+    b = np.array([4, 2, 5])
+    print(a[b])
+
 
 
 if __name__ == "__main__":

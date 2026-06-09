@@ -4,7 +4,7 @@ import networkx as nx
 import matplotlib.pyplot as plt
 from gtda.homology import FlagserPersistence
 from gtda.plotting import plot_diagram
-from code.vectorizers_batch import diagrams_isolate_dim, remove_diagram_padding
+# from vectorizers_batch import diagrams_isolate_dim, remove_diagram_padding
 
 
 CRYSTAL_SYSTEMS = [
@@ -18,14 +18,19 @@ CRYSTAL_SYSTEMS = [
 ]
 
 
+# with open(f'data/diagrams/triclinic.pkl', 'rb') as file:
+#     diagrams = pickle.load(file)
 
-with open(f'data/diagrams/triclinic.pkl', 'rb') as file:
-    diagrams = pickle.load(file)
+# keys_list = list(diagrams.keys())
+# diagram_array = np.stack(tuple(diagrams.values()), axis=0) 
+# diagrams_dims = diagrams_isolate_dim(diagram_array)
 
-keys_list = list(diagrams.keys())
-diagram_array = np.stack(tuple(diagrams.values()), axis=0) 
-diagrams_dims = diagrams_isolate_dim(diagram_array)
+# diagram_list = diagrams_dims[2]
+# has_empty = any(len(d) == 0 for d in diagram_list)
+# print(f"Contains empty diagrams: {has_empty}")
 
-diagram_list = diagrams_dims[2]
-has_empty = any(len(d) == 0 for d in diagram_list)
-print(f"Contains empty diagrams: {has_empty}")
+
+with open(f'data/graphs/cubic.pkl', 'rb') as file:
+    graphs = pickle.load(file)
+
+print(graphs['mp-97'].nodes(data=True))
