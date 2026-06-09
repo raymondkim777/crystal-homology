@@ -77,6 +77,8 @@ parser.add_argument('--n-conv', default=3, type=int, metavar='N',
                     help='number of conv layers')
 parser.add_argument('--n-h', default=1, type=int, metavar='N',
                     help='number of hidden layers after pooling')
+parser.add_argument('--seed', action='store_true',
+                    help='sets torch seed to 42')
 
 args = parser.parse_args(sys.argv[1:])
 
@@ -90,6 +92,12 @@ else:
 
 def main():
     global args, best_mae_error
+
+    # ! set torch seed
+    if args.seed:
+        torch.manual_seed(42)
+    print("GPU Available", args.cuda)
+    
 
     # load data
     # dataset = CIFData(*args.data_options)
