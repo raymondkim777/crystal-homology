@@ -1,7 +1,7 @@
 import os
 from tqdm import tqdm
 import pickle
-from utils import open_write_file, plot_nxgraph
+from utils import CRYSTAL_SYSTEMS, open_write_file, plot_nxgraph
 from pymatgen.io.cif import CifParser
 # from pymatgen.core.structure import Structure
 from pymatgen.analysis.local_env import CrystalNN
@@ -11,15 +11,6 @@ import matplotlib.pyplot as plt
 import networkx as nx
 
 
-CRYSTAL_SYSTEMS = [
-    'triclinic', 
-    'monoclinic', 
-    'trigonal', 
-    'hexagonal', 
-    'orthorhombic', 
-    'tetragonal', 
-    'cubic'
-]
 CIF_DIRECTORY = "data/cif"
 GRAPH_DIRECTORY = "data/graphs"
 

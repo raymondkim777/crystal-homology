@@ -7,17 +7,8 @@ import gtda.diagrams as gtd
 from gudhi.representations import Landscape, PersistenceImage
 
 from compute_diagrams import plot_persistence_diagram
-from utils import open_write_file
+from utils import CRYSTAL_SYSTEMS, open_write_file
 
-CRYSTAL_SYSTEMS = [
-    'triclinic', 
-    'monoclinic', 
-    'trigonal', 
-    'hexagonal', 
-    'orthorhombic', 
-    'tetragonal', 
-    'cubic'
-]
 
 LANDSCAPE_DIRECTORY = "data/landscapes"
 IMAGE_DIRECTORY = "data/images"

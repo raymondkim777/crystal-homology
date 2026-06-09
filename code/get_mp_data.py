@@ -2,20 +2,11 @@ import json
 from mp_api.client import MPRester
 from monty.json import MontyEncoder
 # from monty.serialization import loadfn, dumpfn
-from utils import open_write_file
+from utils import CRYSTAL_SYSTEMS, open_write_file
 from dotenv import load_dotenv
 load_dotenv()
 
 
-CRYSTAL_SYSTEMS = [
-    'triclinic', 
-    'monoclinic', 
-    'trigonal', 
-    'hexagonal', 
-    'orthorhombic', 
-    'tetragonal', 
-    'cubic'
-]
 FIELDS = [
     "material_id", 
     "symmetry", 

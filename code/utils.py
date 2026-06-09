@@ -3,6 +3,17 @@ import networkx as nx
 import matplotlib.pyplot as plt
 
 
+CRYSTAL_SYSTEMS = [
+    'triclinic', 
+    'monoclinic', 
+    'trigonal', 
+    'hexagonal', 
+    'orthorhombic', 
+    'tetragonal', 
+    'cubic'
+]
+
+
 def open_write_file(dir_path, file_name):
     """Opens a file for writing, or creates new file if file doesn't exist."""
     file_path = os.path.join(dir_path, file_name)
