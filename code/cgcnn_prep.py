@@ -80,7 +80,7 @@ def graph_process(save=False) -> dict:
         with open(csv_filepath, 'w') as f:
             # CRYSTAL SYSTEM - classification
             for mp_id, value in new_graph_dict.items():
-                f.write(f"{mp_id}, {system_to_int[value['system']]}\n")
+                f.write(f"{mp_id[3:]}, {system_to_int[value['system']]}\n")
 
 
 def bid_test():

@@ -71,5 +71,5 @@ Trains CGCNN to predict crystal systems via classification (first pass).
 cd cgcnn
 ```
 ```
-python main.py --task classification --train-ratio 0.6 --val-ratio 0.2 --test-ratio 0.2 data/graph_data
+python main.py --task classification --num-classes 7 --train-ratio 0.6 --val-ratio 0.2 --test-ratio 0.2 data/graph_data
 ```

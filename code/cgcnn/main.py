@@ -79,6 +79,7 @@ parser.add_argument('--n-h', default=1, type=int, metavar='N',
                     help='number of hidden layers after pooling')
 parser.add_argument('--seed', action='store_true',
                     help='sets torch seed to 42')
+parser.add_argument('--num-classes', default=2, type=int)
 
 args = parser.parse_args(sys.argv[1:])
 
@@ -97,7 +98,7 @@ def main():
     if args.seed:
         torch.manual_seed(42)
     print("GPU Available", args.cuda)
-    
+
 
     # load data
     # dataset = CIFData(*args.data_options)
@@ -141,8 +142,8 @@ def main():
                                 n_conv=args.n_conv,
                                 h_fea_len=args.h_fea_len,
                                 n_h=args.n_h,
-                                classification=True if args.task ==
-                                                       'classification' else False)
+                                classification=True if args.task == 'classification' else False, 
+                                num_classes=args.num_classes)
     if args.cuda:
         model.cuda()
 
@@ -210,7 +211,8 @@ def main():
 
     # test best model
     print('---------Evaluate Model on Test Set---------------')
-    best_checkpoint = torch.load('model_best.pth.tar')
+    # ! PyTorch 2.6 safety measure: only load model weights -> extra argument
+    best_checkpoint = torch.load('model_best.pth.tar', weights_only=False)
     model.load_state_dict(best_checkpoint['state_dict'])
     validate(test_loader, model, criterion, normalizer, test=True)
 
@@ -325,6 +327,7 @@ def validate(val_loader, model, criterion, normalizer, test=False):
     if test:
         test_targets = []
         test_preds = []
+        test_probs = []
         test_cif_ids = []
 
     # switch to evaluate mode
@@ -382,8 +385,16 @@ def validate(val_loader, model, criterion, normalizer, test=False):
             if test:
                 test_pred = torch.exp(output.data.cpu())
                 test_target = target
-                assert test_pred.shape[1] == 2
-                test_preds += test_pred[:, 1].tolist()
+                
+                # ! MODIFIED to account for multiclass
+                # assert test_pred.shape[1] == 2
+                assert test_pred.shape[1] == args.num_classes
+                
+                # test_preds += test_pred[:, 1].tolist()
+                pred_label = torch.argmax(test_pred, dim = 1)
+                test_preds += pred_label.tolist()
+                test_probs += test_pred.tolist()
+                
                 test_targets += test_target.view(-1).tolist()
                 test_cif_ids += batch_cif_ids
 
@@ -415,11 +426,16 @@ def validate(val_loader, model, criterion, normalizer, test=False):
     if test:
         star_label = '**'
         import csv
+        # ! MODIFIED to write full multiclass predicted probabilities
         with open('test_results.csv', 'w') as f:
             writer = csv.writer(f)
-            for cif_id, target, pred in zip(test_cif_ids, test_targets,
-                                            test_preds):
-                writer.writerow((cif_id, target, pred))
+
+            header = ['mp-id', 'target', 'predicted_class']
+            header += [f'prob_class_{i}' for i in range(args.num_classes)]
+            writer.writerow(header)
+
+            for cif_id, target, pred, probs in zip(test_cif_ids, test_targets, test_preds, test_probs):
+                writer.writerow([cif_id, target, pred] + probs)
     else:
         star_label = '*'
     if args.task == 'regression':
@@ -468,7 +484,8 @@ def mae(prediction, target):
     return torch.mean(torch.abs(target - prediction))
 
 
-def class_eval(prediction, target):
+# ! Only for binary classification
+def class_eval_DEPRECIATED(prediction, target):
     prediction = np.exp(prediction.numpy())
     target = target.numpy()
     pred_label = np.argmax(prediction, axis=1)
@@ -482,6 +499,38 @@ def class_eval(prediction, target):
         accuracy = metrics.accuracy_score(target_label, pred_label)
     else:
         raise NotImplementedError
+    return accuracy, precision, recall, fscore, auc_score
+
+
+# ! Updated for multiclass classification
+def class_eval(prediction, target):
+    prediction = np.exp(prediction.numpy())
+    target = target.numpy()
+
+    pred_label = np.argmax(prediction, axis=1)
+    target_label = np.squeeze(target)
+
+    if not target_label.shape:
+        target_label = np.asarray([target_label])
+
+    accuracy = metrics.accuracy_score(target_label, pred_label)
+
+    if prediction.shape[1] == 2:
+        precision, recall, fscore, _ = metrics.precision_recall_fscore_support(
+            target_label, pred_label, average='binary')
+        auc_score = metrics.roc_auc_score(target_label, prediction[:, 1])
+    else:
+        # ! average macro (imbalanced?) vs micro (balanced?)
+        precision, recall, fscore, _ = metrics.precision_recall_fscore_support(
+            target_label, pred_label, average='macro', zero_division=0)
+        # ! multi_class ovr (balanced) vs ovo (imbalanced)
+        auc_score = metrics.roc_auc_score(
+                target_label,
+                prediction,
+                multi_class='ovo',
+                average='macro'
+            )
+        # ! might raise error --> if so, then catch later
     return accuracy, precision, recall, fscore, auc_score
 
 

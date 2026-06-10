@@ -81,7 +81,7 @@ class CrystalGraphConvNet(nn.Module):
     """
     def __init__(self, orig_atom_fea_len, nbr_fea_len,
                  atom_fea_len=64, n_conv=3, h_fea_len=128, n_h=1,
-                 classification=False):
+                 classification=False, num_classes=2):
         """
         Initialize CrystalGraphConvNet.
 
@@ -115,7 +115,7 @@ class CrystalGraphConvNet(nn.Module):
             self.softpluses = nn.ModuleList([nn.Softplus()
                                              for _ in range(n_h-1)])
         if self.classification:
-            self.fc_out = nn.Linear(h_fea_len, 7)  # ! Changed 2 --> 7 (for systems)
+            self.fc_out = nn.Linear(h_fea_len, num_classes)  # ! Changed 2 --> 7 (for systems)
         else:
             self.fc_out = nn.Linear(h_fea_len, 1)
         if self.classification:
