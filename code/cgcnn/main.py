@@ -77,6 +77,8 @@ parser.add_argument('--n-conv', default=3, type=int, metavar='N',
                     help='number of conv layers')
 parser.add_argument('--n-h', default=1, type=int, metavar='N',
                     help='number of hidden layers after pooling')
+
+
 parser.add_argument('--seed', action='store_true',
                     help='sets torch seed to 42')
 parser.add_argument('--num-classes', default=2, type=int)

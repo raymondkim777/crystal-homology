@@ -1,3 +1,4 @@
+import argparse
 import json
 import random
 from monty.json import MontyEncoder
@@ -8,14 +9,20 @@ load_dotenv()
 
 
 MP_DATA_PATH = 'data/mp-raw'
-SUBSET_SIZE = 1000
 
 
-def choose_subset_of_mp_data() -> None:
+def _parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--subset-size', default=1000, type=int, help='size for each class')
+    return parser.parse_args()
+
+
+def choose_subset_of_mp_data(subset_size=1000) -> None:
+    print(f"Subset Size: {subset_size}")
     for system in CRYSTAL_SYSTEMS:
         print(f"Choosing subset of {system} system...")
         mp_raw_json_list = loadfn(f"data/mp-raw/{system}.json")
-        mp_subset = random.sample(mp_raw_json_list, k=SUBSET_SIZE)
+        mp_subset = random.sample(mp_raw_json_list, k=subset_size)
 
         # save subset JSON files
         data_raw_dir = f'data/mp-subset'
@@ -43,5 +50,8 @@ def convert_summarydoc_to_cif() -> None:
 
 if __name__ == "__main__":
     random.seed(42)
-    choose_subset_of_mp_data()
+
+    args = _parse_args()
+
+    choose_subset_of_mp_data(args.subset_size)
     convert_summarydoc_to_cif()

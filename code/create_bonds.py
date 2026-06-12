@@ -11,6 +11,7 @@ import networkx as nx
 
 
 CIF_DIRECTORY = "data/cif"
+MULTIGRAPH_DIRECTORY = "data/graphs-multi"
 GRAPH_DIRECTORY = "data/graphs"
 
 
@@ -47,9 +48,15 @@ def construct_crystalnn_graph() -> None:
     # remove self connections
     
     # parameters selected for structural bonds, not chemical bonds
-    crystalnn = CrystalNN(distance_cutoffs=None, x_diff_weight=0, porous_adjustment=False)
+    crystalnn = CrystalNN(
+        distance_cutoffs=None, 
+        x_diff_weight=0, 
+        porous_adjustment=False,
+        search_cutoff=12  # default 7, but ERROR: No Voronoi neighbors found for site
+    )
     for system in CRYSTAL_SYSTEMS:
 
+        system_multigraphs = dict()
         system_graphs = dict()
         cif_files = fetch_cif_filenames(system)
                     
@@ -58,32 +65,40 @@ def construct_crystalnn_graph() -> None:
             structure_filename = f"{CIF_DIRECTORY}/{system}/{filename}"
             structures = get_structures_from_cif(structure_filename)
             
-            # transform into graph
-            bonded_graph = crystalnn.get_bonded_structure(structures[0])
+            # transform into multi-digraph
+            nx_multigraph = crystalnn.get_bonded_structure(structures[0])
 
-            # save edge multiplicites
-            edge_mult_dict = dict()
-            for edge in bonded_graph.graph.edges:  # tuple
-                edge_collapsed = (edge[0], edge[1])  # three entries, third one is unique key
-                edge_mult_dict[edge_collapsed] = len(bonded_graph.graph[edge[0]][edge[1]])
+            # set bond distances as weight for each edge
+            for u, v, key, data in nx_multigraph.graph.edges(keys=True, data=True):
+                to_jimage = data['to_jimage']
+                dist = structures[0].get_distance(u, v, jimage=to_jimage)
+                nx_multigraph.graph.edges[u, v, key]['weight'] = dist
+
+            # change species identifier to species object, not label
+            for node in nx_multigraph.graph.nodes:
+                nx_multigraph.graph.nodes[node]['specie'] = structures[0][node].specie
+
+            # save multigraph (for CGCNN graph input)
+            system_multigraphs[filename[:-4]] = nx_multigraph.graph
 
             # collapse multigraph into graph
-            nx_graph = nx.DiGraph(bonded_graph.graph)
+            nx_graph = nx.DiGraph(nx_multigraph.graph)
 
-            # edit nodes
+            # remove self connections
             for node in nx_graph.nodes:
-
-                # change species identifier to species object, not label
-                nx_graph.nodes[node]['specie'] = structures[0][node].specie
-
-                # remove self connections
                 if nx_graph.has_edge(*(node, node)):
                     nx_graph.remove_edge(*(node, node))
+
+            # save edge multiplicites --> DEPR, CGCNN can handle multiple edges
+            edge_mult_dict = dict()
+            for edge in nx_multigraph.graph.edges:  # tuple
+                edge_collapsed = (edge[0], edge[1])  # three entries, third one is unique key
+                edge_mult_dict[edge_collapsed] = len(nx_multigraph.graph[edge[0]][edge[1]])
 
             # store edge multiplicities as edge attribute
             nx.set_edge_attributes(nx_graph, values=edge_mult_dict, name='multiplicity')
 
-            # add edge weights (min. Euc. distances)
+            # re-implement edge weights as min. distances of all relevant bonds
             distance_matrix = structures[0].distance_matrix
             distances_dict = dict()
             for edge in nx_graph.edges:
@@ -94,9 +109,15 @@ def construct_crystalnn_graph() -> None:
             for u, v, data in nx_graph.edges(data=True):
                 data.pop("to_jimage", None)
 
+            # save graph
             system_graphs[filename[:-4]] = nx_graph
         
-        # save system_graphs as pickle
+        # save graphs as pickles
+
+        multigraph_filepath = open_write_file(MULTIGRAPH_DIRECTORY, f'{system}.pkl')
+        with open(multigraph_filepath, 'wb') as f:
+            pickle.dump(system_multigraphs, f)
+        
         graph_filepath = open_write_file(GRAPH_DIRECTORY, f'{system}.pkl')
         with open(graph_filepath, 'wb') as f:
             pickle.dump(system_graphs, f)
@@ -135,8 +156,8 @@ def test_crystalnn() -> None:
     bonded_graph = crystalnn.get_bonded_structure(structures[0])
     # print(bonded_graph)
     # print(type(bonded_graph))
-    print(bonded_graph.graph.nodes(data=True))
-    print(structures[0][0].specie)
+    print(bonded_graph.graph.edges(data=True))
+    print(type(bonded_graph.graph.edges[0, 4, 0]['to_jimage']))
     return
 
     nx_graph = bonded_graph.graph
