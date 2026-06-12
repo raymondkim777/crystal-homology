@@ -424,6 +424,17 @@ def validate(val_loader, model, criterion, normalizer, test=False):
                     i, len(val_loader), batch_time=batch_time, loss=losses,
                     accu=accuracies, prec=precisions, recall=recalls,
                     f1=fscores, auc=auc_scores))
+    
+    print('Final C Test\t'
+            'Loss ({loss.avg:.4f})\t'
+            'Accu ({accu.avg:.3f})\t'
+            'Precision ({prec.avg:.3f})\t'
+            'Recall ({recall.avg:.3f})\t'
+            'F1 ({f1.avg:.3f})\t'
+            'AUC ({auc.avg:.3f})'.format(
+        i, len(val_loader), batch_time=batch_time, loss=losses,
+        accu=accuracies, prec=precisions, recall=recalls,
+        f1=fscores, auc=auc_scores))
 
     if test:
         star_label = '**'

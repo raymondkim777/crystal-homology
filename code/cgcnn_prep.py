@@ -1,3 +1,4 @@
+from tqdm import tqdm
 import random
 import argparse
 import numpy as np
@@ -19,7 +20,8 @@ def _parse_args():
 def unpack_all_graphs() -> dict:
     graph_dict = dict()
     for system in CRYSTAL_SYSTEMS:
-        with open(f'data/graphs/{system}.pkl', 'rb') as file:
+        print(f"Unpacking {system} system...")
+        with open(f'data/graphs-multi/{system}.pkl', 'rb') as file:
             graph_dict[system] = pickle.load(file)
     return graph_dict
 
@@ -50,7 +52,8 @@ def graph_process(save=False) -> dict:
     max_num_nbr = 0
     max_bond_dist = 0
 
-    for key, value in new_graph_dict.items():
+    print("Computing bounds...")
+    for key, value in tqdm(new_graph_dict.items()):
         graph = value['graph']
         # max_degree = max(d for _, d in graph.out_degree())  # for digraphss
         max_degree = max(d for _, d in graph.degree())

@@ -9,6 +9,7 @@ import random
 import warnings
 
 import numpy as np
+import networkx as nx
 import torch
 from pymatgen.core.structure import Structure
 from torch.utils.data import Dataset, DataLoader
@@ -302,9 +303,9 @@ class GraphData(Dataset):
     def __init__(
             self, 
             root_dir, 
-            max_num_nbr=24, 
+            max_num_nbr=38, 
             dmin=0, 
-            dmax=12.5,  # 12.43843407284584
+            dmax=17,  # 16.719527690689166
             step=0.2,
             random_seed=42
     ):
@@ -354,15 +355,29 @@ class GraphData(Dataset):
 
         # neighbor features (edge attributes)
         nbr_fea_idx, nbr_fea = [], []
-        for node in range(len(graph_dict['graph'].nodes)):
-            nbr_list = list(graph_dict['graph'].neighbors(node))
+        adj_dict = nx.to_dict_of_dicts(graph_dict['graph'])
+        for u in adj_dict.keys():
+            nbr_list = []
+            dist = []
+            for v in adj_dict[u].keys():
+                for k in adj_dict[u][v].keys():
+                    # u v k --> node1, node2, key
+                    nbr_list.append(v)
+                    dist.append(adj_dict[u][v][k]['weight'])
             nbr_fea_idx.append(nbr_list + [0] * (self.max_num_nbr - len(nbr_list)))
-            
-            dist = [graph_dict['graph'].edges[node, nbr]['weight']
-                    for nbr in nbr_list]
             nbr_fea.append(dist + [0] * (self.max_num_nbr - len(nbr_list)))
         nbr_fea_idx, nbr_fea = np.array(nbr_fea_idx), np.array(nbr_fea)
         nbr_fea = self.gdf.expand(nbr_fea)
+
+        # for node in range(len(graph_dict['graph'].nodes)):
+        #     nbr_list = list(graph_dict['graph'].neighbors(node))
+        #     nbr_fea_idx.append(nbr_list + [0] * (self.max_num_nbr - len(nbr_list)))
+            
+        #     dist = [graph_dict['graph'].edges[node, nbr]['weight']
+        #             for nbr in nbr_list]
+        #     nbr_fea.append(dist + [0] * (self.max_num_nbr - len(nbr_list)))
+        # nbr_fea_idx, nbr_fea = np.array(nbr_fea_idx), np.array(nbr_fea)
+        # nbr_fea = self.gdf.expand(nbr_fea)
 
         # TODO: fractional coordinates, crystal systems, (and other properties)
 

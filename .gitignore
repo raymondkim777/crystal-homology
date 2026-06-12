@@ -10,3 +10,4 @@ logs
 code/ignore*
 
 code/cgcnn/data/graph_data/graphs
+code/cgcnn/data/graph_data/id_prop.csv
