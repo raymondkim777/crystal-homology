@@ -180,7 +180,7 @@ def main():
     if args.resume:
         if os.path.isfile(args.resume):
             print("=> loading checkpoint '{}'".format(args.resume))
-            checkpoint = torch.load(args.resume)
+            checkpoint = torch.load(args.resume, weights_only=False)
             args.start_epoch = checkpoint['epoch']
             best_mae_error = checkpoint['best_mae_error']
             model.load_state_dict(checkpoint['state_dict'])
@@ -225,7 +225,7 @@ def main():
 
     # test best model
     print('---------Evaluate Model on Test Set---------------')
-    best_checkpoint = torch.load('model_best.pth.tar')
+    best_checkpoint = torch.load('model_best.pth.tar', weights_only=False)
     model.load_state_dict(best_checkpoint['state_dict'])
     validate(test_loader, model, criterion, normalizer, test=True)
 
@@ -340,6 +340,7 @@ def validate(val_loader, model, criterion, normalizer, test=False):
     if test:
         test_targets = []
         test_preds = []
+        test_probs = []
         test_cif_ids = []
 
     # switch to evaluate mode
@@ -435,6 +436,17 @@ def validate(val_loader, model, criterion, normalizer, test=False):
                     accu=accuracies, prec=precisions, recall=recalls,
                     f1=fscores, auc=auc_scores))
 
+    print('Final C Test\t'
+            'Loss ({loss.avg:.4f})\t'
+            'Accu ({accu.avg:.3f})\t'
+            'Precision ({prec.avg:.3f})\t'
+            'Recall ({recall.avg:.3f})\t'
+            'F1 ({f1.avg:.3f})\t'
+            'AUC ({auc.avg:.3f})'.format(
+        i, len(val_loader), batch_time=batch_time, loss=losses,
+        accu=accuracies, prec=precisions, recall=recalls,
+        f1=fscores, auc=auc_scores))
+    
     if test:
         star_label = '**'
         import csv
