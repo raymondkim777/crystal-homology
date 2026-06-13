@@ -60,6 +60,7 @@ Moves graph data over to `cgcnn/data/graph_data` folder as `.pkl` file and creat
 
 ```
 python cgcnn_prep.py --save
+
 ```
 If `--save` argument is not included, then `graph_data` and `id_prop.csv` are not created.
 
@@ -71,8 +72,5 @@ Trains CGCNN to predict crystal systems via classification (first pass).
 cd cgcnn
 ```
 ```
-python main.py --delete --task classification --optim Adam --num-classes 7 --train-ratio 0.6 --val-ratio 0.2 --test-ratio 0.2 --epochs 100 --lr 0.001 --atom-fea-len 128 --n-conv 3 --h-fea-len 256 --n-h 1 data/graph_data
-```
-```
-python main.py --task classification --optim Adam --num-classes 7 --train-ratio 0.6 --val-ratio 0.2 --test-ratio 0.2 --epochs 100 --lr 0.001 --atom-fea-len 64 --n-conv 4 --n-h 2 --h-fea-len 128 data/graph_data
+python main.py --delete --task classification --optim Adam --num-classes 7 --train-ratio 0.6 --val-ratio 0.2 --test-ratio 0.2 --epochs 100 --lr 0.001 --atom-fea-len 64 --n-conv 4 --h-fea-len 256 --n-h 1 data/graph_data
 ```
