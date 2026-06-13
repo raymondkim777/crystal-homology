@@ -10,7 +10,7 @@ from pymatgen.io.cif import CifParser
 from utils import CRYSTAL_SYSTEMS, open_write_file, plot_nxgraph
 
 
-CIF_DIRECTORY = "code/data/cif"
+CIF_DIRECTORY = "data/cif"
 CGCNN_DATAPATH = 'cgcnn/data/our-data'
 
 

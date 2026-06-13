@@ -75,5 +75,5 @@ python main.py --delete --task classification --optim Adam --num-classes 7 --tra
 ```
 
 ```
-python main.py --task classification --train-ratio 0.6 --val-ratio 0.2 --test-ratio 0.2 data/our-data
+python main.py --seed --task classification --optim Adam --num-classes 7 --train-ratio 0.6 --val-ratio 0.2 --test-ratio 0.2 --epochs 100 --lr 0.001 --atom-fea-len 64 --n-conv 4 --h-fea-len 128 --n-h 1 data/our-data
 ```
