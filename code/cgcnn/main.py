@@ -105,9 +105,16 @@ def main():
     print("GPU Available", args.cuda)
 
     if args.delete:
-        os.remove("./checkpoint.pth.tar")
-        os.remove("./model_best.pth.tar")
-        os.remove("./test_results.csv")
+        check_path = "./checkpoint.pth.tar"
+        model_path = "./model_best.pth.tar"
+        result_path = "./test_results.csv"
+        
+        if os.path.exists(check_path):
+            os.remove(check_path)
+        if os.path.exists(model_path):
+            os.remove(model_path)
+        if os.path.exists(result_path):
+            os.remove(result_path)
 
 
     # load data
@@ -550,7 +557,8 @@ def class_eval(prediction, target):
                 target_label,
                 prediction,
                 multi_class='ovo',
-                average='macro'
+                average='macro',
+                labels=list(range(args.num_classes))
             )
         # ! might raise error --> if so, then catch later
     return accuracy, precision, recall, fscore, auc_score
