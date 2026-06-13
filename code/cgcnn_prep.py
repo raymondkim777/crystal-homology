@@ -70,6 +70,7 @@ def graph_process(save=False) -> dict:
     print("Maximum Bond Distance:", max_bond_dist)
 
     if save:
+        print(f"Saving files to {CGCNN_DATAPATH}")
         # save graphs to CGCNN data folder
         for mp_id, value in new_graph_dict.items():
             cgcnn_datapath = open_write_file(f"{CGCNN_DATAPATH}/graphs", f'{mp_id}.pkl')

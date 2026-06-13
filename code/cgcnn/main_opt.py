@@ -97,7 +97,7 @@ else:
 def main():
     global args, best_mae_error
 
-    # ! set torch seed
+    # ! CUSTOM
     if args.seed:
         torch.manual_seed(42)
     print("GPU Available", args.cuda)

@@ -82,6 +82,9 @@ parser.add_argument('--n-h', default=1, type=int, metavar='N',
 parser.add_argument('--seed', action='store_true',
                     help='sets torch seed to 42')
 parser.add_argument('--num-classes', default=2, type=int)
+parser.add_argument('--delete', action='store_true',
+                    help='deletes generated training files before training')
+
 
 args = parser.parse_args(sys.argv[1:])
 
@@ -96,10 +99,15 @@ else:
 def main():
     global args, best_mae_error
 
-    # ! set torch seed
+    # ! CUSTOM
     if args.seed:
         torch.manual_seed(42)
     print("GPU Available", args.cuda)
+
+    if args.delete:
+        os.remove("./checkpoint.pth.tar")
+        os.remove("./model_best.pth.tar")
+        os.remove("./test_results.csv")
 
 
     # load data
@@ -168,7 +176,8 @@ def main():
     if args.resume:
         if os.path.isfile(args.resume):
             print("=> loading checkpoint '{}'".format(args.resume))
-            checkpoint = torch.load(args.resume)
+            # ! TRUSTED SOURCE
+            checkpoint = torch.load(args.resume, weights_only=False)
             args.start_epoch = checkpoint['epoch']
             best_mae_error = checkpoint['best_mae_error']
             model.load_state_dict(checkpoint['state_dict'])
