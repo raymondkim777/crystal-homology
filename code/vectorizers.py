@@ -1,7 +1,9 @@
 import argparse
 import pickle
 import numpy as np
+import matplotlib
 import matplotlib.pyplot as plt
+matplotlib.use('Agg')  # Directs Matplotlib to write to a file, not a GUI window
 import gudhi.representations as gdr
 import gtda.diagrams as gtd
 from gudhi.representations import Landscape, PersistenceImage
@@ -242,7 +244,8 @@ def plot_landscape(system: str, mat_id: str, dim: int=0):
     plt.ylabel("$\lambda_k(t)$")
     plt.legend()
     plt.grid(True, alpha=0.3)
-    plt.show()
+    # plt.show()
+    plt.savefig('data/landscapes/example_gudhi.png')
 
 
 def plot_image(system: str, mat_id: str, dim: int=0):
@@ -265,7 +268,8 @@ def plot_image(system: str, mat_id: str, dim: int=0):
     plt.xlabel("Birth")
     plt.ylabel("Death")
     plt.colorbar(label="Pixel Intensity")
-    plt.show()
+    # plt.show()
+    plt.savefig('data/images/example_gudhi.png')
 
 
 ################   UNUSED FROM BELOW   ################
@@ -301,9 +305,9 @@ if __name__ == "__main__":
     if args.landscape:
         persistence_landscape()
         if args.example:
-            plot_landscape_gtda('triclinic', 'mp-2856')
-            plot_landscape('triclinic', 'mp-2856', dim=2)
+            plot_landscape_gtda('triclinic', 'mp-2981')
+            plot_landscape('triclinic', 'mp-2981', dim=0)
     if args.image:
         persistence_image()
         if args.example:
-            plot_image('triclinic', 'mp-2856', dim=1)
+            plot_image('triclinic', 'mp-2981', dim=1)

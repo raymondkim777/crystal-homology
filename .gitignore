@@ -1,9 +1,14 @@
 .env
 .vscode
 __pycache__
+
 code/data/mp*
 code/data/cif
 code/data/struct-issues
+code/data/diagrams*
+code/data/images*
+code/data/landscapes*
+
 code/error.log
 logs
 
