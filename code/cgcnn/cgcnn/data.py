@@ -11,6 +11,7 @@ import warnings
 import numpy as np
 import networkx as nx
 import torch
+import torch.nn as nn
 from pymatgen.core.structure import Structure
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.dataloader import default_collate
@@ -296,6 +297,7 @@ class GraphData(Dataset):
 
     atom_fea: torch.Tensor shape (n_i, atom_fea_len)
     nbr_fea: torch.Tensor shape (n_i, M, nbr_fea_len)
+    # nbr_fea_len includes 27 one-hot encoding for to_jimage
     nbr_fea_idx: torch.LongTensor shape (n_i, M)
     target: torch.Tensor shape (1, )
     cif_id: str or int
@@ -329,7 +331,15 @@ class GraphData(Dataset):
         return len(self.id_prop_data)
     
 
-    @functools.lru_cache(maxsize=None)  # Cache loaded structures
+    def __cart_vector(self, coord_start, coord_end, jimage, matrix):
+        jimage = np.array(jimage)
+
+        delta_frac = coord_end + jimage - coord_start
+        delta_cart = delta_frac @ matrix
+        return delta_cart
+    
+
+    @functools.lru_cache(maxsize=None)  # Cache computed attributes
     def __getitem__(self, idx):
         mp_id, target = self.id_prop_data[idx]
         with open(os.path.join(self.root_dir, 'graphs', f'mp-{mp_id}.pkl'), 'rb') as file:
@@ -345,13 +355,22 @@ class GraphData(Dataset):
         ########################
 
         # atom features (node features)
-        atom_fea = np.vstack(
-            [
+        feature_list = [
                 self.ari.get_atom_fea(graph_dict['graph'].nodes[node]['specie'].number)
                 for node in graph_dict['graph'].nodes
-            ]
-        )
-        atom_fea = torch.Tensor(atom_fea)
+        ]
+
+        # add fractional coordinates as periodic coordinates
+        periodic_coords = [
+            np.hstack([
+                [np.cos(2 * np.pi * val), np.sin(2 * np.pi * val)]
+                for val in graph_dict['graph'].nodes[node]['coords']
+            ])
+            for node in graph_dict['graph'].nodes
+        ]
+        atom_fea = np.hstack((feature_list, periodic_coords))
+
+        # ! perhaps site properties (if my results contain any)
 
         # neighbor features (edge attributes)
         nbr_fea_idx, nbr_fea = [], []
@@ -366,8 +385,30 @@ class GraphData(Dataset):
                     dist.append(adj_dict[u][v][k]['weight'])
             nbr_fea_idx.append(nbr_list + [0] * (self.max_num_nbr - len(nbr_list)))
             nbr_fea.append(dist + [0] * (self.max_num_nbr - len(nbr_list)))
+        
         nbr_fea_idx, nbr_fea = np.array(nbr_fea_idx), np.array(nbr_fea)
         nbr_fea = self.gdf.expand(nbr_fea)
+
+        # increase nbr_fea_len by 3 to hold cartesian displacement vectors
+        padding = ((0, 0), (0, 0), (0, 3))
+        nbr_fea = np.pad(nbr_fea, pad_width=padding, mode='constant', constant_values=0)
+
+
+        # add to_jimage as cartesian displacement vector
+        for u in adj_dict.keys():
+            cart_vectors = []
+            for v in adj_dict[u].keys():
+                for k in adj_dict[u][v].keys():
+                    to_jimage = np.asarray(adj_dict[u][v][k]['to_jimage'])
+                    coord_start = graph_dict['graph'].nodes[u]['coords']
+                    coord_end = graph_dict['graph'].nodes[v]['coords']
+                    matrix = graph_dict['lattice_matrix']
+
+                    cart_vector = self.__cart_vector(coord_start, coord_end, to_jimage, matrix)
+
+                    cart_vectors.append(cart_vector)
+            cart_vectors = np.asarray(cart_vectors)
+            nbr_fea[u, :cart_vectors.shape[0], -3:] = cart_vectors
 
         # for node in range(len(graph_dict['graph'].nodes)):
         #     nbr_list = list(graph_dict['graph'].neighbors(node))

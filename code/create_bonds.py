@@ -52,7 +52,7 @@ def construct_crystalnn_graph() -> None:
         distance_cutoffs=None, 
         x_diff_weight=0, 
         porous_adjustment=False,
-        search_cutoff=12  # default 7, but ERROR: No Voronoi neighbors found for site
+        search_cutoff=9  # default 7, but ERROR: No Voronoi neighbors found for site
     )
     for system in CRYSTAL_SYSTEMS:
 

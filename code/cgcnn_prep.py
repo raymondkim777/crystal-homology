@@ -5,7 +5,9 @@ import numpy as np
 import networkx as nx
 from tqdm import tqdm
 import pickle
+import warnings
 from utils import CRYSTAL_SYSTEMS, open_write_file, plot_nxgraph
+from create_bonds import get_structures_from_cif
 
 
 CGCNN_DATAPATH = 'cgcnn/data/graph_data'
@@ -42,10 +44,15 @@ def graph_process(save=False) -> dict:
 
     # UNDIRECTED edges
     for system in CRYSTAL_SYSTEMS:
-        for key, graph in graph_dict[system].items():
+        for key, graph in tqdm(graph_dict[system].items()):
+            structure_filename = f'data/cif/{system}/{key}.cif'
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                structure = get_structures_from_cif(structure_filename)[0]
             new_graph_dict[key] = {
                 'graph': graph.to_undirected(),     # UNDIRECTED (for message passing)
-                'system': system
+                'system': system, 
+                'lattice_matrix': structure.lattice.matrix,
             }
     
     # computing bounds

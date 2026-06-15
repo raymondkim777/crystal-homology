@@ -7,10 +7,21 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+PROPS = []
 FIELDS = [
     "material_id", 
     "symmetry", 
-    "structure"
+    "structure", 
+    # Chemist recommended fields
+    'phonon_IDs', 
+    'bulk_modulus', 
+    'dos', 
+    'bandstructure', 
+    'band_gap', 
+    'cbm', 
+    'vbm', 
+    'efermi', 
+    'is_gap_direct'
 ]
 
 
@@ -21,7 +32,8 @@ def query_all_crystals_from_mp() -> None:
         with MPRester() as mpr:
             docs = mpr.materials.summary.search(
                 crystal_system=system,
-                fields=FIELDS
+                # has_props=PROPS,
+                # fields=FIELDS
             )
 
         # serialize SummaryDoc into JSON
