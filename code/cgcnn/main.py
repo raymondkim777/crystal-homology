@@ -84,6 +84,8 @@ parser.add_argument('--seed', action='store_true',
 parser.add_argument('--num-classes', default=2, type=int)
 parser.add_argument('--delete', action='store_true',
                     help='deletes generated training files before training')
+parser.add_argument('--vector', default='none', type=str,
+                    help='choose a vectorization: none, image, landscape, perslay')
 
 
 args = parser.parse_args(sys.argv[1:])
@@ -119,7 +121,7 @@ def main():
 
     # load data
     # dataset = CIFData(*args.data_options)
-    dataset = GraphData(*args.data_options)
+    dataset = GraphData(*args.data_options, vector=args.vector)
     collate_fn = collate_pool
     train_loader, val_loader, test_loader = get_train_val_test_loader(
         dataset=dataset,
@@ -160,7 +162,8 @@ def main():
                                 h_fea_len=args.h_fea_len,
                                 n_h=args.n_h,
                                 classification=True if args.task == 'classification' else False, 
-                                num_classes=args.num_classes)
+                                num_classes=args.num_classes,
+                                vector=args.vector)
     if args.cuda:
         model.cuda()
 

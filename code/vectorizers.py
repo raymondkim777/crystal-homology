@@ -151,6 +151,7 @@ def fit_image_transformers(bandwidth, resolution):
 def persistence_landscape(
         num_landscapes=LA_LAYER, 
         resolution=LA_RESOLUTION,
+        flatten=False,
     ):
     '''
     Generates persistence landscapes for every system persistence diagram for each dimension. 
@@ -174,7 +175,7 @@ def persistence_landscape(
         for i in range(len(keys_list)):
             key = keys_list[i]
             system_landscapes[key] = {
-                dim: landscapes_by_dim[dim][i] 
+                dim: landscapes_by_dim[dim][i]      # already one dimensional
                 for dim in range(DIMENSION_CNT)
             }
         
@@ -187,6 +188,7 @@ def persistence_landscape(
 def persistence_image(
         bandwidth=IM_BANDWIDTH, 
         resolution=IM_RESOLUTION, 
+        flatten=False,
     ):
     '''
     Generates persistence images for every system persistence diagram for each dimension. 
@@ -231,6 +233,7 @@ def plot_landscape(system: str, mat_id: str, dim: int=0):
     with open(f'data/landscapes/{system}.pkl', 'rb') as file:
         landscapes = pickle.load(file)
     landscape_to_plot = landscapes[mat_id][dim]  # all three dimensions
+    print(landscape_to_plot.shape)
     
     x_values = np.linspace(*transformers[dim].sample_range_fixed_, LA_RESOLUTION)
     plt.figure(figsize=(8, 5))  
@@ -259,6 +262,7 @@ def plot_image(system: str, mat_id: str, dim: int=0):
     with open(f'data/images/{system}.pkl', 'rb') as file:
         images = pickle.load(file)
     image_to_plot = images[mat_id][dim]  # all three dimensions
+    print(image_to_plot.shape)
     
     img_matrix = image_to_plot.reshape(IM_RESOLUTION)
     plt.figure(figsize=(6, 6))

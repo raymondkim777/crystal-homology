@@ -16,6 +16,8 @@ from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.dataloader import default_collate
 from torch.utils.data.sampler import SubsetRandomSampler
 
+from utils import CRYSTAL_SYSTEMS
+
 
 def get_train_val_test_loader(dataset, collate_fn=default_collate,
                               batch_size=64, train_ratio=None,
@@ -132,9 +134,10 @@ def collate_pool(dataset_list):
     """
     batch_atom_fea, batch_nbr_fea, batch_nbr_fea_idx = [], [], []
     crystal_atom_idx, batch_target = [], []
+    batch_vectorizations = []
     batch_cif_ids = []
     base_idx = 0
-    for i, ((atom_fea, nbr_fea, nbr_fea_idx), target, cif_id)\
+    for i, ((atom_fea, nbr_fea, nbr_fea_idx), vectorizations, target, cif_id)\
             in enumerate(dataset_list):
         n_i = atom_fea.shape[0]  # number of atoms for this crystal
         batch_atom_fea.append(atom_fea)
@@ -143,12 +146,14 @@ def collate_pool(dataset_list):
         new_idx = torch.LongTensor(np.arange(n_i)+base_idx)
         crystal_atom_idx.append(new_idx)
         batch_target.append(target)
+        batch_vectorizations.append(vectorizations)
         batch_cif_ids.append(cif_id)
         base_idx += n_i
     return (torch.cat(batch_atom_fea, dim=0),
             torch.cat(batch_nbr_fea, dim=0),
             torch.cat(batch_nbr_fea_idx, dim=0),
             crystal_atom_idx),\
+        torch.stack(batch_vectorizations, dim=0), \
         torch.stack(batch_target, dim=0),\
         batch_cif_ids
 
@@ -253,7 +258,7 @@ class AtomCustomJSONInitializer(AtomInitializer):
 
 class GraphData(Dataset):
     """
-    The GraphDATA dataset is a wrapper for a dataset where the crystal structures
+    The GraphData dataset is a wrapper for a dataset where the crystal structures
     are stored in the form of NetworkX graphs. The dataset should have the following
     directory structure:
 
@@ -307,7 +312,8 @@ class GraphData(Dataset):
             dmin=0, 
             dmax=17,  # 16.719527690689166
             step=0.2,
-            random_seed=42
+            random_seed=42, 
+            vector='none',    # 'none', 'image', 'landscape', 'perslay'
     ):
         self.root_dir = root_dir  # cgcnn/data/graph_data
         self.max_num_nbr = max_num_nbr
@@ -323,6 +329,21 @@ class GraphData(Dataset):
         assert os.path.exists(atom_init_file), 'atom_init.json does not exist!'
         self.ari = AtomCustomJSONInitializer(atom_init_file)
         self.gdf = GaussianDistance(dmin=dmin, dmax=dmax, step=step)
+
+        assert vector in ['none', 'image', 'landscape', 'perslay'], 'incorrect vectorization input!'
+        self.vector_dict = dict()
+        if vector == 'image':
+            for system in CRYSTAL_SYSTEMS:
+                with open(f'data/images/{system}.pkl', 'rb') as file:
+                    images = pickle.load(file)
+                self.vector_dict = self.vector_dict | images  # [mat_id][dim]
+        elif vector == 'landscape':
+            for system in CRYSTAL_SYSTEMS:
+                with open(f'data/landscapes/{system}.pkl', 'rb') as file:
+                    landscapes = pickle.load(file)
+                self.vector_dict = self.vector_dict | landscapes  # [mat_id][dim]
+        elif vector == 'perslay':
+            pass
         
 
     def __len__(self):
@@ -369,23 +390,14 @@ class GraphData(Dataset):
         nbr_fea_idx, nbr_fea = np.array(nbr_fea_idx), np.array(nbr_fea)
         nbr_fea = self.gdf.expand(nbr_fea)
 
-        # for node in range(len(graph_dict['graph'].nodes)):
-        #     nbr_list = list(graph_dict['graph'].neighbors(node))
-        #     nbr_fea_idx.append(nbr_list + [0] * (self.max_num_nbr - len(nbr_list)))
-            
-        #     dist = [graph_dict['graph'].edges[node, nbr]['weight']
-        #             for nbr in nbr_list]
-        #     nbr_fea.append(dist + [0] * (self.max_num_nbr - len(nbr_list)))
-        # nbr_fea_idx, nbr_fea = np.array(nbr_fea_idx), np.array(nbr_fea)
-        # nbr_fea = self.gdf.expand(nbr_fea)
-
-        # TODO: fractional coordinates, crystal systems, (and other properties)
+        vectorizations = np.hstack((self.vector_dict[mp_id][dim] for dim in range(3)))
 
         atom_fea = torch.Tensor(atom_fea)
         nbr_fea = torch.Tensor(nbr_fea)
         nbr_fea_idx = torch.LongTensor(nbr_fea_idx)
+        vectorizations = torch.Tensor(vectorizations)
         target = torch.Tensor([float(target)])
-        return (atom_fea, nbr_fea, nbr_fea_idx), target, mp_id
+        return (atom_fea, nbr_fea, nbr_fea_idx), vectorizations, target, mp_id
 
 
 class CIFData(Dataset):

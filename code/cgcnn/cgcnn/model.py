@@ -79,9 +79,18 @@ class CrystalGraphConvNet(nn.Module):
     Create a crystal graph convolutional neural network for predicting total
     material properties.
     """
-    def __init__(self, orig_atom_fea_len, nbr_fea_len,
-                 atom_fea_len=64, n_conv=3, h_fea_len=128, n_h=1,
-                 classification=False, num_classes=2):
+    def __init__(
+            self,
+            orig_atom_fea_len, 
+            nbr_fea_len,
+            atom_fea_len=64, 
+            n_conv=3, 
+            h_fea_len=128, 
+            n_h=1,
+            classification=False, 
+            num_classes=2,
+            vector="none",
+            ):
         """
         Initialize CrystalGraphConvNet.
 
@@ -100,14 +109,26 @@ class CrystalGraphConvNet(nn.Module):
           Number of hidden features after pooling
         n_h: int
           Number of hidden layers after pooling
+        asdf
         """
         super(CrystalGraphConvNet, self).__init__()
+        assert vector in ['none', 'image', 'landscape', 'perslay'], 'incorrect vectorization input!'
+        self.vector = vector
+        if self.vector == 'none' or self.vector == 'perslay':
+            self.vector_len = 0
+        elif self.vector == 'image':
+            self.vector_len = 400
+        elif self.vector == 'landscape':
+            self.vector_len = 500
+        
         self.classification = classification
         self.embedding = nn.Linear(orig_atom_fea_len, atom_fea_len)
         self.convs = nn.ModuleList([ConvLayer(atom_fea_len=atom_fea_len,
                                     nbr_fea_len=nbr_fea_len)
                                     for _ in range(n_conv)])
-        self.conv_to_fc = nn.Linear(atom_fea_len, h_fea_len)
+        # ! vectorization
+        conv_to_fc_input_len = atom_fea_len + self.vector_len
+        self.conv_to_fc = nn.Linear(conv_to_fc_input_len, h_fea_len)
         self.conv_to_fc_softplus = nn.Softplus()
         if n_h > 1:
             self.fcs = nn.ModuleList([nn.Linear(h_fea_len, h_fea_len)
@@ -122,7 +143,7 @@ class CrystalGraphConvNet(nn.Module):
             self.logsoftmax = nn.LogSoftmax(dim=1)
             self.dropout = nn.Dropout()
 
-    def forward(self, atom_fea, nbr_fea, nbr_fea_idx, crystal_atom_idx):
+    def forward(self, atom_fea, nbr_fea, nbr_fea_idx, crystal_atom_idx, vectorizations):
         """
         Forward pass
 
@@ -153,6 +174,11 @@ class CrystalGraphConvNet(nn.Module):
         for conv_func in self.convs:
             atom_fea = conv_func(atom_fea, nbr_fea, nbr_fea_idx)
         crys_fea = self.pooling(atom_fea, crystal_atom_idx)
+        
+        # ! concatenating vectorization
+        if self.vector in ['image', 'landscape']:
+            crys_fea = torch.cat([crys_fea, vectorizations], dim=1)
+
         crys_fea = self.conv_to_fc(self.conv_to_fc_softplus(crys_fea))
         crys_fea = self.conv_to_fc_softplus(crys_fea)
         if self.classification:
