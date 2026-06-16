@@ -12,15 +12,22 @@ CRYSTAL_SYSTEMS = [
     'triclinic', 
     'trigonal'
 ]
-# CRYSTAL_SYSTEMS = [
-#     'triclinic', 
-#     'monoclinic', 
-#     'trigonal', 
-#     'hexagonal', 
-#     'orthorhombic', 
-#     'tetragonal', 
-#     'cubic'
-# ]
+
+FIELDS = [
+    "material_id", 
+    "symmetry", 
+    "structure", 
+    # Chemist recommended fields
+    'phonon_IDs', 
+    'bulk_modulus', 
+    'dos', 
+    'bandstructure', 
+    'band_gap', 
+    'cbm', 
+    'vbm', 
+    'efermi', 
+    'is_gap_direct'
+]
 
 
 def open_write_file(dir_path, file_name):

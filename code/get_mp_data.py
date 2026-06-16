@@ -2,27 +2,10 @@ import json
 from mp_api.client import MPRester
 from monty.json import MontyEncoder
 # from monty.serialization import loadfn, dumpfn
-from utils import CRYSTAL_SYSTEMS, open_write_file
+from utils import CRYSTAL_SYSTEMS, FIELDS, open_write_file
+
 from dotenv import load_dotenv
 load_dotenv()
-
-
-PROPS = []
-FIELDS = [
-    "material_id", 
-    "symmetry", 
-    "structure", 
-    # Chemist recommended fields
-    'phonon_IDs', 
-    'bulk_modulus', 
-    'dos', 
-    'bandstructure', 
-    'band_gap', 
-    'cbm', 
-    'vbm', 
-    'efermi', 
-    'is_gap_direct'
-]
 
 
 def query_all_crystals_from_mp() -> None:
@@ -32,18 +15,17 @@ def query_all_crystals_from_mp() -> None:
         with MPRester() as mpr:
             docs = mpr.materials.summary.search(
                 crystal_system=system,
-                # has_props=PROPS,
-                # fields=FIELDS
+                fields=FIELDS
             )
 
         # serialize SummaryDoc into JSON
         # ! Note: directly using Monty serialization messes the material_id
-        mp_json_list = []
+        mp_json_dict = dict()
         for doc in docs:
             json_object = dict()
             for field in FIELDS:
                 json_object[field] = getattr(doc, field)
-            mp_json_list.append(json_object)
+            mp_json_dict[str(doc.material_id)] = json_object
         
         # save JSON files
         data_raw_dir = f'data/mp-raw'
@@ -51,7 +33,7 @@ def query_all_crystals_from_mp() -> None:
         data_raw_path = open_write_file(data_raw_dir, file_raw_name)
 
         with open(data_raw_path, 'w') as f:
-            json.dump(mp_json_list, f, cls=MontyEncoder, indent=4)
+            json.dump(mp_json_dict, f, cls=MontyEncoder, indent=4)
 
 
 if __name__ == "__main__":
