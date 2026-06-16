@@ -14,6 +14,7 @@ CGCNN_DATAPATH = 'cgcnn/data/graph_data'
 def _parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--save', action='store_true', help='Saves graph data to CGCNN data path')
+    parser.add_argument('--vector', action='store_true', help='Saves vectorizations to CGCNN data path')
     return parser.parse_args()
 
 
@@ -26,7 +27,7 @@ def unpack_all_graphs() -> dict:
     return graph_dict
 
 
-def graph_process(save=False) -> dict:
+def graph_process(save=False, vector=False) -> dict:
     """
     Saves all graphs with labeled crystal systems in CGCNN data folder. 
     Computes and prints required bounds for GraphData.
@@ -86,6 +87,27 @@ def graph_process(save=False) -> dict:
             for mp_id, value in new_graph_dict.items():
                 f.write(f"{mp_id[3:]}, {system_to_int[value['system']]}\n")
 
+        if vector:
+            image_dict, landscape_dict = dict(), dict()
+            for system in CRYSTAL_SYSTEMS:
+                with open(f'data/images/{system}.pkl', 'rb') as file:
+                    images = pickle.load(file)
+                image_dict = image_dict | images  # [mat_id][dim]
+                
+                with open(f'data/landscapes/{system}.pkl', 'rb') as file:
+                    landscapes = pickle.load(file)
+                landscape_dict = landscape_dict | landscapes  # [mat_id][dim]
+
+            cgcnn_image_datapath = open_write_file(f"{CGCNN_DATAPATH}", f'images.pkl')
+            with open(cgcnn_image_datapath, 'wb') as f:
+                pickle.dump(image_dict, f)
+
+            cgcnn_landscape_datapath = open_write_file(f"{CGCNN_DATAPATH}", f'landscapes.pkl')
+            with open(cgcnn_landscape_datapath, 'wb') as f:
+                pickle.dump(landscape_dict, f)
+            
+
+
 
 def bid_test():
     '''
@@ -128,6 +150,6 @@ def test():
 
 if __name__ == "__main__":
     args = _parse_args()
-    graph_process(args.save)
+    graph_process(args.save, args.vector)
     # bid_test()
     # test()

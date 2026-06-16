@@ -117,9 +117,9 @@ class CrystalGraphConvNet(nn.Module):
         if self.vector == 'none' or self.vector == 'perslay':
             self.vector_len = 0
         elif self.vector == 'image':
-            self.vector_len = 400
+            self.vector_len = 400 * 3
         elif self.vector == 'landscape':
-            self.vector_len = 500
+            self.vector_len = 500 * 3
         
         self.classification = classification
         self.embedding = nn.Linear(orig_atom_fea_len, atom_fea_len)

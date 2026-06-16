@@ -16,8 +16,6 @@ from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.dataloader import default_collate
 from torch.utils.data.sampler import SubsetRandomSampler
 
-from utils import CRYSTAL_SYSTEMS
-
 
 def get_train_val_test_loader(dataset, collate_fn=default_collate,
                               batch_size=64, train_ratio=None,
@@ -333,15 +331,11 @@ class GraphData(Dataset):
         assert vector in ['none', 'image', 'landscape', 'perslay'], 'incorrect vectorization input!'
         self.vector_dict = dict()
         if vector == 'image':
-            for system in CRYSTAL_SYSTEMS:
-                with open(f'data/images/{system}.pkl', 'rb') as file:
-                    images = pickle.load(file)
-                self.vector_dict = self.vector_dict | images  # [mat_id][dim]
+            with open(os.path.join(self.root_dir, 'images.pkl'), 'rb') as file:
+                self.vector_dict = pickle.load(file)
         elif vector == 'landscape':
-            for system in CRYSTAL_SYSTEMS:
-                with open(f'data/landscapes/{system}.pkl', 'rb') as file:
-                    landscapes = pickle.load(file)
-                self.vector_dict = self.vector_dict | landscapes  # [mat_id][dim]
+            with open(os.path.join(self.root_dir, 'landscapes.pkl'), 'rb') as file:
+                self.vector_dict = pickle.load(file)
         elif vector == 'perslay':
             pass
         
@@ -390,7 +384,8 @@ class GraphData(Dataset):
         nbr_fea_idx, nbr_fea = np.array(nbr_fea_idx), np.array(nbr_fea)
         nbr_fea = self.gdf.expand(nbr_fea)
 
-        vectorizations = np.hstack((self.vector_dict[mp_id][dim] for dim in range(3)))
+        # vectorization
+        vectorizations = np.hstack([self.vector_dict[f'mp-{mp_id}'][dim] for dim in range(3)])
 
         atom_fea = torch.Tensor(atom_fea)
         nbr_fea = torch.Tensor(nbr_fea)
