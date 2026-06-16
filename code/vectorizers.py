@@ -309,9 +309,9 @@ if __name__ == "__main__":
     if args.landscape:
         persistence_landscape()
         if args.example:
-            plot_landscape_gtda('triclinic', 'mp-2981')
-            plot_landscape('triclinic', 'mp-2981', dim=0)
+            plot_landscape_gtda('cubic', 'mp-8635')
+            plot_landscape('cubic', 'mp-8635', dim=0)
     if args.image:
         persistence_image()
         if args.example:
-            plot_image('triclinic', 'mp-2981', dim=1)
+            plot_image('cubic', 'mp-8635', dim=1)
