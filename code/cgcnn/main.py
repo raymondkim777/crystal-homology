@@ -124,6 +124,8 @@ def main():
     # dataset = CIFData(*args.data_options)
     dataset = GraphData(*args.data_options, vector=args.vector)
     collate_fn = collate_pool
+
+    # ! attempt to parallelize (4 CPUs)
     train_loader, val_loader, test_loader = get_train_val_test_loader(
         dataset=dataset,
         collate_fn=collate_fn,
@@ -136,7 +138,10 @@ def main():
         train_size=args.train_size,
         val_size=args.val_size,
         test_size=args.test_size,
-        return_test=True)
+        return_test=True, 
+        
+        # ! added
+        persistent_workers=True)
 
     # obtain target value normalizer
     if args.task == 'classification':

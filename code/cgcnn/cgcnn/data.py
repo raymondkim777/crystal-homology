@@ -329,14 +329,15 @@ class GraphData(Dataset):
         self.gdf = GaussianDistance(dmin=dmin, dmax=dmax, step=step)
 
         assert vector in ['none', 'image', 'landscape', 'perslay'], 'incorrect vectorization input!'
+        self.vector = vector
         self.vector_dict = dict()
-        if vector == 'image':
+        if self.vector == 'image':
             with open(os.path.join(self.root_dir, 'images.pkl'), 'rb') as file:
                 self.vector_dict = pickle.load(file)
-        elif vector == 'landscape':
+        elif self.vector == 'landscape':
             with open(os.path.join(self.root_dir, 'landscapes.pkl'), 'rb') as file:
                 self.vector_dict = pickle.load(file)
-        elif vector == 'perslay':
+        elif self.vector == 'perslay':
             pass
         
 
@@ -344,11 +345,19 @@ class GraphData(Dataset):
         return len(self.id_prop_data)
     
 
-    @functools.lru_cache(maxsize=None)  # Cache loaded structures
+    @functools.lru_cache(maxsize=4096)
+    def _load_graph_dict(self, mp_id):
+        with open(os.path.join(self.root_dir, "graphs", f"mp-{mp_id}.pkl"), 'rb') as file:
+            return pickle.load(file)
+
+
+    # @functools.lru_cache(maxsize=None)  # Cache loaded structures
     def __getitem__(self, idx):
         mp_id, target = self.id_prop_data[idx]
-        with open(os.path.join(self.root_dir, 'graphs', f'mp-{mp_id}.pkl'), 'rb') as file:
-            graph_dict = pickle.load(file)
+        graph_dict = self._load_graph_dict(mp_id)
+        graph = graph_dict['graph']
+        # with open(os.path.join(self.root_dir, 'graphs', f'mp-{mp_id}.pkl'), 'rb') as file:
+        #     graph_dict = pickle.load(file)
 
         ########################
         # graph_dict format:
@@ -362,15 +371,15 @@ class GraphData(Dataset):
         # atom features (node features)
         atom_fea = np.vstack(
             [
-                self.ari.get_atom_fea(graph_dict['graph'].nodes[node]['specie'].number)
-                for node in graph_dict['graph'].nodes
+                self.ari.get_atom_fea(graph.nodes[node]['specie'].number)
+                for node in graph.nodes
             ]
         )
         atom_fea = torch.Tensor(atom_fea)
 
         # neighbor features (edge attributes)
         nbr_fea_idx, nbr_fea = [], []
-        adj_dict = nx.to_dict_of_dicts(graph_dict['graph'])
+        adj_dict = nx.to_dict_of_dicts(graph)
         for u in adj_dict.keys():
             nbr_list = []
             dist = []
@@ -385,7 +394,7 @@ class GraphData(Dataset):
         nbr_fea = self.gdf.expand(nbr_fea)
 
         # vectorization & normalization (optional)
-        vectorizations = np.hstack([self.vector_dict[f'mp-{mp_id}'][dim] for dim in range(3)])
+        vectorizations = np.array([]) if self.vector =='none' else np.hstack([self.vector_dict[f'mp-{mp_id}'][dim] for dim in range(3)])
         # if np.sum(vectorizations) != 0:
         #     vec_norm = np.linalg.norm(vectorizations)
         #     vectorizations = vectorizations / vec_norm
