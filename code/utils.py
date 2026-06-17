@@ -12,15 +12,7 @@ CRYSTAL_SYSTEMS = [
     'triclinic', 
     'trigonal'
 ]
-# CRYSTAL_SYSTEMS = [
-#     'triclinic', 
-#     'monoclinic', 
-#     'trigonal', 
-#     'hexagonal', 
-#     'orthorhombic', 
-#     'tetragonal', 
-#     'cubic'
-# ]
+DIMENSION_CNT = 3
 
 
 def open_write_file(dir_path, file_name):

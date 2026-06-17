@@ -90,7 +90,9 @@ class CrystalGraphConvNet(nn.Module):
             classification=False, 
             num_classes=2,
             vector="none",
-            ):
+            weight="none", 
+            phi="none"
+        ):
         """
         Initialize CrystalGraphConvNet.
 
@@ -112,14 +114,28 @@ class CrystalGraphConvNet(nn.Module):
         asdf
         """
         super(CrystalGraphConvNet, self).__init__()
+        
         assert vector in ['none', 'image', 'landscape', 'perslay'], 'incorrect vectorization input!'
+        assert weight in ['none', 'power', 'grid', 'gaussian']
+        assert phi in ['none', 'image', 'landscape', 'betti']
+        
         self.vector = vector
+        self.weight = weight
+        self.phi = phi
+
         if self.vector == 'none' or self.vector == 'perslay':
             self.vector_len = 0
         elif self.vector == 'image':
             self.vector_len = 400 * 3
         elif self.vector == 'landscape':
             self.vector_len = 500 * 3
+        elif self.vector == 'perslay':
+            if self.phi == 'image':
+                pass
+            elif self.phi == 'landcsape':
+                pass
+            elif self.phi == 'betti':
+                pass
         
         self.classification = classification
         self.embedding = nn.Linear(orig_atom_fea_len, atom_fea_len)
@@ -142,6 +158,10 @@ class CrystalGraphConvNet(nn.Module):
         if self.classification:
             self.logsoftmax = nn.LogSoftmax(dim=1)
             self.dropout = nn.Dropout()
+
+        # ! perslay
+        
+        
 
     def forward(self, atom_fea, nbr_fea, nbr_fea_idx, crystal_atom_idx, vectorizations):
         """

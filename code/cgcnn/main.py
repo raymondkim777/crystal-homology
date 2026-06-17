@@ -87,6 +87,10 @@ parser.add_argument('--delete', action='store_true',
                     help='deletes generated training files before training')
 parser.add_argument('--vector', default='none', type=str,
                     help='choose a vectorization: none, image, landscape, perslay')
+parser.add_argument('--weight', default='none', type=str,
+                    help='choose a weight function: none, power, grid, gaussian')
+parser.add_argument('--phi', default='none', type=str,
+                    help='choose a transformation function: none, image, landscape, betti')
 
 
 args = parser.parse_args(sys.argv[1:])
@@ -111,7 +115,6 @@ def main():
         check_path = "./checkpoint.pth.tar"
         model_path = "./model_best.pth.tar"
         result_path = "./test_results.csv"
-        out_path = "./output.log"
         
         if os.path.exists(check_path):
             os.remove(check_path)
@@ -119,9 +122,6 @@ def main():
             os.remove(model_path)
         if os.path.exists(result_path):
             os.remove(result_path)
-        if os.path.exists(out_path):
-            with open(out_path, "w") as f:
-                pass
 
 
     # load data
@@ -166,14 +166,19 @@ def main():
     structures, _, _, _ = dataset[0]
     orig_atom_fea_len = structures[0].shape[-1]
     nbr_fea_len = structures[1].shape[-1]
-    model = CrystalGraphConvNet(orig_atom_fea_len, nbr_fea_len,
-                                atom_fea_len=args.atom_fea_len,
-                                n_conv=args.n_conv,
-                                h_fea_len=args.h_fea_len,
-                                n_h=args.n_h,
-                                classification=True if args.task == 'classification' else False, 
-                                num_classes=args.num_classes,
-                                vector=args.vector)
+    model = CrystalGraphConvNet(
+        orig_atom_fea_len, nbr_fea_len,
+        atom_fea_len=args.atom_fea_len,
+        n_conv=args.n_conv,
+        h_fea_len=args.h_fea_len,
+        n_h=args.n_h,
+        classification=True if args.task == 'classification' else False, 
+        num_classes=args.num_classes,
+        # ! vectorization arguments to model
+        vector=args.vector, 
+        weight=args.weight,
+        phi=args.phi,
+    )
     if args.cuda:
         model.cuda()
 

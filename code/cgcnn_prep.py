@@ -5,7 +5,7 @@ import numpy as np
 import networkx as nx
 from tqdm import tqdm
 import pickle
-from utils import CRYSTAL_SYSTEMS, open_write_file, plot_nxgraph
+from utils import CRYSTAL_SYSTEMS, DIMENSION_CNT, open_write_file, plot_nxgraph
 
 
 CGCNN_DATAPATH = 'cgcnn/data/graph_data'
@@ -25,6 +25,75 @@ def unpack_all_graphs() -> dict:
         with open(f'data/graphs-multi/{system}.pkl', 'rb') as file:
             graph_dict[system] = pickle.load(file)
     return graph_dict
+
+
+def collect_all_diagrams():
+    '''Collects all persistence diagrams from .pkl files from all systems into one dict/list.'''
+    all_diagrams_dict = dict()
+    all_diagrams_list = []
+
+    for system in CRYSTAL_SYSTEMS:
+        with open(f'data/diagrams/{system}.pkl', 'rb') as file:
+            diagrams = pickle.load(file)
+        all_diagrams_dict = all_diagrams_dict | diagrams
+        all_diagrams_list += list(diagrams.values())
+
+    return all_diagrams_dict, all_diagrams_list,
+
+
+def remove_diagram_padding(diagram, eps=1e-12):
+    '''Removes all infinite values & (b, d) such that b == d'''
+    diagram = np.asarray(diagram, dtype=float)
+
+    finite_mask = np.isfinite(diagram).all(axis=1)
+    persistence_mask = (diagram[:, 1] - diagram[:, 0]) > eps
+    final_diagram = diagram[finite_mask & persistence_mask]
+    # NOTE: final diagram may be empty
+    return final_diagram
+
+
+def process_all_diagrams(diagram_dict: dict):
+    '''
+    Removes all diagram giotto-tda padding (b == d), organizes triplets into
+    separate dimensions, and removes dimension field. Applied to list of diagrams.
+    Input: {id1: diagram1, id2: diagram2, ...} where diagram = [[b, d, dim], ...]
+    Output: {id1: [h0_diagram1, h1_diagram1, h2_diagram1], ...}
+            where each Hn diagram is [[b, d], ...]
+    '''
+    dim_diagrams = dict()
+    for mp_id, diagram in diagram_dict:
+        dim_diagrams[mp_id] = []
+        for dim in range(DIMENSION_CNT):
+            triplets_in_dim = diagram[diagram[:, 2] == dim]
+            doubles_in_dim = triplets_in_dim[:, :2]
+            final_diagram = remove_diagram_padding(doubles_in_dim)
+            dim_diagrams[mp_id].append(final_diagram)
+    return dim_diagrams
+
+
+def homogenize_shape(diagrams: list):
+    '''Homogenizes np shape for given diagram array (one dimension)'''
+    num_diagrams = len(diagrams)
+    lengths = np.array([diag.shape[0] for diag in diagrams])
+    max_n = lengths.max()
+
+    padded = np.full(
+        shape=(num_diagrams, max_n, 2), 
+        fill_value = 0, 
+        dtype=np.float32
+    )
+
+    for i, diag in enumerate(diagrams):
+        n = diag.shape[0]
+        padded[i, : n, :] = diag
+    
+    return padded
+
+
+def retrieve_diagrams():
+    diagrams_dict, diagrams_list = collect_all_diagrams()
+    processed_diagrams_by_dim = process_all_diagrams(diagrams_list)     # [mp_id][dim] --> processed diagram
+    return processed_diagrams_by_dim
 
 
 def graph_process(save=False, vector=False) -> dict:
@@ -88,6 +157,7 @@ def graph_process(save=False, vector=False) -> dict:
                 f.write(f"{mp_id[3:]}, {system_to_int[value['system']]}\n")
 
         if vector:
+            diagram_dict = retrieve_diagrams()
             image_dict, landscape_dict = dict(), dict()
             for system in CRYSTAL_SYSTEMS:
                 with open(f'data/images/{system}.pkl', 'rb') as file:
@@ -98,6 +168,10 @@ def graph_process(save=False, vector=False) -> dict:
                     landscapes = pickle.load(file)
                 landscape_dict = landscape_dict | landscapes  # [mat_id][dim]
 
+            cgcnn_diagram_datapath = open_write_file(f"{CGCNN_DATAPATH}", f'diagrams.pkl')
+            with open(cgcnn_diagram_datapath, 'wb') as f:
+                pickle.dump(diagram_dict, f)
+
             cgcnn_image_datapath = open_write_file(f"{CGCNN_DATAPATH}", f'images.pkl')
             with open(cgcnn_image_datapath, 'wb') as f:
                 pickle.dump(image_dict, f)
@@ -105,6 +179,7 @@ def graph_process(save=False, vector=False) -> dict:
             cgcnn_landscape_datapath = open_write_file(f"{CGCNN_DATAPATH}", f'landscapes.pkl')
             with open(cgcnn_landscape_datapath, 'wb') as f:
                 pickle.dump(landscape_dict, f)
+            
             
 
 

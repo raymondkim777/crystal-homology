@@ -226,8 +226,8 @@ def plot_landscape(system: str, mat_id: str, dim: int=0):
     '''
     Plots persistence diagram and landscape of given material id in given system, for given dimension. 
     '''
-    diagram = collect_system_diagrams(system)[mat_id]
-    plot_persistence_diagram(diagram)
+    # diagram = collect_system_diagrams(system)[mat_id]
+    # plot_persistence_diagram(diagram)
 
     transformers = fit_landscape_transformers(num_landscapes=LA_LAYER, resolution=LA_RESOLUTION)
     with open(f'data/landscapes/{system}.pkl', 'rb') as file:
@@ -255,14 +255,15 @@ def plot_image(system: str, mat_id: str, dim: int=0):
     '''
     Plots persistence diagram and image of given material id in given system, for given dimension. 
     '''
-    diagram = collect_system_diagrams(system)[mat_id]
-    plot_persistence_diagram(diagram)
+    # diagram = collect_system_diagrams(system)[mat_id]
+    # plot_persistence_diagram(diagram)
 
     transformers = fit_image_transformers(bandwidth=IM_BANDWIDTH, resolution=IM_RESOLUTION)
     with open(f'data/images/{system}.pkl', 'rb') as file:
         images = pickle.load(file)
     image_to_plot = images[mat_id][dim]  # all three dimensions
     print(image_to_plot.shape)
+    print(transformers[dim].im_range_fixed_)
     
     img_matrix = image_to_plot.reshape(IM_RESOLUTION)
     plt.figure(figsize=(6, 6))
@@ -314,4 +315,4 @@ if __name__ == "__main__":
     if args.image:
         persistence_image()
         if args.example:
-            plot_image('cubic', 'mp-8635', dim=1)
+            plot_image('cubic', 'mp-8635', dim=0)

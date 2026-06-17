@@ -6,6 +6,7 @@ import torch.optim as optim
 import torchPersLay as tp
 import gudhi.representations as gdr
 from sklearn.preprocessing import MinMaxScaler
+from itertools import zip_longest
 
 
 CRYSTAL_SYSTEMS = [
@@ -61,8 +62,23 @@ def process_all_diagrams(diagrams: list):
     return dimension_array
 
 
-def homogenize_shape(diagrams: np.ndarray):
+def homogenize_shape(diagrams: list):
     '''Homogenizes np shape for given diagram array (one dimension)'''
+    num_diagrams = len(diagrams)
+    lengths = np.array([diag.shape[0] for diag in diagrams])
+    max_n = lengths.max()
+
+    padded = np.full(
+        shape=(num_diagrams, max_n, 2), 
+        fill_value = 0, 
+        dtype=np.float32
+    )
+
+    for i, diag in enumerate(diagrams):
+        n = diag.shape[0]
+        padded[i, : n, :] = diag
+    
+    return padded
     pass
 
 
@@ -73,7 +89,7 @@ def test():
 
     weight = tp.PowerPerslayWeight(constant=constant, power=power)
 
-    image_size = (5, 5)
+    image_size = (20, 20)
     image_bnds = ((-0.5, 1.5), (-0.5, 1.5))
     variance = 0.1
 
@@ -92,17 +108,28 @@ def test():
 
     all_diagrams = collect_all_diagrams()  # list
     processed_diagrams = process_all_diagrams(all_diagrams)
-    print(processed_diagrams[0][0])
+
+    print(processed_diagrams[0][0].shape)
+    print(processed_diagrams[0][1].shape)
+    print(type(processed_diagrams[0][1]))
+
+    # print(processed_diagrams[0][0])  # [dim][diag]
     # [[h0_diagram1, h0_diagram2, ...], [h1_diagram1, ...], ...] 
     #         where each Hn diagram is [[b, d], ...]
 
     # have to homogenize shape if feeding in multiple
+    pad_result = homogenize_shape(processed_diagrams[0])
+    print(pad_result.shape)
 
     scaler = gdr.DiagramScaler(use=True, scalers=[([0, 1], MinMaxScaler())])
-    diagrams = scaler.fit_transform([processed_diagrams[0][0]])
+    diagrams = scaler.fit_transform([pad_result[0], pad_result[1]])
     diagrams = torch.from_numpy(np.array(diagrams, dtype=np.float32))
 
-    print(perslay(diagrams))
+    result = perslay(diagrams)
+    print(result.shape)
+    result = result.squeeze(-1)
+    result = result.flatten(start_dim=1)
+    print(result.shape)
 
 
 if __name__ == "__main__":
