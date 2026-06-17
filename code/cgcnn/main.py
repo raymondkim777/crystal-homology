@@ -111,6 +111,7 @@ def main():
         check_path = "./checkpoint.pth.tar"
         model_path = "./model_best.pth.tar"
         result_path = "./test_results.csv"
+        out_path = "./output.log"
         
         if os.path.exists(check_path):
             os.remove(check_path)
@@ -118,6 +119,8 @@ def main():
             os.remove(model_path)
         if os.path.exists(result_path):
             os.remove(result_path)
+        if os.path.exists(out_path):
+            os.remove(out_path)
 
 
     # load data
