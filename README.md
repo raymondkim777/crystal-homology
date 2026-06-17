@@ -59,10 +59,11 @@ Generated persistence landscapes/images are stored in `code/data/landscapes` and
 Moves graph data over to `cgcnn/data/graph_data` folder as `.pkl` file and creates `id_prop.csv`. Also computes dataset bounds required as input for `GraphData` class.
 
 ```
-python cgcnn_prep.py --save
+python cgcnn_prep.py --save --vector
 
 ```
 If `--save` argument is not included, then `graph_data` and `id_prop.csv` are not created.
+If `--vector` argument is not included, then diagrams, images, and landscapes aren't saved to `graph_data`.
 
 ## CGCNN Training
 

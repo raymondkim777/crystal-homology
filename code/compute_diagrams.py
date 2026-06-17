@@ -9,7 +9,7 @@ from gtda.plotting import plot_diagram
 
 GRAPH_DIRECTORY = "data/graphs"
 DIAGRAM_DIRECTORY = "data/diagrams"
-MAX_DIST = 12.43843407284584  # computed from find_max_dist()
+MAX_DIST = 16.719527690689166  # computed from find_max_dist()
 DIMENSION_CNT = 3
 
 

@@ -93,11 +93,17 @@ def test():
     image_bnds = ((-0.5, 1.5), (-0.5, 1.5))
     variance = 0.1
 
-    phi = tp.GaussianPerslayPhi(
-        image_size=image_size,
-        image_bnds=image_bnds,
-        variance=variance,  # learnable
-    )
+    # phi = tp.GaussianPerslayPhi(
+    #     image_size=image_size,
+    #     image_bnds=image_bnds,
+    #     variance=variance,  # learnable
+    # )
+
+    LA_RESOLUTION = 100
+    MAX_DIST = 16.719527690689166
+
+    samples = np.linspace(0, MAX_DIST, num=LA_RESOLUTION)
+    phi = tp.TentPerslayPhi(samples=samples)
 
     perm_op = torch.sum
     rho = nn.Identity()
@@ -118,11 +124,11 @@ def test():
     #         where each Hn diagram is [[b, d], ...]
 
     # have to homogenize shape if feeding in multiple
-    pad_result = homogenize_shape(processed_diagrams[0])
+    pad_result = homogenize_shape(processed_diagrams[1])
     print(pad_result.shape)
 
     scaler = gdr.DiagramScaler(use=True, scalers=[([0, 1], MinMaxScaler())])
-    diagrams = scaler.fit_transform([pad_result[0], pad_result[1]])
+    diagrams = scaler.fit_transform([pad_result[0]])
     diagrams = torch.from_numpy(np.array(diagrams, dtype=np.float32))
 
     result = perslay(diagrams)

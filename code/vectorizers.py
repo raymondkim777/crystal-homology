@@ -15,7 +15,7 @@ from utils import CRYSTAL_SYSTEMS, open_write_file
 LANDSCAPE_DIRECTORY = "data/landscapes"
 IMAGE_DIRECTORY = "data/images"
 DIMENSION_CNT = 3
-MAX_DIST = 12.43843407284584  # computed from find_max_dist()
+MAX_DIST = 16.719527690689166  # computed from find_max_dist()
 
 # landscape
 LA_LAYER = 5
@@ -147,11 +147,9 @@ def fit_image_transformers(bandwidth, resolution):
     return transformers
 
 
-
 def persistence_landscape(
         num_landscapes=LA_LAYER, 
         resolution=LA_RESOLUTION,
-        flatten=False,
     ):
     '''
     Generates persistence landscapes for every system persistence diagram for each dimension. 
@@ -188,7 +186,6 @@ def persistence_landscape(
 def persistence_image(
         bandwidth=IM_BANDWIDTH, 
         resolution=IM_RESOLUTION, 
-        flatten=False,
     ):
     '''
     Generates persistence images for every system persistence diagram for each dimension. 
@@ -211,6 +208,10 @@ def persistence_image(
         system_images = dict()
         for i in range(len(keys_list)):
             key = keys_list[i]
+            system_images[key] = {
+                dim: images_by_dim[dim][i] 
+                for dim in range(DIMENSION_CNT)
+            }
             system_images[key] = {
                 dim: images_by_dim[dim][i] 
                 for dim in range(DIMENSION_CNT)

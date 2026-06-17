@@ -114,7 +114,7 @@ class CrystalGraphConvNet(nn.Module):
         asdf
         """
         super(CrystalGraphConvNet, self).__init__()
-        
+
         assert vector in ['none', 'image', 'landscape', 'perslay'], 'incorrect vectorization input!'
         assert weight in ['none', 'power', 'grid', 'gaussian']
         assert phi in ['none', 'image', 'landscape', 'betti']
@@ -131,7 +131,7 @@ class CrystalGraphConvNet(nn.Module):
             self.vector_len = 500 * 3
         elif self.vector == 'perslay':
             if self.phi == 'image':
-                pass
+                self.vector_len = 400 * 3
             elif self.phi == 'landcsape':
                 pass
             elif self.phi == 'betti':
@@ -163,7 +163,12 @@ class CrystalGraphConvNet(nn.Module):
         
         
 
-    def forward(self, atom_fea, nbr_fea, nbr_fea_idx, crystal_atom_idx, vectorizations):
+    def forward(
+            self, 
+            atom_fea, nbr_fea, nbr_fea_idx, 
+            crystal_atom_idx, 
+            vectorizations, 
+            diagram_0, diagram_1, diagram_2):
         """
         Forward pass
 

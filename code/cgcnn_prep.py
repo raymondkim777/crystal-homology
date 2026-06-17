@@ -52,29 +52,49 @@ def remove_diagram_padding(diagram, eps=1e-12):
     return final_diagram
 
 
-def process_all_diagrams(diagram_dict: dict):
+# def process_all_diagrams(diagram_dict: dict):
+#     '''
+#     Removes all diagram giotto-tda padding (b == d), organizes triplets into
+#     separate dimensions, and removes dimension field. Applied to list of diagrams.
+#     Input: {id1: diagram1, id2: diagram2, ...} where diagram = [[b, d, dim], ...]
+#     Output: {id1: [h0_diagram1, h1_diagram1, h2_diagram1], ...}
+#             where each Hn diagram is [[b, d], ...]
+#     '''
+#     dim_diagrams = dict()
+#     for mp_id, diagram in diagram_dict.items():
+#         dim_diagrams[mp_id] = []
+#         for dim in range(DIMENSION_CNT):
+#             triplets_in_dim = diagram[diagram[:, 2] == dim]
+#             doubles_in_dim = triplets_in_dim[:, :2]
+#             final_diagram = remove_diagram_padding(doubles_in_dim)
+#             dim_diagrams[mp_id].append(final_diagram)
+#     return dim_diagrams
+
+
+def process_all_diagrams(diagram_dict: dict) -> list:
     '''
     Removes all diagram giotto-tda padding (b == d), organizes triplets into
     separate dimensions, and removes dimension field. Applied to list of diagrams.
-    Input: {id1: diagram1, id2: diagram2, ...} where diagram = [[b, d, dim], ...]
-    Output: {id1: [h0_diagram1, h1_diagram1, h2_diagram1], ...}
+    Input: [diagram1, diagram2, ...] where diagram = [[b, d, dim], ...]
+    Output: [{id1: h0_diagram1, id2: h0_diagram2, ...}, {id1: h1_diagram1, ...}, ...] 
             where each Hn diagram is [[b, d], ...]
     '''
-    dim_diagrams = dict()
-    for mp_id, diagram in diagram_dict:
-        dim_diagrams[mp_id] = []
-        for dim in range(DIMENSION_CNT):
+    dimension_array = []
+    for dim in range(DIMENSION_CNT):
+        dim_diagrams = dict()
+        for mp_id, diagram in diagram_dict.items():
             triplets_in_dim = diagram[diagram[:, 2] == dim]
             doubles_in_dim = triplets_in_dim[:, :2]
             final_diagram = remove_diagram_padding(doubles_in_dim)
-            dim_diagrams[mp_id].append(final_diagram)
-    return dim_diagrams
+            dim_diagrams[mp_id] = final_diagram
+        dimension_array.append(dim_diagrams)
+    return dimension_array
 
 
-def homogenize_shape(diagrams: list):
-    '''Homogenizes np shape for given diagram array (one dimension)'''
-    num_diagrams = len(diagrams)
-    lengths = np.array([diag.shape[0] for diag in diagrams])
+def homogenize_diags_in_dict(diagram_dict: dict) -> dict:
+    '''Homogenizes np shape for given diagram dict (one dimension)'''
+    num_diagrams = len(diagram_dict.keys())
+    lengths = np.array([diag.shape[0] for diag in diagram_dict.values()])
     max_n = lengths.max()
 
     padded = np.full(
@@ -82,18 +102,35 @@ def homogenize_shape(diagrams: list):
         fill_value = 0, 
         dtype=np.float32
     )
-
-    for i, diag in enumerate(diagrams):
+    final_dict = dict()
+    for i, (id, diag) in enumerate(diagram_dict.items()):
         n = diag.shape[0]
         padded[i, : n, :] = diag
-    
-    return padded
+        final_dict[id] = padded[i]
+    return final_dict
+
+
+def reorganize_list_of_dicts(list_of_dicts: list) -> dict:
+    '''
+    Input: [{id1: h0_diagram1, id2: h0_diagram2, ...}, {id1: h1_diagram1, ...}, ...] 
+            where each Hn diagram is [[b, d], ...]
+    Output: {id1: [h0_diagram1, h1_diagram1, h2_diagram1], ...}
+#             where each Hn diagram is [[b, d], ...]
+    '''
+    diagram_dict = dict()
+    for dim in range(DIMENSION_CNT):
+        for mp_id, diagram in list_of_dicts[dim].items():
+            if mp_id not in diagram_dict.keys():
+                diagram_dict[mp_id] = []
+            diagram_dict[mp_id].append(diagram)
+    return diagram_dict
 
 
 def retrieve_diagrams():
-    diagrams_dict, diagrams_list = collect_all_diagrams()
-    processed_diagrams_by_dim = process_all_diagrams(diagrams_list)     # [mp_id][dim] --> processed diagram
-    return processed_diagrams_by_dim
+    diagrams_dict, _ = collect_all_diagrams()
+    processed_diagrams_by_dim = process_all_diagrams(diagrams_dict)     # [mp_id][dim] --> processed diagram
+    padded_diagram_dict_by_dim = [homogenize_diags_in_dict(processed_diagrams_by_dim[dim]) for dim in range(DIMENSION_CNT)]
+    return reorganize_list_of_dicts(padded_diagram_dict_by_dim)
 
 
 def graph_process(save=False, vector=False) -> dict:
@@ -106,6 +143,7 @@ def graph_process(save=False, vector=False) -> dict:
         system: <system>,
         ... (additional properties to be added)
     }
+    Optionally saves diagrams and vectorizations as pickle files in CGCNN data folder. 
     """
     graph_dict = unpack_all_graphs()
     new_graph_dict = dict()  # mp_id: {graph: <graph>, system: 'system'}
@@ -208,23 +246,7 @@ def bid_test():
     print(no_bidirectional)
 
 
-def test():
-    graph_dict = unpack_all_graphs()
-    new_graph_dict = dict()  # mp_id: {graph: <graph>, system: 'system'}
-    for system in CRYSTAL_SYSTEMS:
-        for key, value in graph_dict[system].items():
-            new_graph_dict[key] = {
-                'graph': value, 
-                'system': system
-            }
-    
-    random.seed(42)
-    sample = random.sample(list(new_graph_dict.keys()), 20)
-    print(sample)
-
-
 if __name__ == "__main__":
     args = _parse_args()
     graph_process(args.save, args.vector)
     # bid_test()
-    # test()

@@ -133,9 +133,15 @@ def collate_pool(dataset_list):
     batch_atom_fea, batch_nbr_fea, batch_nbr_fea_idx = [], [], []
     crystal_atom_idx, batch_target = [], []
     batch_vectorizations = []
+    batch_diagrams_0, batch_diagrams_1, batch_diagrams_2 = [], [], []
     batch_cif_ids = []
     base_idx = 0
-    for i, ((atom_fea, nbr_fea, nbr_fea_idx), vectorizations, target, cif_id)\
+    for i, (
+        (atom_fea, nbr_fea, nbr_fea_idx), 
+        vectorizations, 
+        [diagram_0, diagram_1, diagram_2], 
+        target, 
+        cif_id) \
             in enumerate(dataset_list):
         n_i = atom_fea.shape[0]  # number of atoms for this crystal
         batch_atom_fea.append(atom_fea)
@@ -145,13 +151,21 @@ def collate_pool(dataset_list):
         crystal_atom_idx.append(new_idx)
         batch_target.append(target)
         batch_vectorizations.append(vectorizations)
+        batch_diagrams_0.append(diagram_0)
+        batch_diagrams_1.append(diagram_1)
+        batch_diagrams_2.append(diagram_2)
         batch_cif_ids.append(cif_id)
         base_idx += n_i
     return (torch.cat(batch_atom_fea, dim=0),
             torch.cat(batch_nbr_fea, dim=0),
             torch.cat(batch_nbr_fea_idx, dim=0),
             crystal_atom_idx),\
-        torch.stack(batch_vectorizations, dim=0), \
+        torch.stack(batch_vectorizations, dim=0),\
+        [
+            torch.stack(batch_diagrams_0, dim=0),
+            torch.stack(batch_diagrams_1, dim=0),
+            torch.stack(batch_diagrams_2, dim=0)
+        ],\
         torch.stack(batch_target, dim=0),\
         batch_cif_ids
 
@@ -338,7 +352,8 @@ class GraphData(Dataset):
             with open(os.path.join(self.root_dir, 'landscapes.pkl'), 'rb') as file:
                 self.vector_dict = pickle.load(file)
         elif self.vector == 'perslay':
-            pass
+            with open(os.path.join(self.root_dir, 'diagrams.pkl'), 'rb') as file:
+                self.vector_dict = pickle.load(file)
         
 
     def __len__(self):
@@ -394,17 +409,26 @@ class GraphData(Dataset):
         nbr_fea = self.gdf.expand(nbr_fea)
 
         # vectorization & normalization (optional)
-        vectorizations = np.array([]) if self.vector =='none' else np.hstack([self.vector_dict[f'mp-{mp_id}'][dim] for dim in range(3)])
-        # if np.sum(vectorizations) != 0:
-        #     vec_norm = np.linalg.norm(vectorizations)
-        #     vectorizations = vectorizations / vec_norm
+        if self.vector == 'none':
+            vectorizations = np.array([])
+            diagrams = [[], [], []]
+        elif self.vector in ['image', 'landscape']:
+            vectorizations = np.hstack([self.vector_dict[f'mp-{mp_id}'][dim] for dim in range(3)])
+            # if np.sum(vectorizations) != 0:
+            #     vec_norm = np.linalg.norm(vectorizations)
+            #     vectorizations = vectorizations / vec_norm
+            diagrams = [[], [], []]
+        elif self.vector == 'perslay':
+            # ! if perslay, then we pass in diagrams (each should be tensor)
+            vectorizations = np.array([])
+            diagrams = [torch.Tensor(self.vector_dict[f'mp-{mp_id}'][dim]) for dim in range(3)]  # list of np.ndarrays
 
         atom_fea = torch.Tensor(atom_fea)
         nbr_fea = torch.Tensor(nbr_fea)
         nbr_fea_idx = torch.LongTensor(nbr_fea_idx)
         vectorizations = torch.Tensor(vectorizations)
         target = torch.Tensor([float(target)])
-        return (atom_fea, nbr_fea, nbr_fea_idx), vectorizations, target, mp_id
+        return (atom_fea, nbr_fea, nbr_fea_idx), vectorizations, diagrams, target, mp_id
 
 
 class CIFData(Dataset):
