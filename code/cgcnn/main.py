@@ -466,6 +466,8 @@ def validate(val_loader, model, criterion, normalizer, test=False):
         i, len(val_loader), batch_time=batch_time, loss=losses,
         accu=accuracies, prec=precisions, recall=recalls,
         f1=fscores, auc=auc_scores))
+    
+    print(f"{losses.avg:.4f}\t{accuracies.avg:.3f}\t{precisions.avg:.3f}\t{recalls.avg:.3f}\t{fscores.avg:.3f}\t{auc_scores.avg:.3f}")
 
     if test:
         star_label = '**'
