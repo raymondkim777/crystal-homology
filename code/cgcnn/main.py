@@ -120,7 +120,8 @@ def main():
         if os.path.exists(result_path):
             os.remove(result_path)
         if os.path.exists(out_path):
-            os.remove(out_path)
+            with open(out_path, "w") as f:
+                pass
 
 
     # load data
