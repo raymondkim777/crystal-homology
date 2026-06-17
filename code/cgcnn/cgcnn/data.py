@@ -384,11 +384,11 @@ class GraphData(Dataset):
         nbr_fea_idx, nbr_fea = np.array(nbr_fea_idx), np.array(nbr_fea)
         nbr_fea = self.gdf.expand(nbr_fea)
 
-        # vectorization & normalization
+        # vectorization & normalization (optional)
         vectorizations = np.hstack([self.vector_dict[f'mp-{mp_id}'][dim] for dim in range(3)])
-        if np.sum(vectorizations) != 0:
-            vec_norm = np.linalg.norm(vectorizations)
-            vectorizations = vectorizations / vec_norm
+        # if np.sum(vectorizations) != 0:
+        #     vec_norm = np.linalg.norm(vectorizations)
+        #     vectorizations = vectorizations / vec_norm
 
         atom_fea = torch.Tensor(atom_fea)
         nbr_fea = torch.Tensor(nbr_fea)
