@@ -23,8 +23,8 @@ FIELDS = [
     'dos', 
     'bandstructure', 
     'band_gap', 
-    'cbm', 
-    'vbm', 
+    # 'cbm', 
+    # 'vbm', 
     'efermi', 
     'is_gap_direct'
 ]
