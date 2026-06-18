@@ -2,6 +2,7 @@ from __future__ import print_function, division
 
 import torch
 import torch.nn as nn
+import torchPersLay as tp
 
 
 class ConvLayer(nn.Module):
@@ -91,7 +92,7 @@ class CrystalGraphConvNet(nn.Module):
             num_classes=2,
             vector="none",
             weight="none", 
-            phi="none"
+            phi="none",
         ):
         """
         Initialize CrystalGraphConvNet.
@@ -123,7 +124,7 @@ class CrystalGraphConvNet(nn.Module):
         self.weight = weight
         self.phi = phi
 
-        if self.vector == 'none' or self.vector == 'perslay':
+        if self.vector == 'none':
             self.vector_len = 0
         elif self.vector == 'image':
             self.vector_len = 400 * 3
@@ -132,10 +133,16 @@ class CrystalGraphConvNet(nn.Module):
         elif self.vector == 'perslay':
             if self.phi == 'image':
                 self.vector_len = 400 * 3
-            elif self.phi == 'landcsape':
-                pass
-            elif self.phi == 'betti':
-                pass
+
+            # ! Don't use landscape/betti for now
+            # TentPerslayPhi/FlatPerslayPhi function doesn't compute k-th highest tent,
+            # it concatenates tent/betti functions (len: sample) for each point --> sample * point
+            # so vectorization is absurdly long
+
+            # elif self.phi == 'landscape':
+            #     pass
+            # elif self.phi == 'betti':
+            #     pass
         
         self.classification = classification
         self.embedding = nn.Linear(orig_atom_fea_len, atom_fea_len)
@@ -159,9 +166,36 @@ class CrystalGraphConvNet(nn.Module):
             self.logsoftmax = nn.LogSoftmax(dim=1)
             self.dropout = nn.Dropout()
 
-        # ! perslay
-        
-        
+        if self.vector == 'perslay':
+            # ! perslay --> experiment with parameters
+            self.weights = nn.ModuleList([
+                tp.PowerPerslayWeight(
+                    constant=1.0,   # learnable
+                    power=1.0
+                )
+                for _ in range(3)
+            ])
+            self.image_bnds = [
+                ((-1.0e-03, 1.0e-03), (0.54836184, 16.7195282)), 
+                ((1.22288406e+00, 1.44270658e+01), (2.38418579e-07, 1.54966436e+01)), 
+                ((1.71408939e+00, 1.52640104e+01), (2.38418579e-07, 1.49896426e+01))
+            ]
+            self.phis = nn.ModuleList([
+                tp.GaussianPerslayPhi(
+                    image_size=(20, 20),
+                    image_bnds=self.image_bnds[i],
+                    variance=0.1,   # learnable
+                )
+                for i in range(3)
+            ])
+            self.perm_op = torch.sum
+            self.rho = nn.Identity()
+
+            self.perslays = nn.ModuleList([
+                tp.Perslay(weight=self.weights[i], phi=self.phis[i], perm_op=self.perm_op, rho=self.rho)
+                for i in range(3)
+            ])
+
 
     def forward(
             self, 
@@ -203,6 +237,17 @@ class CrystalGraphConvNet(nn.Module):
         # ! concatenating vectorization
         if self.vector in ['image', 'landscape']:
             crys_fea = torch.cat([crys_fea, vectorizations], dim=1)
+        elif self.vector == 'perslay':
+            vec0 = self.perslays[0](diagram_0).squeeze(-1).flatten(start_dim=1)
+            vec1 = self.perslays[1](diagram_1).squeeze(-1).flatten(start_dim=1)
+            vec2 = self.perslays[2](diagram_2).squeeze(-1).flatten(start_dim=1)
+            
+            # print(crys_fea.shape)
+            # print(vec0.shape)
+            # print(vec1.shape)
+            # print(vec2.shape)
+            
+            crys_fea = torch.cat([crys_fea, vec0, vec1, vec2], dim=1)
 
         crys_fea = self.conv_to_fc(self.conv_to_fc_softplus(crys_fea))
         crys_fea = self.conv_to_fc_softplus(crys_fea)

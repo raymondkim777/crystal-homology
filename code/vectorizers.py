@@ -28,6 +28,7 @@ IM_RESOLUTION = [20, 20]
 
 def _parse_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--save', action='store_true', help='saves generated vectorizations')
     parser.add_argument('--landscape', action='store_true', help='generates persistence landscapes')
     parser.add_argument('--image', action='store_true', help='generates persistence images')
     parser.add_argument('--example', action='store_true', help='display some examples')
@@ -148,6 +149,7 @@ def fit_image_transformers(bandwidth, resolution):
 
 
 def persistence_landscape(
+        save, 
         num_landscapes=LA_LAYER, 
         resolution=LA_RESOLUTION,
     ):
@@ -177,13 +179,16 @@ def persistence_landscape(
                 for dim in range(DIMENSION_CNT)
             }
         
-        # save system images
-        landscape_path = open_write_file(LANDSCAPE_DIRECTORY, f"{system}.pkl")
-        with open(landscape_path, 'wb') as f:
-            pickle.dump(system_landscapes, f)
+        if save:
+            # save system images
+            print("Saving landscapes...")
+            landscape_path = open_write_file(LANDSCAPE_DIRECTORY, f"{system}.pkl")
+            with open(landscape_path, 'wb') as f:
+                pickle.dump(system_landscapes, f)
 
 
 def persistence_image(
+        save, 
         bandwidth=IM_BANDWIDTH, 
         resolution=IM_RESOLUTION, 
     ):
@@ -217,10 +222,12 @@ def persistence_image(
                 for dim in range(DIMENSION_CNT)
             }
         
-        # save system images
-        image_path = open_write_file(IMAGE_DIRECTORY, f"{system}.pkl")
-        with open(image_path, 'wb') as f:
-            pickle.dump(system_images, f)
+        if save:
+            # save system images
+            print("Saving images...")
+            image_path = open_write_file(IMAGE_DIRECTORY, f"{system}.pkl")
+            with open(image_path, 'wb') as f:
+                pickle.dump(system_images, f)
 
 
 def plot_landscape(system: str, mat_id: str, dim: int=0):
@@ -309,11 +316,11 @@ if __name__ == "__main__":
     args = _parse_args()
 
     if args.landscape:
-        persistence_landscape()
+        persistence_landscape(args.save)
         if args.example:
-            plot_landscape_gtda('cubic', 'mp-8635')
+            # plot_landscape_gtda('cubic', 'mp-8635')
             plot_landscape('cubic', 'mp-8635', dim=0)
     if args.image:
-        persistence_image()
+        persistence_image(args.save)
         if args.example:
-            plot_image('cubic', 'mp-8635', dim=0)
+            plot_image('cubic', 'mp-8635', dim=2)

@@ -6,7 +6,6 @@ import torch.optim as optim
 import torchPersLay as tp
 import gudhi.representations as gdr
 from sklearn.preprocessing import MinMaxScaler
-from itertools import zip_longest
 
 
 CRYSTAL_SYSTEMS = [
@@ -93,17 +92,22 @@ def test():
     image_bnds = ((-0.5, 1.5), (-0.5, 1.5))
     variance = 0.1
 
-    # phi = tp.GaussianPerslayPhi(
-    #     image_size=image_size,
-    #     image_bnds=image_bnds,
-    #     variance=variance,  # learnable
-    # )
+    phi = tp.GaussianPerslayPhi(
+        image_size=image_size,
+        image_bnds=image_bnds,
+        variance=variance,  # learnable
+    )
 
     LA_RESOLUTION = 100
     MAX_DIST = 16.719527690689166
 
-    samples = np.linspace(0, MAX_DIST, num=LA_RESOLUTION)
-    phi = tp.TentPerslayPhi(samples=samples)
+    # samples = np.linspace(0, MAX_DIST, num=LA_RESOLUTION)
+    # phi = tp.TentPerslayPhi(samples=samples)
+
+    # samples = np.linspace(0, MAX_DIST, num=LA_RESOLUTION)
+    # theta = 10.0
+
+    # phi = tp.FlatPerslayPhi(samples=samples, theta=theta)
 
     perm_op = torch.sum
     rho = nn.Identity()

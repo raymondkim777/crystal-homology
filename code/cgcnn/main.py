@@ -91,6 +91,8 @@ parser.add_argument('--weight', default='none', type=str,
                     help='choose a weight function: none, power, grid, gaussian')
 parser.add_argument('--phi', default='none', type=str,
                     help='choose a transformation function: none, image, landscape, betti')
+parser.add_argument('--id', default=0, type=int, metavar='N',
+                    help='identifier for multiple checkpoint/models')
 
 
 args = parser.parse_args(sys.argv[1:])
@@ -112,9 +114,9 @@ def main():
     print("GPU Available", args.cuda)
 
     if args.delete:
-        check_path = "./checkpoint.pth.tar"
-        model_path = "./model_best.pth.tar"
-        result_path = "./test_results.csv"
+        check_path = f"./checkpoint_{args.id}.pth.tar"
+        model_path = f"./model_best_{args.id}.pth.tar"
+        result_path = f"./test_results_{args.id}.csv"
         
         if os.path.exists(check_path):
             os.remove(check_path)
@@ -163,7 +165,7 @@ def main():
         normalizer = Normalizer(sample_target)
 
     # build model
-    structures, _, _, _ = dataset[0]
+    structures, _, _, _, _ = dataset[0]
     orig_atom_fea_len = structures[0].shape[-1]
     nbr_fea_len = structures[1].shape[-1]
     model = CrystalGraphConvNet(
@@ -179,8 +181,21 @@ def main():
         weight=args.weight,
         phi=args.phi,
     )
-    if args.cuda:
-        model.cuda()
+
+    # ! updated tensor cuda code
+    # if args.cuda:
+    #     model.cuda()
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if args.disable_cuda:
+        device = torch.device("cpu")
+    model = model.to(device)
+
+    # ! moving torchPerslay inner params to cuda
+    for perslay in model.perslays:
+        perslay.phi.mu = perslay.phi.mu.to(device)
+        perslay.phi.M = tuple(m.to(device) for m in perslay.phi.M)
+
 
     # define loss func and optimizer
     if args.task == 'classification':
@@ -215,7 +230,7 @@ def main():
 
     scheduler = MultiStepLR(optimizer, milestones=args.lr_milestones,
                             gamma=0.1)
-
+    
     for epoch in range(args.start_epoch, args.epochs):
         # train for one epoch
         train(train_loader, model, criterion, optimizer, epoch, normalizer)
@@ -248,7 +263,7 @@ def main():
     # test best model
     print('---------Evaluate Model on Test Set---------------')
     # ! PyTorch 2.6 safety measure: only load model weights -> extra argument
-    best_checkpoint = torch.load('model_best.pth.tar', weights_only=False)
+    best_checkpoint = torch.load(f'model_best_{args.id}.pth.tar', weights_only=False)
     model.load_state_dict(best_checkpoint['state_dict'])
     validate(test_loader, model, criterion, normalizer, test=True)
 
@@ -268,25 +283,58 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizer):
 
     # switch to train mode
     model.train()
-
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     end = time.time()
-    for i, (input, vectorizations, target, _) in enumerate(train_loader):
+    # for i, (input, vectorizations, diagrams, target, _) in enumerate(train_loader):
+    for i, ((atom_fea, nbr_fea, nbr_fea_idx, crys_idx), vectorizations, diagrams, target, _) in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
 
-        if args.cuda:
-            input_var = (Variable(input[0].cuda(non_blocking=True)),
-                         Variable(input[1].cuda(non_blocking=True)),
-                         input[2].cuda(non_blocking=True),
-                         [crys_idx.cuda(non_blocking=True) for crys_idx in input[3]], 
-                         # ! edited to add vectorization
-                         Variable(vectorizations.cuda(non_blocking=True)))
-        else:
-            input_var = (Variable(input[0]),
-                         Variable(input[1]),
-                         input[2],
-                         input[3],
-                         Variable(vectorizations))
+        # ! EDTIED to use torch tensors
+        atom_fea = atom_fea.to(device, non_blocking=True)
+        nbr_fea = nbr_fea.to(device, non_blocking=True)
+        nbr_fea_idx = nbr_fea_idx.to(device, non_blocking=True)
+
+        crys_idx = [idx.to(device, non_blocking=True) for idx in crys_idx]
+
+        vectorizations = vectorizations.to(device, non_blocking=True)
+        diagrams = [
+            diagram.to(device, non_blocking=True)
+            for diagram in diagrams
+        ]
+        # target = target.to(device, non_blocking=True)
+
+        input_var = (
+            atom_fea, 
+            nbr_fea, 
+            nbr_fea_idx, 
+            crys_idx,
+            vectorizations, 
+            diagrams[0], 
+            diagrams[1], 
+            diagrams[2]
+        )
+
+        # if args.cuda:
+        #     input_var = (Variable(input[0].cuda(non_blocking=True)),
+        #                  Variable(input[1].cuda(non_blocking=True)),
+        #                  input[2].cuda(non_blocking=True),
+        #                  [crys_idx.cuda(non_blocking=True) for crys_idx in input[3]], 
+        #                  # ! edited to add vectorization
+        #                  Variable(vectorizations.cuda(non_blocking=True)),
+        #                  # perslay diagrams
+        #                  Variable(diagrams[0].cuda(non_blocking=True)), 
+        #                  Variable(diagrams[1].cuda(non_blocking=True)),
+        #                  Variable(diagrams[2].cuda(non_blocking=True)))
+        # else:
+        #     input_var = (Variable(input[0]),
+        #                  Variable(input[1]),
+        #                  input[2],
+        #                  input[3],
+        #                  Variable(vectorizations), 
+        #                  Variable(diagrams[0]), 
+        #                  Variable(diagrams[1]), 
+        #                  Variable(diagrams[2]))
         # normalize target
         if args.task == 'regression':
             target_normed = normalizer.norm(target)
@@ -296,6 +344,17 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizer):
             target_var = Variable(target_normed.cuda(non_blocking=True))
         else:
             target_var = Variable(target_normed)
+
+
+        # print("model:", next(model.parameters()).device)
+
+        # print("diagram_0:", diagrams[0].device)
+        # print("diagram_1:", diagrams[1].device)
+        # print("diagram_2:", diagrams[2].device)
+
+        # print("perslay0 param:", next(model.perslays[0].parameters()).device)
+        # print("perslay0 phi.mu:", model.perslays[0].phi.mu.device)
+
 
         # compute output
         output = model(*input_var)
@@ -373,22 +432,56 @@ def validate(val_loader, model, criterion, normalizer, test=False):
     model.eval()
 
     end = time.time()
-    for i, (input, vectorizations, target, batch_cif_ids) in enumerate(val_loader):
-        if args.cuda:
-            with torch.no_grad():
-                input_var = (Variable(input[0].cuda(non_blocking=True)),
-                             Variable(input[1].cuda(non_blocking=True)),
-                             input[2].cuda(non_blocking=True),
-                             [crys_idx.cuda(non_blocking=True) for crys_idx in input[3]],
-                             # ! edited to add vectorization
-                             Variable(vectorizations.cuda(non_blocking=True)))
-        else:
-            with torch.no_grad():
-                input_var = (Variable(input[0]),
-                             Variable(input[1]),
-                             input[2],
-                             input[3],
-                             Variable(vectorizations))
+    # for i, (input, vectorizations, diagrams, target, batch_cif_ids) in enumerate(val_loader):
+    for i, ((atom_fea, nbr_fea, nbr_fea_idx, crys_idx), vectorizations, diagrams, target, batch_cif_ids) in enumerate(val_loader):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        # ! EDTIED to use torch tensors
+        atom_fea = atom_fea.to(device, non_blocking=True)
+        nbr_fea = nbr_fea.to(device, non_blocking=True)
+        nbr_fea_idx = nbr_fea_idx.to(device, non_blocking=True)
+
+        crys_idx = [idx.to(device, non_blocking=True) for idx in crys_idx]
+
+        vectorizations = vectorizations.to(device, non_blocking=True)
+        diagrams = [
+            diagram.to(device, non_blocking=True)
+            for diagram in diagrams
+        ]
+
+        input_var = (
+            atom_fea, 
+            nbr_fea, 
+            nbr_fea_idx, 
+            crys_idx,
+            vectorizations, 
+            diagrams[0], 
+            diagrams[1], 
+            diagrams[2]
+        )
+        
+        # if args.cuda:
+        #     with torch.no_grad():
+        #         input_var = (Variable(input[0].cuda(non_blocking=True)),
+        #                      Variable(input[1].cuda(non_blocking=True)),
+        #                      input[2].cuda(non_blocking=True),
+        #                      [crys_idx.cuda(non_blocking=True) for crys_idx in input[3]],
+        #                      # ! edited to add vectorization
+        #                      Variable(vectorizations.cuda(non_blocking=True)), 
+        #                      # perslay diagrams
+        #                      Variable(diagrams[0].cuda(non_blocking=True)), 
+        #                      Variable(diagrams[1].cuda(non_blocking=True)),
+        #                      Variable(diagrams[2].cuda(non_blocking=True)))
+        # else:
+        #     with torch.no_grad():
+        #         input_var = (Variable(input[0]),
+        #                      Variable(input[1]),
+        #                      input[2],
+        #                      input[3],
+        #                      Variable(vectorizations), 
+        #                      Variable(diagrams[0]), 
+        #                      Variable(diagrams[1]), 
+        #                      Variable(diagrams[2]))
         if args.task == 'regression':
             target_normed = normalizer.norm(target)
         else:
@@ -476,7 +569,7 @@ def validate(val_loader, model, criterion, normalizer, test=False):
         accu=accuracies, prec=precisions, recall=recalls,
         f1=fscores, auc=auc_scores))
     
-    print(f"{losses.avg:.4f}\t{accuracies.avg:.3f}\t{precisions.avg:.3f}\t{recalls.avg:.3f}\t{fscores.avg:.3f}\t{auc_scores.avg:.3f}")
+    print(f"{losses.avg:.4f}	{accuracies.avg:.3f}	{precisions.avg:.3f}	{recalls.avg:.3f}	{fscores.avg:.3f}	{auc_scores.avg:.3f}")
 
     if test:
         star_label = '**'
@@ -609,10 +702,10 @@ class AverageMeter(object):
         self.avg = self.sum / self.count
 
 
-def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
+def save_checkpoint(state, is_best, filename=f'checkpoint_{args.id}.pth.tar'):
     torch.save(state, filename)
     if is_best:
-        shutil.copyfile(filename, 'model_best.pth.tar')
+        shutil.copyfile(filename, f'model_best_{args.id}.pth.tar')
 
 
 def adjust_learning_rate(optimizer, epoch, k):
