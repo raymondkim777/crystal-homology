@@ -575,7 +575,7 @@ def validate(val_loader, model, criterion, normalizer, test=False):
         star_label = '**'
         import csv
         # ! MODIFIED to write full multiclass predicted probabilities
-        with open('test_results.csv', 'w') as f:
+        with open(f'test_results_{args.id}.csv', 'w') as f:
             writer = csv.writer(f)
 
             header = ['mp-id', 'target', 'predicted_class']
