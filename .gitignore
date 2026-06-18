@@ -15,6 +15,7 @@ logs
 code/ignore*
 
 code/cgcnn/data/graph_data/graphs
+code/cgcnn/data/graph_data/diagrams.pkl
 code/cgcnn/data/graph_data/images.pkl
 code/cgcnn/data/graph_data/landscapes.pkl
 code/cgcnn/data/graph_data/id_prop.csv

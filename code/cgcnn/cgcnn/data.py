@@ -420,8 +420,6 @@ class GraphData(Dataset):
         # nbr_fea_idx, nbr_fea = np.array(nbr_fea_idx), np.array(nbr_fea)
         # nbr_fea = self.gdf.expand(nbr_fea)
 
-        # TODO: fractional coordinates, crystal systems, (and other properties)
-
         atom_fea = torch.Tensor(atom_fea)
         nbr_fea = torch.Tensor(nbr_fea)
         nbr_fea_idx = torch.LongTensor(nbr_fea_idx)
