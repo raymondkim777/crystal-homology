@@ -22,15 +22,11 @@ CIF_DATA_PATH = 'data/cif'
 
 def _parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--subset-size', default=1000, type=int, help='size for each class')
+    parser.add_argument('--subset', action='store_true', help='compute subset')
+    parser.add_argument('--size', default=1000, type=int, help='subset size for each class')
+    parser.add_argument('--cif', action='store_true', help='convert subset to CIF files')
+    parser.add_argument('--absorb', action='store_true', help='append absorption data to subsets')
     return parser.parse_args()
-
-
-# not needed
-def clone_mp_raw():
-    open_write_file('data/mp-base', '')
-    for system in CRYSTAL_SYSTEMS:
-        shutil.copyfile(f'data/mp-raw/{system}.json', f'data/mp-base/{system}.json')
 
 
 class CrystalSubset:
@@ -161,6 +157,10 @@ class CrystalSubset:
         return {mp_id: self.crystals[mp_id] for mp_id in id_list}
     
 
+    def compute_absorption_features(self, abs_coeff_list, e_list):
+        pass
+
+
     def merge_abs_mp_data():
         with MPRester() as mpr:
 
@@ -183,12 +183,18 @@ class CrystalSubset:
             for system in CRYSTAL_SYSTEMS:
                 print(f"Merging absorption data for {system} system with mp-subset...")
                 mp_id_list = mp_id_list_by_system[system]
+
                 abs_docs = mpr.materials.absorption.search(
                     material_ids=mp_id_list
                 )
                 with open(f"{SUBSET_DATA_PATH}/{system}.pkl", 'rb') as file:
                     subset_json_dict = pickle.load(file)
                 
+                # maximum absorption
+                # energy of maximum absorption
+                # integrated absorption
+                # absorption onset energy
+                    
                 base_id_set = set(subset_json_dict.keys())
                 for i in tqdm(range(len(mp_id_list))):
                     mp_id = mp_id_list[i]
@@ -200,22 +206,6 @@ class CrystalSubset:
                 subset_path = open_write_file(SUBSET_DATA_PATH, f"{system}.pkl")
                 with open(subset_path, "wb") as f:
                     pickle.dump(subset_json_dict, f)
-
-
-def choose_random_subset_of_mp_data(subset_size=1000) -> None:
-    print(f"Subset Size: {subset_size}")
-    for system in CRYSTAL_SYSTEMS:
-        print(f"Choosing subset of {system} system...")
-        mp_raw_json_list = loadfn(f"data/mp-raw/{system}.json")
-        mp_subset = random.sample(mp_raw_json_list, k=subset_size)
-
-        # save subset JSON files
-        data_raw_dir = f'data/mp-subset'
-        file_raw_name = f'{system}.json'
-        data_raw_path = open_write_file(data_raw_dir, file_raw_name)
-
-        with open(data_raw_path, 'w') as f:
-            json.dump(mp_subset, f, cls=MontyEncoder, indent=4)
 
 
 def convert_subsets_to_cif() -> None:
@@ -239,5 +229,10 @@ if __name__ == "__main__":
 
     args = _parse_args()
     crystal_subset = CrystalSubset()
-    crystal_subset.select_and_save_subset_ids(subset_size=args.subset_size)
-    convert_subsets_to_cif()
+
+    if args.subset:
+        crystal_subset.select_and_save_subset_ids(subset_size=args.size)
+    if args.absorb:
+        crystal_subset.merge_abs_mp_data()
+    if args.cif:
+        convert_subsets_to_cif()
