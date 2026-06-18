@@ -84,9 +84,8 @@ class CrystalSubset():
             prop_rare_w = self.crystal_avail[mp_id][prop_idx]
             prop_rare_w *=  self.property_rarity[prop_idx]
             prop_rare_w *= 1 / np.sqrt(prop_cnts[prop_idx] + 1)
-
-            prop_cnt_w = 0.2 * np.sum(self.crystal_avail[mp_id])
-            score += prop_rare_w + prop_cnt_w
+            score += prop_rare_w
+        score += 1 * np.sum(self.crystal_avail[mp_id])
         return score
 
 
