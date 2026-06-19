@@ -20,4 +20,4 @@ code/cgcnn/data/graph_data/images.pkl
 code/cgcnn/data/graph_data/landscapes.pkl
 code/cgcnn/data/graph_data/id_prop.csv
 code/cgcnn/*.pth.tar
-code/cgcnn/test_results.csv
+code/cgcnn/test_results*.csv
