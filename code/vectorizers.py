@@ -11,12 +11,11 @@ from gudhi.representations import Landscape, PersistenceImage
 
 from concurrent.futures import ProcessPoolExecutor
 from compute_diagrams import plot_persistence_diagram
-from utils import CRYSTAL_SYSTEMS, get_num_cpus, open_write_file
+from utils import CRYSTAL_SYSTEMS, DIMENSION_CNT, get_num_cpus, open_write_file
 
 
 LANDSCAPE_DIRECTORY = "data/landscapes"
 IMAGE_DIRECTORY = "data/images"
-DIMENSION_CNT = 3
 MAX_DIST = 12.43843407284584  # computed from find_max_dist()
 
 LANDSCAPE_TRANSFORMERS = None

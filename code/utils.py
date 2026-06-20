@@ -29,6 +29,7 @@ FIELDS = [
     'efermi', 
     'is_gap_direct'
 ]
+DIMENSION_CNT = 3
 MAX_DIST = 12.43843407284584  # computed from find_max_dist()
 MAX_NBR = 38
 

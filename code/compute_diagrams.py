@@ -4,7 +4,7 @@ import numpy as np
 import networkx as nx
 from tqdm import tqdm
 import pickle
-from utils import CRYSTAL_SYSTEMS, get_num_cpus, open_write_file, get_max_dist
+from utils import CRYSTAL_SYSTEMS, DIMENSION_CNT, get_num_cpus, open_write_file, get_max_dist
 from gtda.homology import FlagserPersistence
 from gtda.plotting import plot_diagram
     
@@ -12,7 +12,6 @@ from gtda.plotting import plot_diagram
 GRAPH_DIRECTORY = "data/graphs"
 DIAGRAM_DIRECTORY = "data/diagrams"
 MAX_DIST = get_max_dist()
-DIMENSION_CNT = 3
 
 
 def unpack_all_graphs() -> dict:
