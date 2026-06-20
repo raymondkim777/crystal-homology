@@ -168,27 +168,34 @@ def main():
         normalizer = Normalizer(sample_target)
 
     # build model
-    structures, _, _ = dataset[0]
+    structures, _, _, _, _ = dataset[0]
     orig_atom_fea_len = structures[0].shape[-1]
     nbr_fea_len = structures[1].shape[-1]
-    model = CrystalGraphConvNet(orig_atom_fea_len, nbr_fea_len,
-                                atom_fea_len=args.atom_fea_len,
-                                n_conv=args.n_conv,
-                                h_fea_len=args.h_fea_len,
-                                n_h=args.n_h,
-                                classification=True if args.task == 'classification' else False, 
-                                num_classes=args.num_classes, 
-                                root_dir=args.data_options,
-                                )
+    model = CrystalGraphConvNet(
+        orig_atom_fea_len, nbr_fea_len,
+        atom_fea_len=args.atom_fea_len,
+        n_conv=args.n_conv,
+        h_fea_len=args.h_fea_len,
+        n_h=args.n_h,
+        classification=True if args.task == 'classification' else False, 
+        num_classes=args.num_classes, 
+        root_dir=args.data_options,
+        # ! vectorization arguments
+        vector=args.vector,
+        weight=args.weight,
+        phi=args.phi,
+        dims=args.dims,
+    )
     # ! updated tensor cuda code
     # if args.cuda:
     #     model.cuda()
     model = model.to(device)
 
     # ! moving torchPerslay inner params to cuda
-    for perslay in model.perslays:
-        perslay.phi.mu = perslay.phi.mu.to(device)
-        perslay.phi.M = tuple(m.to(device) for m in perslay.phi.M)
+    if args.vector == 'perslay':
+        for perslay in model.perslays:
+            perslay.phi.mu = perslay.phi.mu.to(device)
+            perslay.phi.M = tuple(m.to(device) for m in perslay.phi.M)
 
     # define loss func and optimizer
     if args.task == 'classification':
@@ -536,7 +543,8 @@ def validate(val_loader, model, criterion, normalizer, test=False):
         i, len(val_loader), batch_time=batch_time, loss=losses,
         accu=accuracies, prec=precisions, recall=recalls,
         f1=fscores, auc=auc_scores))
-    
+
+    print(f"{args.atom_fea_len}\t{args.n_conv}\t{args.h_fea_len}\t{args.n_h}")    
     print(f"{losses.avg:.4f}	{accuracies.avg:.3f}	{precisions.avg:.3f}	{recalls.avg:.3f}	{fscores.avg:.3f}	{auc_scores.avg:.3f}")
 
     if test:

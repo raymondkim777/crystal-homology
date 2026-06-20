@@ -3,7 +3,7 @@ from __future__ import print_function, division
 import pickle
 import torch
 import torch.nn as nn
-import torchPerslay as tp
+import torchPersLay as tp
 
 
 class ConvLayer(nn.Module):
