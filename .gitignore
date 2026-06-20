@@ -4,6 +4,7 @@ __pycache__
 
 code/data/mp*
 code/data/cif
+code/data/bounds.json
 code/data/struct-issues
 code/data/diagrams*
 code/data/images*
