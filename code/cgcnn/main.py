@@ -86,11 +86,21 @@ parser.add_argument('--delete', action='store_true',
                     help='deletes generated training files before training')
 parser.add_argument('--id', default=0, type=int, metavar='N',
                     help='identifier for multiple checkpoint/models')
+parser.add_argument('--dims', default=3, type=int,
+                    help='number of persistence homology dimensions')
+parser.add_argument('--vector', default='none', type=str,
+                    help='choose a vectorization: none, image, landscape, perslay')
+parser.add_argument('--weight', default='none', type=str,
+                    help='choose a weight function: none, power, grid, gaussian')
+parser.add_argument('--phi', default='none', type=str,
+                    help='choose a transformation function: none, image, landscape, betti')
 
 
 args = parser.parse_args(sys.argv[1:])
 
+# ! setting torch device
 args.cuda = not args.disable_cuda and torch.cuda.is_available()
+device = torch.device("cuda" if torch.cuda.is_available() and not args.disable_cuda else "cpu")
 
 if args.task == 'regression':
     best_mae_error = 1e10
@@ -123,6 +133,8 @@ def main():
     # dataset = CIFData(*args.data_options)
     dataset = GraphData(*args.data_options)
     collate_fn = collate_pool
+
+    # ! multiprocess attempt
     train_loader, val_loader, test_loader = get_train_val_test_loader(
         dataset=dataset,
         collate_fn=collate_fn,
@@ -135,7 +147,10 @@ def main():
         train_size=args.train_size,
         val_size=args.val_size,
         test_size=args.test_size,
-        return_test=True)
+        return_test=True,
+        # ! added
+        persistent_workers=True
+    )
 
     # obtain target value normalizer
     if args.task == 'classification':
@@ -162,9 +177,18 @@ def main():
                                 h_fea_len=args.h_fea_len,
                                 n_h=args.n_h,
                                 classification=True if args.task == 'classification' else False, 
-                                num_classes=args.num_classes)
-    if args.cuda:
-        model.cuda()
+                                num_classes=args.num_classes, 
+                                root_dir=args.data_options,
+                                )
+    # ! updated tensor cuda code
+    # if args.cuda:
+    #     model.cuda()
+    model = model.to(device)
+
+    # ! moving torchPerslay inner params to cuda
+    for perslay in model.perslays:
+        perslay.phi.mu = perslay.phi.mu.to(device)
+        perslay.phi.M = tuple(m.to(device) for m in perslay.phi.M)
 
     # define loss func and optimizer
     if args.task == 'classification':
@@ -254,20 +278,50 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizer):
     model.train()
 
     end = time.time()
-    for i, (input, target, _) in enumerate(train_loader):
+    # for i, (input, target, _) in enumerate(train_loader):
+    for i, (
+        (atom_fea, nbr_fea, nbr_fea_idx, crys_idx), 
+        vectorizations, diagrams, target, _
+    ) in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
 
-        if args.cuda:
-            input_var = (Variable(input[0].cuda(non_blocking=True)),
-                         Variable(input[1].cuda(non_blocking=True)),
-                         input[2].cuda(non_blocking=True),
-                         [crys_idx.cuda(non_blocking=True) for crys_idx in input[3]])
-        else:
-            input_var = (Variable(input[0]),
-                         Variable(input[1]),
-                         input[2],
-                         input[3])
+        # ! EDTIED to use torch tensors
+        atom_fea = atom_fea.to(device, non_blocking=True)
+        nbr_fea = nbr_fea.to(device, non_blocking=True)
+        nbr_fea_idx = nbr_fea_idx.to(device, non_blocking=True)
+
+        crys_idx = [idx.to(device, non_blocking=True) for idx in crys_idx]
+
+        vectorizations = vectorizations.to(device, non_blocking=True)
+        diagrams = [
+            diagram.to(device, non_blocking=True)
+            for diagram in diagrams
+        ]
+
+        # ! updated variables to use torch Tensors & receive additional data
+        input_var = (
+            atom_fea, 
+            nbr_fea, 
+            nbr_fea_idx, 
+            crys_idx,
+            vectorizations, 
+            diagrams[0], 
+            diagrams[1], 
+            diagrams[2]
+        )
+
+        # if args.cuda:
+        #     input_var = (Variable(input[0].cuda(non_blocking=True)),
+        #                  Variable(input[1].cuda(non_blocking=True)),
+        #                  input[2].cuda(non_blocking=True),
+        #                  [crys_idx.cuda(non_blocking=True) for crys_idx in input[3]])
+        # else:
+        #     input_var = (Variable(input[0]),
+        #                  Variable(input[1]),
+        #                  input[2],
+        #                  input[3])
+    
         # normalize target
         if args.task == 'regression':
             target_normed = normalizer.norm(target)
@@ -354,19 +408,48 @@ def validate(val_loader, model, criterion, normalizer, test=False):
     model.eval()
 
     end = time.time()
-    for i, (input, target, batch_cif_ids) in enumerate(val_loader):
-        if args.cuda:
-            with torch.no_grad():
-                input_var = (Variable(input[0].cuda(non_blocking=True)),
-                             Variable(input[1].cuda(non_blocking=True)),
-                             input[2].cuda(non_blocking=True),
-                             [crys_idx.cuda(non_blocking=True) for crys_idx in input[3]])
-        else:
-            with torch.no_grad():
-                input_var = (Variable(input[0]),
-                             Variable(input[1]),
-                             input[2],
-                             input[3])
+    # for i, (input, target, batch_cif_ids) in enumerate(val_loader):
+    for i, (
+        (atom_fea, nbr_fea, nbr_fea_idx, crys_idx), 
+        vectorizations, diagrams, target, batch_cif_ids
+    ) in enumerate(val_loader):
+
+        # ! EDTIED to use torch tensors
+        atom_fea = atom_fea.to(device, non_blocking=True)
+        nbr_fea = nbr_fea.to(device, non_blocking=True)
+        nbr_fea_idx = nbr_fea_idx.to(device, non_blocking=True)
+
+        crys_idx = [idx.to(device, non_blocking=True) for idx in crys_idx]
+
+        vectorizations = vectorizations.to(device, non_blocking=True)
+        diagrams = [
+            diagram.to(device, non_blocking=True)
+            for diagram in diagrams
+        ]
+
+        # ! updated variables to use torch Tensors & receive additional data
+        input_var = (
+            atom_fea, 
+            nbr_fea, 
+            nbr_fea_idx, 
+            crys_idx,
+            vectorizations, 
+            diagrams[0], 
+            diagrams[1], 
+            diagrams[2]
+        )
+        # if args.cuda:
+        #     with torch.no_grad():
+        #         input_var = (Variable(input[0].cuda(non_blocking=True)),
+        #                      Variable(input[1].cuda(non_blocking=True)),
+        #                      input[2].cuda(non_blocking=True),
+        #                      [crys_idx.cuda(non_blocking=True) for crys_idx in input[3]])
+        # else:
+        #     with torch.no_grad():
+        #         input_var = (Variable(input[0]),
+        #                      Variable(input[1]),
+        #                      input[2],
+        #                      input[3])
         if args.task == 'regression':
             target_normed = normalizer.norm(target)
         else:
@@ -453,6 +536,8 @@ def validate(val_loader, model, criterion, normalizer, test=False):
         i, len(val_loader), batch_time=batch_time, loss=losses,
         accu=accuracies, prec=precisions, recall=recalls,
         f1=fscores, auc=auc_scores))
+    
+    print(f"{losses.avg:.4f}	{accuracies.avg:.3f}	{precisions.avg:.3f}	{recalls.avg:.3f}	{fscores.avg:.3f}	{auc_scores.avg:.3f}")
 
     if test:
         star_label = '**'

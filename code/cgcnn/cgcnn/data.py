@@ -21,7 +21,8 @@ from torch.utils.data.sampler import SubsetRandomSampler
 def get_train_val_test_loader(dataset, collate_fn=default_collate,
                               batch_size=64, train_ratio=None,
                               val_ratio=0.1, test_ratio=0.1, return_test=False,
-                              num_workers=1, pin_memory=False, **kwargs):
+                              num_workers=1, pin_memory=False, persistent_workers=False,
+                              **kwargs):
     """
     Utility function for dividing a dataset to train, val, test datasets.
 
@@ -41,6 +42,7 @@ def get_train_val_test_loader(dataset, collate_fn=default_collate,
       data will be hidden.
     num_workers: int
     pin_memory: bool
+    # ! added persistent_workers to hopefully speed up
 
     Returns
     -------
@@ -82,16 +84,19 @@ def get_train_val_test_loader(dataset, collate_fn=default_collate,
     train_loader = DataLoader(dataset, batch_size=batch_size,
                               sampler=train_sampler,
                               num_workers=num_workers,
-                              collate_fn=collate_fn, pin_memory=pin_memory)
+                              collate_fn=collate_fn, pin_memory=pin_memory, 
+                              persistent_workers=persistent_workers)
     val_loader = DataLoader(dataset, batch_size=batch_size,
                             sampler=val_sampler,
                             num_workers=num_workers,
-                            collate_fn=collate_fn, pin_memory=pin_memory)
+                            collate_fn=collate_fn, pin_memory=pin_memory,
+                            persistent_workers=persistent_workers)
     if return_test:
         test_loader = DataLoader(dataset, batch_size=batch_size,
                                  sampler=test_sampler,
                                  num_workers=num_workers,
-                                 collate_fn=collate_fn, pin_memory=pin_memory)
+                                 collate_fn=collate_fn, pin_memory=pin_memory,
+                                 persistent_workers=persistent_workers)
     if return_test:
         return train_loader, val_loader, test_loader
     else:
@@ -107,11 +112,14 @@ def collate_pool(dataset_list):
     ----------
 
     dataset_list: list of tuples for each data point.
-      (atom_fea, nbr_fea, nbr_fea_idx, target)
+      (atom_fea, nbr_fea, nbr_fea_idx), 
+      vectorizations, [d0, d1, d2], target, cif_id
 
       atom_fea: torch.Tensor shape (n_i, atom_fea_len)
       nbr_fea: torch.Tensor shape (n_i, M, nbr_fea_len)
       nbr_fea_idx: torch.LongTensor shape (n_i, M)
+      vectorizations: torch.LongTensor shape (vec_len*DIM_CNT, ) 
+      d0/1/2: torch.LongTensor shape (pt_cnt, 2) --> [[b, d], ...]
       target: torch.Tensor shape (1, )
       cif_id: str or int
 
@@ -125,17 +133,26 @@ def collate_pool(dataset_list):
       Bond features of each atom's M neighbors
     batch_nbr_fea_idx: torch.LongTensor shape (N, M)
       Indices of M neighbors of each atom
-    crystal_atom_idx: list of torch.LongTensor of length N0
-      Mapping from the crystal idx to atom idx
-    target: torch.Tensor shape (N, 1)
+    crystal_atom_idx: list of torch.LongTensor of length N
+      Mapping from the crystal idx to atom idx (for each atom, stores crystal idx)
+    batch_vectorizations: torch.LongTensor shape (N0, vec_len*DIM_CNT)
+    batch_d0/1/2: torch.LongTensor shape (N0, pt_cnt, 2)
+    target: torch.Tensor shape (N0, 1)
       Target value for prediction
     batch_cif_ids: list
     """
     batch_atom_fea, batch_nbr_fea, batch_nbr_fea_idx = [], [], []
     crystal_atom_idx, batch_target = [], []
+    batch_vectorizations = []
+    batch_d0, batch_d1, batch_d2 = [], [], []
     batch_cif_ids = []
     base_idx = 0
-    for i, ((atom_fea, nbr_fea, nbr_fea_idx), target, cif_id)\
+    for i, (
+        (atom_fea, nbr_fea, nbr_fea_idx), 
+        vectorizations, 
+        [d0, d1, d2],
+        target, 
+        cif_id)\
             in enumerate(dataset_list):
         n_i = atom_fea.shape[0]  # number of atoms for this crystal
         batch_atom_fea.append(atom_fea)
@@ -143,6 +160,10 @@ def collate_pool(dataset_list):
         batch_nbr_fea_idx.append(nbr_fea_idx+base_idx)
         new_idx = torch.LongTensor(np.arange(n_i)+base_idx)
         crystal_atom_idx.append(new_idx)
+        batch_vectorizations.append(vectorizations)
+        batch_d0.append(d0)
+        batch_d1.append(d1)
+        batch_d2.append(d2)
         batch_target.append(target)
         batch_cif_ids.append(cif_id)
         base_idx += n_i
@@ -150,6 +171,12 @@ def collate_pool(dataset_list):
             torch.cat(batch_nbr_fea, dim=0),
             torch.cat(batch_nbr_fea_idx, dim=0),
             crystal_atom_idx),\
+        torch.stack(batch_vectorizations, dim=0),\
+        [
+            torch.stack(batch_d0, dim=0),
+            torch.stack(batch_d1, dim=0),
+            torch.stack(batch_d2, dim=0),
+        ],\
         torch.stack(batch_target, dim=0),\
         batch_cif_ids
 
@@ -254,7 +281,7 @@ class AtomCustomJSONInitializer(AtomInitializer):
 
 class GraphData(Dataset):
     """
-    The GraphDATA dataset is a wrapper for a dataset where the crystal structures
+    The GraphData dataset is a wrapper for a dataset where the crystal structures
     are stored in the form of NetworkX graphs. The dataset should have the following
     directory structure:
 
@@ -309,7 +336,9 @@ class GraphData(Dataset):
             dmin=0, 
             dmax=17,  # 16.719527690689166
             step=0.2,
-            random_seed=42
+            random_seed=42,
+            vector='none',  # 'none', 'image', 'landscape', 'perslay
+            dims=3,
     ):
         self.root_dir = root_dir  # cgcnn/data/graph_data
         self.max_num_nbr = max_num_nbr
@@ -320,11 +349,27 @@ class GraphData(Dataset):
             reader = csv.reader(f)
             self.id_prop_data = [row for row in reader]
         random.seed(random_seed)
+        # shuffling (before calling get_train_val_test_loader in main)
         random.shuffle(self.id_prop_data)
         atom_init_file = os.path.join(self.root_dir, 'atom_init.json')
         assert os.path.exists(atom_init_file), 'atom_init.json does not exist!'
         self.ari = AtomCustomJSONInitializer(atom_init_file)
         self.gdf = GaussianDistance(dmin=dmin, dmax=dmax, step=step)
+
+        # ! vectorization support
+        assert vector in ['none', 'image', 'landscape', 'perslay'], 'incorrect vectorization input!'
+        self.dim_cnt = dims
+        self.vector = vector
+        self.vector_dict = dict()
+        if self.vector == 'image':
+            with open(os.path.join(self.root_dir, 'images.pkl'), 'rb') as file:
+                self.vector_dict = pickle.load(file)
+        elif self.vector == 'landscape':
+            with open(os.path.join(self.root_dir, 'landscapes.pkl'), 'rb') as file:
+                self.vector_dict = pickle.load(file)
+        elif self.vector == 'perslay':
+            with open(os.path.join(self.root_dir, 'diagrams.pkl'), 'rb') as file:
+                self.vector_dict = pickle.load(file)  # technically diagrams, not vector
         
 
     def __len__(self):
@@ -339,11 +384,16 @@ class GraphData(Dataset):
         return delta_cart
     
 
-    @functools.lru_cache(maxsize=None)  # Cache computed attributes
+    @functools.lru_cache(maxsize=4096)  # Cache computed attributes
+    def _load_graph_dict(self, mp_id):
+        with open(os.path.join(self.root_dir, "graphs", f"mp-{mp_id}.pkl"), 'rb') as file:
+            return pickle.load(file)
+
+
     def __getitem__(self, idx):
         mp_id, target = self.id_prop_data[idx]
-        with open(os.path.join(self.root_dir, 'graphs', f'mp-{mp_id}.pkl'), 'rb') as file:
-            graph_dict = pickle.load(file)
+        graph_dict = self._load_graph_dict(mp_id)
+        graph = graph_dict['graph']
 
         ########################
         # graph_dict format:
@@ -356,17 +406,17 @@ class GraphData(Dataset):
 
         # atom features (node features)
         feature_list = [
-                self.ari.get_atom_fea(graph_dict['graph'].nodes[node]['specie'].number)
-                for node in graph_dict['graph'].nodes
+                self.ari.get_atom_fea(graph.nodes[node]['specie'].number)
+                for node in graph.nodes
         ]
 
         # add fractional coordinates as periodic coordinates
         periodic_coords = [
             np.hstack([
                 [np.cos(2 * np.pi * val), np.sin(2 * np.pi * val)]
-                for val in graph_dict['graph'].nodes[node]['coords']
+                for val in graph.nodes[node]['coords']
             ])
-            for node in graph_dict['graph'].nodes
+            for node in graph.nodes
         ]
         atom_fea = np.hstack((feature_list, periodic_coords))
 
@@ -374,7 +424,7 @@ class GraphData(Dataset):
 
         # neighbor features (edge attributes)
         nbr_fea_idx, nbr_fea = [], []
-        adj_dict = nx.to_dict_of_dicts(graph_dict['graph'])
+        adj_dict = nx.to_dict_of_dicts(graph)
         for u in adj_dict.keys():
             nbr_list = []
             dist = []
@@ -393,15 +443,14 @@ class GraphData(Dataset):
         padding = ((0, 0), (0, 0), (0, 3))
         nbr_fea = np.pad(nbr_fea, pad_width=padding, mode='constant', constant_values=0)
 
-
         # add to_jimage as cartesian displacement vector
         for u in adj_dict.keys():
             cart_vectors = []
             for v in adj_dict[u].keys():
                 for k in adj_dict[u][v].keys():
                     to_jimage = np.asarray(adj_dict[u][v][k]['to_jimage'])
-                    coord_start = graph_dict['graph'].nodes[u]['coords']
-                    coord_end = graph_dict['graph'].nodes[v]['coords']
+                    coord_start = graph.nodes[u]['coords']
+                    coord_end = graph.nodes[v]['coords']
                     matrix = graph_dict['lattice_matrix']
 
                     cart_vector = self.__cart_vector(coord_start, coord_end, to_jimage, matrix)
@@ -410,21 +459,28 @@ class GraphData(Dataset):
             cart_vectors = np.asarray(cart_vectors)
             nbr_fea[u, :cart_vectors.shape[0], -3:] = cart_vectors
 
-        # for node in range(len(graph_dict['graph'].nodes)):
-        #     nbr_list = list(graph_dict['graph'].neighbors(node))
-        #     nbr_fea_idx.append(nbr_list + [0] * (self.max_num_nbr - len(nbr_list)))
-            
-        #     dist = [graph_dict['graph'].edges[node, nbr]['weight']
-        #             for nbr in nbr_list]
-        #     nbr_fea.append(dist + [0] * (self.max_num_nbr - len(nbr_list)))
-        # nbr_fea_idx, nbr_fea = np.array(nbr_fea_idx), np.array(nbr_fea)
-        # nbr_fea = self.gdf.expand(nbr_fea)
+        # ! vectorization & normalization (optional)
+        if self.vector == 'none':
+            vectorizations = np.array([])
+            diagrams = [torch.Tensor([]) for _ in range(self.dim_cnt)]
+        elif self.vector in ['image', 'landscape']:
+            vectorizations = np.hstack([self.vector_dict[f'mp-{mp_id}'][dim] for dim in range(self.dim_cnt)])
+            # # normalize vectors (optional, ineffective)
+            # if np.sum(vectorizations) != 0:
+            #     vec_norm = np.linalg.norm(vectorizations)
+            #     vectorizations = vectorizations / vec_norm
+            diagrams = [torch.Tensor([]) for _ in range(self.dim_cnt)]
+        elif self.vector == 'perslay':
+            # ! if perslay, then we pass in diagrams (each should be tensor)
+            vectorizations = np.array([])
+            diagrams = [torch.Tensor(self.vector_dict[f'mp-{mp_id}'][dim]) for dim in range(self.dim_cnt)]  # list of np.ndarrays
 
         atom_fea = torch.Tensor(atom_fea)
         nbr_fea = torch.Tensor(nbr_fea)
         nbr_fea_idx = torch.LongTensor(nbr_fea_idx)
+        vectorizations = torch.Tensor(vectorizations)
         target = torch.Tensor([float(target)])
-        return (atom_fea, nbr_fea, nbr_fea_idx), target, mp_id
+        return (atom_fea, nbr_fea, nbr_fea_idx), vectorizations, diagrams, target, mp_id
 
 
 class CIFData(Dataset):
@@ -528,58 +584,6 @@ class CIFData(Dataset):
         nbr_fea_idx = torch.LongTensor(nbr_fea_idx)
         target = torch.Tensor([float(target)])
         return (atom_fea, nbr_fea, nbr_fea_idx), target, cif_id
-
-
-
-
-################ ERASE LATER ################
-
-
-from pymatgen.io.cif import CifParser
-
-
-def get_structures_from_cif(filepath: str) -> list:
-    cif_parser = CifParser(filepath)
-    structures = cif_parser.parse_structures()
-    for struct in structures:
-        check_result = cif_parser.check(struct)
-        if check_result is not None:
-            print(f"CIF Error: {filepath}")
-            print(f"Error Message: {check_result}")
-            raise ValueError(f"Struct contained in {filepath} is invalid")
-    # TODO: look into which crystals have multiple structures
-    return structures
-    # return Structure.from_file(filepath)
-
-
-def test():
-    structure_filename = f"data/cif/cubic/mp-97.cif"
-    structures = get_structures_from_cif(structure_filename)
-    struct = structures[0]
-    all_nbrs = struct.get_all_neighbors(8, include_index=True)
-    all_nbrs = [sorted(nbrs, key=lambda x: x[1]) for nbrs in all_nbrs]
-    nbr = all_nbrs[0]
-    # print(nbr[0])
-    # # nbr[i] == (site, distance, index, image)
-    # print(type(nbr[0][1]))
-    # print(nbr[0][2])
-
-
-    gdf = GaussianDistance(dmin=0, dmax=8, step=0.2)
-
-    nbr_fea = []
-    for nbr in all_nbrs:
-        nbr_fea.append(list(map(lambda x: x[1], nbr)))
-    
-    print('Before:')
-    print(nbr_fea)
-    
-    nbr_fea = np.array(nbr_fea)
-    nbr_fea = gdf.expand(nbr_fea)
-
-    print('\nAfter:')
-    print(nbr_fea)
-
 
 
 if __name__ == "__main__":

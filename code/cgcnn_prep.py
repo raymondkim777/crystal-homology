@@ -1,6 +1,7 @@
 import argparse
 import random
 import pickle
+import json
 import numpy as np
 import networkx as nx
 import warnings
@@ -8,6 +9,7 @@ from tqdm import tqdm
 
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from create_bonds import get_structures_from_cif
+from vectorizers import IM_BANDWIDTH, IM_RESOLUTION, fit_image_transformers
 from utils import CRYSTAL_SYSTEMS, DIMENSION_CNT, get_num_cpus, open_write_file
 
 
@@ -18,6 +20,7 @@ def _parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--save', action='store_true', help='Saves graph data to CGCNN data path')
     parser.add_argument('--vector', action='store_true', help='Saves vectorizations to CGCNN data path')
+    parser.add_argument('--bound', action='store_true', help='Saves persistence bounds to CGCNN data path')
     return parser.parse_args()
 
 
@@ -172,7 +175,7 @@ def retrieve_diagrams():
     return reorganize_list_of_dicts(padded_diagram_dict_by_dim)
 
 
-def graph_process(save=False, vector=False):
+def graph_process(vector=False):
     """
     Saves all graphs with labeled crystal systems in CGCNN data folder. 
     Computes and prints required bounds for GraphData.
@@ -185,49 +188,77 @@ def graph_process(save=False, vector=False):
     Optionally saves diagrams and vectorizations as pickle files in CGCNN data folder. 
     """
     graph_dict = unpack_all_graphs()
-
-    if save:
-        print(f"Saving files to {CGCNN_DATAPATH}")
-        # save graphs to CGCNN data folder
+    print(f"Saving files to {CGCNN_DATAPATH}")
+    # save graphs to CGCNN data folder
+    for mp_id, value in graph_dict.items():
+        cgcnn_datapath = open_write_file(f"{CGCNN_DATAPATH}/graphs", f'{mp_id}.pkl')
+        with open(cgcnn_datapath, 'wb') as f:
+            pickle.dump(value, f)
+    
+    # create id_prop.csv
+    system_to_int = {CRYSTAL_SYSTEMS[idx]: idx for idx in range(len(CRYSTAL_SYSTEMS))}
+    
+    csv_filepath = open_write_file(CGCNN_DATAPATH, 'id_prop.csv')
+    with open(csv_filepath, 'w') as f:
+        # CRYSTAL SYSTEM - classification
         for mp_id, value in graph_dict.items():
-            cgcnn_datapath = open_write_file(f"{CGCNN_DATAPATH}/graphs", f'{mp_id}.pkl')
-            with open(cgcnn_datapath, 'wb') as f:
-                pickle.dump(value, f)
-        
-        # create id_prop.csv
-        system_to_int = {CRYSTAL_SYSTEMS[idx]: idx for idx in range(len(CRYSTAL_SYSTEMS))}
-        
-        csv_filepath = open_write_file(CGCNN_DATAPATH, 'id_prop.csv')
-        with open(csv_filepath, 'w') as f:
-            # CRYSTAL SYSTEM - classification
-            for mp_id, value in graph_dict.items():
-                f.write(f"{mp_id[3:]}, {system_to_int[value['system']]}\n")
+            f.write(f"{mp_id[3:]}, {system_to_int[value['system']]}\n")
 
-        if vector:
-            diagram_dict = retrieve_diagrams()
-            image_dict, landscape_dict = dict(), dict()
-            for system in CRYSTAL_SYSTEMS:
-                with open(f'data/images/{system}.pkl', 'rb') as file:
-                    images = pickle.load(file)
-                image_dict = image_dict | images  # [mat_id][dim]
-                
-                with open(f'data/landscapes/{system}.pkl', 'rb') as file:
-                    landscapes = pickle.load(file)
-                landscape_dict = landscape_dict | landscapes  # [mat_id][dim]
+    if vector:
+        diagram_dict = retrieve_diagrams()
+        image_dict, landscape_dict = dict(), dict()
+        for system in CRYSTAL_SYSTEMS:
+            with open(f'data/images/{system}.pkl', 'rb') as file:
+                images = pickle.load(file)
+            image_dict = image_dict | images  # [mat_id][dim]
+            
+            with open(f'data/landscapes/{system}.pkl', 'rb') as file:
+                landscapes = pickle.load(file)
+            landscape_dict = landscape_dict | landscapes  # [mat_id][dim]
 
-            cgcnn_diagram_datapath = open_write_file(f"{CGCNN_DATAPATH}", f'diagrams.pkl')
-            with open(cgcnn_diagram_datapath, 'wb') as f:
-                pickle.dump(diagram_dict, f)
+        cgcnn_diagram_datapath = open_write_file(f"{CGCNN_DATAPATH}", f'diagrams.pkl')
+        with open(cgcnn_diagram_datapath, 'wb') as f:
+            pickle.dump(diagram_dict, f)
 
-            cgcnn_image_datapath = open_write_file(f"{CGCNN_DATAPATH}", f'images.pkl')
-            with open(cgcnn_image_datapath, 'wb') as f:
-                pickle.dump(image_dict, f)
+        cgcnn_image_datapath = open_write_file(f"{CGCNN_DATAPATH}", f'images.pkl')
+        with open(cgcnn_image_datapath, 'wb') as f:
+            pickle.dump(image_dict, f)
 
-            cgcnn_landscape_datapath = open_write_file(f"{CGCNN_DATAPATH}", f'landscapes.pkl')
-            with open(cgcnn_landscape_datapath, 'wb') as f:
-                pickle.dump(landscape_dict, f)
+        cgcnn_landscape_datapath = open_write_file(f"{CGCNN_DATAPATH}", f'landscapes.pkl')
+        with open(cgcnn_landscape_datapath, 'wb') as f:
+            pickle.dump(landscape_dict, f)
+
+
+def pad_bounds(bound_x, bound_y, eps=0.001):
+    if bound_x == bound_y:
+        bound_x -= eps
+        bound_y -= eps
+    return (bound_x, bound_y)
+
+
+def save_bounds():
+    image_transformers = fit_image_transformers(IM_BANDWIDTH, IM_RESOLUTION)
+    # self.image_bnds = [
+    #     ((-1.0e-03, 1.0e-03), (0.54836184, 16.7195282)), 
+    #     ((1.22288406e+00, 1.44270658e+01), (2.38418579e-07, 1.54966436e+01)), 
+    #     ((1.71408939e+00, 1.52640104e+01), (2.38418579e-07, 1.49896426e+01))
+    # ]
+    image_bnds_list = []
+    for dim in range(DIMENSION_CNT):
+        bounds = image_transformers[dim].im_range_fixed_
+        bounds_tuple = (pad_bounds(bounds[0], bounds[1]), pad_bounds(bounds[2], bounds[3]))
+        image_bnds_list.append(bounds_tuple)
+    
+    # save JSON
+    file_path = open_write_file(CGCNN_DATAPATH, 'bounds.pkl')
+    with open(file_path, "wb") as f:
+        pickle.dump(image_bnds_list, f)
             
 
 if __name__ == "__main__":
     args = _parse_args()
-    graph_process(args.save, args.vector)
+
+    if args.save:
+        graph_process(args.vector)
+    if args.bound:
+        save_bounds()
