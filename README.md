@@ -31,46 +31,32 @@ python find_bounds.py --bounds
 
 Generated graphs are stored in `code/data/graphs-multi` and `code/data/graphs` as `.pkl` files (included in repo). Add `--test` argument to `find_bounds.py` to check for bidirectionality in directed graphs.
 
-## Persistence Diagram Creation
+## Persistence Diagram/Vectorizations Generation
 
-Generates persistence diagrams for all 7000 crystals. 
+Generates persistence diagrams, landscapes, and images for all crystals. 
 
 ```
 bash scripts/persistent_homology.sh
 ```
 
-Generated persistence diagrams are stored in `code/data/diagrams` as `.pkl` files (included in repo).
-
-## Vectorizations
-
-Generates persistence landscapes and images for all 7000 crystals.
-
-Add `--example` to plot the persistence diagram and landscape/image of an example material. (Edit code directly to select specific system, material, and dimensions to plot.)
-
-```
-python vectorizers.py --landscape
-python vectorizers.py --image
-```
-
-Generated persistence landscapes/images are stored in `code/data/landscapes` and `data/images` as `.pkl` files (included in repo).
+Generated persistence diagrams are stored in `code/data/diagrams` as `.pkl` files (included in repo). Generated persistence landscapes/images are stored in `code/data/landscapes` and `data/images` as `.pkl` files (included in repo).
 
 ## CGCNN Prep
 
-Moves graph data over to `cgcnn/data/graph_data` folder as `.pkl` file and creates `id_prop.csv`. Also computes dataset bounds required as input for `GraphData` class.
+Moves graph/vectorization data over to `cgcnn/data/graph_data` folder as `.pkl` file and creates `id_prop.csv`. Also computes dataset bounds required as input for `GraphData` class.
 
 ```
-python cgcnn_prep.py --save
+bash scripts/cgcnn_prep.sh
 
 ```
-If `--save` argument is not included, then `graph_data` and `id_prop.csv` are not created.
 
 ## CGCNN Training
 
-Trains CGCNN to predict crystal systems via classification (first pass). 
+Trains CGCNN+ to predict crystal systems via classification, with vectorization options. 
 
 ```
 cd cgcnn
 ```
 ```
-python main.py --seed --delete --task classification --optim Adam --num-classes 7 --train-ratio 0.6 --val-ratio 0.2 --test-ratio 0.2 --epochs 100 --lr 0.001 --atom-fea-len 64 --n-conv 4 --h-fea-len 128 --n-h 2 data/graph_data
+bash train.sh
 ```
