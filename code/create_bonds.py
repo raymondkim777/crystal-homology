@@ -16,7 +16,10 @@ MULTIGRAPH_DIRECTORY = "data/graphs-multi"
 GRAPH_DIRECTORY = "data/graphs"
 
 
-def get_num_workers(default=4):
+CRYSTALNN = None
+
+
+def get_num_cpus(default=1):
     if "SLURM_CPUS_PER_TASK" in os.environ:
         return int(os.environ["SLURM_CPUS_PER_TASK"])
     return default
@@ -50,7 +53,7 @@ def get_structures_from_cif(filepath: str) -> list:
 
 def process_one_cif(args):
     # accept one tuple for multiprocessing
-    crystalnn, system, filename = args
+    system, filename = args
 
     structure_filename = f"{CIF_DIRECTORY}/{system}/{filename}"
     with warnings.catch_warnings():
@@ -58,7 +61,7 @@ def process_one_cif(args):
         structures = get_structures_from_cif(structure_filename)
     
     # transform into multi-digraph
-    bonded_structure = crystalnn.get_bonded_structure(structures[0])
+    bonded_structure = CRYSTALNN.get_bonded_structure(structures[0])
     nx_multigraph = bonded_structure.graph
 
     # set bond distances as weight for each edge
@@ -104,8 +107,13 @@ def process_one_cif(args):
     return crystal_id, nx_multigraph, nx_graph
 
 
+def init_crystalnn(crystalnn):
+    global CRYSTALNN
+    CRYSTALNN = crystalnn
+
+
 def construct_crystalnn_graph() -> None:
-    workers = get_num_workers()
+    workers = get_num_cpus()
     print(f"Using {workers} worker processes")
 
     # parameters selected for structural bonds, not chemical bonds
@@ -122,10 +130,14 @@ def construct_crystalnn_graph() -> None:
         system_graphs = dict()
 
         cif_files = fetch_cif_filenames(system)
-        tasks = [(crystalnn, system, filename) for filename in cif_files]
+        tasks = [(system, filename) for filename in cif_files]
                     
         print(f"Creating graphs of {system} system...")
-        with ProcessPoolExecutor(max_workers=workers) as executor:
+        with ProcessPoolExecutor(
+            max_workers=workers,
+            initializer=init_crystalnn, 
+            initargs=(crystalnn,),
+        ) as executor:
             results = executor.map(process_one_cif, tasks, chunksize=8)
 
             for crystal_id, nx_multigraph, nx_graph in tqdm(results, total=len(tasks)):

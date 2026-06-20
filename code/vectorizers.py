@@ -1,6 +1,7 @@
 import argparse
 import pickle
 import numpy as np
+from tqdm import tqdm
 import matplotlib
 import matplotlib.pyplot as plt
 matplotlib.use('Agg')  # Directs Matplotlib to write to a file, not a GUI window
@@ -8,14 +9,18 @@ import gudhi.representations as gdr
 import gtda.diagrams as gtd
 from gudhi.representations import Landscape, PersistenceImage
 
+from concurrent.futures import ProcessPoolExecutor
 from compute_diagrams import plot_persistence_diagram
-from utils import CRYSTAL_SYSTEMS, open_write_file
+from utils import CRYSTAL_SYSTEMS, get_num_cpus, open_write_file
 
 
 LANDSCAPE_DIRECTORY = "data/landscapes"
 IMAGE_DIRECTORY = "data/images"
 DIMENSION_CNT = 3
 MAX_DIST = 12.43843407284584  # computed from find_max_dist()
+
+LANDSCAPE_TRANSFORMERS = None
+IMAGE_TRANSFORMERS = None
 
 # landscape
 LA_LAYER = 5
@@ -103,15 +108,17 @@ def fit_landscape_transformers(num_landscapes, resolution):
     '''
     For each dimension, fits landscape transformers to all system persistence diagrams. 
     '''
-    # persistence diagrams for all systems (giotto-tda format)
-    print("processing persistence diagrams...")
-    all_diagrams = collect_all_diagrams()
+    # ! sample_range is already provided, so no need to fit
+    # # persistence diagrams for all systems (giotto-tda format)
+    # all_diagrams = collect_all_diagrams()
     
-    # convert all diagrams into gudhi format, separate into dimensions
-    processed_diagrams = process_all_diagrams(all_diagrams)
+    # # convert all diagrams into gudhi format, separate into dimensions
+    # processed_diagrams = process_all_diagrams(all_diagrams)
 
     # define and fit landscape classes
-    print("fitting landscape transformer...")
+    print("fitting landscape transformers...")
+
+    dummy_diagrams = [np.empty((0, 2))]
 
     transformers = []  # one per dimension
     for dim in range(DIMENSION_CNT):
@@ -120,7 +127,8 @@ def fit_landscape_transformers(num_landscapes, resolution):
             resolution=resolution, 
             sample_range=[0, MAX_DIST]
         )
-        transformer.fit(processed_diagrams[dim])
+        # transformer.fit(processed_diagrams[dim])
+        transformer.fit(dummy_diagrams)  # to create grid_
         transformers.append(transformer)
     return transformers
 
@@ -130,14 +138,13 @@ def fit_image_transformers(bandwidth, resolution):
     For each dimension, fits image transformers to all system persistence diagrams. 
     '''
     # persistence diagrams for all systems (giotto-tda format)
-    print("processing persistence diagrams...")
     all_diagrams = collect_all_diagrams()
     
     # convert all diagrams into gudhi format, separate into dimensions
     processed_diagrams = process_all_diagrams(all_diagrams)
 
     # define and fit image classes
-    print("fitting image transformer...")
+    print("fitting image transformers...")
 
     transformers = []  # one per dimension
     for dim in range(DIMENSION_CNT):
@@ -147,41 +154,102 @@ def fit_image_transformers(bandwidth, resolution):
     return transformers
 
 
+def init_landscape_transformers(transformers):
+    global LANDSCAPE_TRANSFORMERS
+    LANDSCAPE_TRANSFORMERS = transformers
+
+
+def init_image_transformers(transformers):
+    global IMAGE_TRANSFORMERS
+    IMAGE_TRANSFORMERS = transformers
+
+
+def compute_landscapes_for_system(args):
+    '''
+    Generates persistence landscapes for one system for each dimension.
+    '''
+    system = args
+
+    # print(f"computing landscapes for {system} system...")
+    # process all diagrams in system
+    system_diagrams = collect_system_diagrams(system)
+    keys_list = list(system_diagrams.keys())
+    diagrams_by_dims = process_all_diagrams(list(system_diagrams.values()))
+
+    # generate persistence landscapes for all diagrams for each dimension
+    landscapes_by_dim = []  # [[h0_land1, h0_land2, ...], [h1_land1, ...], ...]
+    for dim in range(DIMENSION_CNT):
+        landscapes_by_dim.append(LANDSCAPE_TRANSFORMERS[dim].transform(diagrams_by_dims[dim]))
+    
+    # match to id and organize by id -> dim
+    system_landscapes = dict()
+    for i in range(len(keys_list)):
+        key = keys_list[i]
+        system_landscapes[key] = {
+            dim: landscapes_by_dim[dim][i] 
+            for dim in range(DIMENSION_CNT)
+        }
+    
+    return system, system_landscapes
+
 
 def persistence_landscape(
         num_landscapes=LA_LAYER, 
         resolution=LA_RESOLUTION,
     ):
     '''
-    Generates persistence landscapes for every system persistence diagram for each dimension. 
+    Generates persistence landscapes for every system for each dimension.
+    Uses multiprocessing. 
     '''
-    transformers = fit_landscape_transformers(num_landscapes, resolution)
+    n_workers = get_num_cpus()
+    landscape_transformers = fit_landscape_transformers(num_landscapes, resolution)
     
-    for system in CRYSTAL_SYSTEMS:
-        print(f"computing landscapes for {system} system...")
-        # process all diagrams in system
-        system_diagrams = collect_system_diagrams(system)
-        keys_list = list(system_diagrams.keys())
-        diagrams_by_dims = process_all_diagrams(list(system_diagrams.values()))
+    print(f"Computing landscapes with {n_workers} workers...")
+    with ProcessPoolExecutor(
+        max_workers=n_workers,
+        initializer=init_landscape_transformers,
+        initargs=(landscape_transformers,),
+    ) as executor:
+        results = executor.map(compute_landscapes_for_system, CRYSTAL_SYSTEMS)
 
-        # generate persistence landscapes for all diagrams for each dimension
-        landscapes_by_dim = []  # [[h0_land1, h0_land2, ...], [h1_land1, ...], ...]
-        for dim in range(DIMENSION_CNT):
-            landscapes_by_dim.append(transformers[dim].transform(diagrams_by_dims[dim]))
-        
-        # match to id and organize by id -> dim
-        system_landscapes = dict()
-        for i in range(len(keys_list)):
-            key = keys_list[i]
-            system_landscapes[key] = {
-                dim: landscapes_by_dim[dim][i] 
-                for dim in range(DIMENSION_CNT)
-            }
-        
-        # save system images
-        landscape_path = open_write_file(LANDSCAPE_DIRECTORY, f"{system}.pkl")
-        with open(landscape_path, 'wb') as f:
-            pickle.dump(system_landscapes, f)
+        for system, system_landscapes in tqdm(results, total=len(CRYSTAL_SYSTEMS)):
+            # save system images
+            landscape_path = open_write_file(LANDSCAPE_DIRECTORY, f"{system}.pkl")
+            with open(landscape_path, 'wb') as f:
+                pickle.dump(system_landscapes, f)
+
+
+def compute_images_for_system(args):
+    '''
+    Generates persistence images for one system for each dimension. 
+    '''
+    system = args
+
+    # print(f"computing images for {system} system...")
+    # process all diagrams in system
+    system_diagrams = collect_system_diagrams(system)
+    keys_list = list(system_diagrams.keys())
+    diagrams_by_dims = process_all_diagrams(list(system_diagrams.values()))
+
+    # generate persistence images for all diagrams for each dimension
+    images_by_dim = []  # [[h0_image1, h0_image2, ...], [h1_image1, ...], ...]
+    for dim in range(DIMENSION_CNT):
+        images_by_dim.append(IMAGE_TRANSFORMERS[dim].transform(diagrams_by_dims[dim]))
+    
+    # match to id and organize by id -> dim
+    system_images = dict()
+    for i in range(len(keys_list)):
+        key = keys_list[i]
+        system_images[key] = {
+            dim: images_by_dim[dim][i] 
+            for dim in range(DIMENSION_CNT)
+        }
+    
+    # # save system images
+    # image_path = open_write_file(IMAGE_DIRECTORY, f"{system}.pkl")
+    # with open(image_path, 'wb') as f:
+    #     pickle.dump(system_images, f)
+    return system, system_images
 
 
 def persistence_image(
@@ -189,35 +257,25 @@ def persistence_image(
         resolution=IM_RESOLUTION, 
     ):
     '''
-    Generates persistence images for every system persistence diagram for each dimension. 
+    Generates persistence images for every system for each dimension. 
+    Uses multiprocessing. 
     '''
-    transformers = fit_image_transformers(bandwidth, resolution)
-    
-    for system in CRYSTAL_SYSTEMS:
-        print(f"computing images for {system} system...")
-        # process all diagrams in system
-        system_diagrams = collect_system_diagrams(system)
-        keys_list = list(system_diagrams.keys())
-        diagrams_by_dims = process_all_diagrams(list(system_diagrams.values()))
+    n_workers = get_num_cpus()
+    image_transformers = fit_image_transformers(bandwidth, resolution)
 
-        # generate persistence images for all diagrams for each dimension
-        images_by_dim = []  # [[h0_image1, h0_image2, ...], [h1_image1, ...], ...]
-        for dim in range(DIMENSION_CNT):
-            images_by_dim.append(transformers[dim].transform(diagrams_by_dims[dim]))
-        
-        # match to id and organize by id -> dim
-        system_images = dict()
-        for i in range(len(keys_list)):
-            key = keys_list[i]
-            system_images[key] = {
-                dim: images_by_dim[dim][i] 
-                for dim in range(DIMENSION_CNT)
-            }
-        
-        # save system images
-        image_path = open_write_file(IMAGE_DIRECTORY, f"{system}.pkl")
-        with open(image_path, 'wb') as f:
-            pickle.dump(system_images, f)
+    print(f"Computing images with {n_workers} workers...")
+    with ProcessPoolExecutor(
+        max_workers=n_workers,
+        initializer=init_image_transformers,
+        initargs=(image_transformers,),
+    ) as executor:
+        results = executor.map(compute_images_for_system, CRYSTAL_SYSTEMS)
+
+        for system, system_images in tqdm(results, total=len(CRYSTAL_SYSTEMS)):
+            # save system images
+            image_path = open_write_file(IMAGE_DIRECTORY, f"{system}.pkl")
+            with open(image_path, 'wb') as f:
+                pickle.dump(system_images, f)
 
 
 def plot_landscape(system: str, mat_id: str, dim: int=0):

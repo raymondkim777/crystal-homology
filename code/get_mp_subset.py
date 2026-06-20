@@ -24,6 +24,7 @@ CIF_DATA_PATH = 'data/cif'
 
 def _parse_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--random', action='store_true', help='compute random, not optimal subset')
     parser.add_argument('--subset', action='store_true', help='compute subset')
     parser.add_argument('--size', default=6700, type=int, help='subset size for each class')
     parser.add_argument('--cif', action='store_true', help='convert subset to CIF files')
@@ -377,6 +378,24 @@ class AbsorptionSubset:
         return abs_max, abs_max_e, abs_int, abs_int_vis, abs_avg_vis, abs_onset_e
 
 
+##### DEPRECATED #####
+    
+def select_random_subset(subset_size=6700) -> None:
+    print(f"Subset Size: {subset_size}")
+    for system in CRYSTAL_SYSTEMS:
+        print(f"Choosing subset of {system} system...")
+        mp_raw_json_list = loadfn(f"data/mp-raw/{system}.json")
+        mp_subset = random.sample(mp_raw_json_list, k=subset_size)
+
+        # save subset JSON files
+        data_raw_dir = f'data/mp-subset'
+        file_raw_name = f'{system}.json'
+        data_raw_path = open_write_file(data_raw_dir, file_raw_name)
+
+        with open(data_raw_path, 'w') as f:
+            json.dump(mp_subset, f, cls=MontyEncoder, indent=4)
+
+
 if __name__ == "__main__":
     random.seed(42)
 
@@ -386,9 +405,14 @@ if __name__ == "__main__":
         absorption_data=args.absorb
     )
 
-    if args.subset:
-        crystal_subset.select_and_save_subset_ids(subset_size=args.size)
-    if args.absorb:
-        crystal_subset.merge_abs_mp_data()
-    if args.cif:
-        crystal_subset.convert_subsets_to_cif()
+    if args.random:
+        select_random_subset()
+        if args.cif:
+            crystal_subset.convert_subsets_to_cif()
+    else:
+        if args.subset:
+            crystal_subset.select_and_save_subset_ids(subset_size=args.size)
+        if args.absorb:
+            crystal_subset.merge_abs_mp_data()
+        if args.cif:
+            crystal_subset.convert_subsets_to_cif()

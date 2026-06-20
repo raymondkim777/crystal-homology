@@ -36,7 +36,7 @@ Generated graphs are stored in `code/data/graphs-multi` and `code/data/graphs` a
 Generates persistence diagrams for all 7000 crystals. 
 
 ```
-python compute_diagrams.py
+bash scripts/persistent_homology.sh
 ```
 
 Generated persistence diagrams are stored in `code/data/diagrams` as `.pkl` files (included in repo).

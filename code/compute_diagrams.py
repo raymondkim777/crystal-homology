@@ -1,17 +1,13 @@
+import os
 import json
 import numpy as np
 import networkx as nx
 from tqdm import tqdm
 import pickle
-from utils import CRYSTAL_SYSTEMS, open_write_file, plot_nxgraph
+from utils import CRYSTAL_SYSTEMS, get_num_cpus, open_write_file, get_max_dist
 from gtda.homology import FlagserPersistence
 from gtda.plotting import plot_diagram
-
-
-def get_max_dist():
-    with open('data/bounds.json', 'r') as f:
-        return json.load(f['max_bond_dist'])
-
+    
 
 GRAPH_DIRECTORY = "data/graphs"
 DIAGRAM_DIRECTORY = "data/diagrams"
@@ -28,21 +24,23 @@ def unpack_all_graphs() -> dict:
 
 
 def convert_graph_to_adj_mat(graph: nx.DiGraph) -> np.ndarray:
-    # ? to_numpy_array can also handle multigraph weights --> extension?
-    adj_mat = nx.to_numpy_array(graph, weight='weight', nonedge=np.inf)
     
+    adj_mat = nx.to_numpy_array(graph, weight='weight', nonedge=np.inf)
     # set diagonals to 0 (just in case)
-    for i in range(len(graph.nodes)):
-        adj_mat[i][i] = 0
+    np.fill_diagonal(adj_mat, 0)
     return adj_mat
 
 
-def plot_persistence_diagram(diagram) -> None:
+def plot_persistence_diagram(mp_id, diagram) -> None:
     fig = plot_diagram(diagram)
-    fig.show()
+    # fig.show()
+    fig.save(f"{DIAGRAM_DIRECTORY}/diagram_{mp_id}.png")
 
 
 def compute_persistence_diagrams(dims: tuple=tuple(range(DIMENSION_CNT))) -> None:
+    n_jobs = get_num_cpus()
+    print(f"Using {n_jobs} job processes")
+
     print(f"Unpacking all graphs...")
     graph_dict = unpack_all_graphs()
 
@@ -52,7 +50,8 @@ def compute_persistence_diagrams(dims: tuple=tuple(range(DIMENSION_CNT))) -> Non
         filtration='max', 
         coeff=2, 
         max_edge_weight=MAX_DIST,
-        infinity_values=None
+        infinity_values=None, 
+        n_jobs=n_jobs   # parallel processing
     )
 
     # fit flagser to all graphs
@@ -101,7 +100,7 @@ def test():
     index = 100
     keys_list = list(diagrams.keys())
     print(keys_list[index])
-    plot_persistence_diagram(diagrams[keys_list[index]])
+    plot_persistence_diagram(keys_list[index], diagrams[keys_list[index]])
     pass
 
 
