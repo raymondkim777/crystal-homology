@@ -8,11 +8,18 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def save_doc_as_dict(doc) -> dict:
+    json_object = dict()
+    for field in FIELDS:
+        json_object[field] = getattr(doc, field)
+    return json_object
+
+
 def query_all_crystals_from_mp() -> None:
     for system in CRYSTAL_SYSTEMS:
         print(f"Querying {system} system from Materials Project...")
 
-        with MPRester() as mpr:
+        with MPRester(force_renew=True) as mpr:
             docs = mpr.materials.summary.search(
                 crystal_system=system,
                 fields=FIELDS
@@ -22,10 +29,7 @@ def query_all_crystals_from_mp() -> None:
         # ! Note: directly using Monty serialization messes the material_id
         mp_json_dict = dict()
         for doc in docs:
-            json_object = dict()
-            for field in FIELDS:
-                json_object[field] = getattr(doc, field)
-            mp_json_dict[str(doc.material_id)] = json_object
+            mp_json_dict[str(doc.material_id)] = save_doc_as_dict(doc)
         
         # save JSON files
         data_raw_dir = f'data/mp-raw'

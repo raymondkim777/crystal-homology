@@ -5,6 +5,7 @@ __pycache__
 code/data/mp*
 code/data/cif
 code/data/bounds.json
+code/data/bid_true.txt
 code/data/struct-issues
 code/data/diagrams*
 code/data/images*
@@ -21,4 +22,4 @@ code/cgcnn/data/graph_data/images.pkl
 code/cgcnn/data/graph_data/landscapes.pkl
 code/cgcnn/data/graph_data/id_prop.csv
 code/cgcnn/*.pth.tar
-code/cgcnn/test_results.csv
+code/cgcnn/test_results*.csv

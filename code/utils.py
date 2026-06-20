@@ -1,4 +1,5 @@
 import os
+import json
 import networkx as nx
 import matplotlib.pyplot as plt
 
@@ -23,11 +24,19 @@ FIELDS = [
     'dos', 
     'bandstructure', 
     'band_gap', 
-    'cbm', 
-    'vbm', 
+    # 'cbm', 
+    # 'vbm', 
     'efermi', 
     'is_gap_direct'
 ]
+MAX_DIST = 12.43843407284584  # computed from find_max_dist()
+MAX_NBR = 38
+
+
+def get_num_cpus(default=1):
+    if "SLURM_CPUS_PER_TASK" in os.environ:
+        return int(os.environ["SLURM_CPUS_PER_TASK"])
+    return default
 
 
 def open_write_file(dir_path, file_name):
@@ -49,3 +58,8 @@ def plot_nxgraph(graph: nx.DiGraph) -> None:
     
     # Display the plot
     plt.show()
+
+
+def get_max_dist():
+    with open('data/bounds.json', 'r') as f:
+        return json.load(f)['max_bond_dist']
