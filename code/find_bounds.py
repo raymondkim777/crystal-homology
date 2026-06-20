@@ -17,7 +17,7 @@ def _parse_args():
 def unpack_all_graphs(undirected=False) -> dict:
     graph_dict = dict()
     for system in CRYSTAL_SYSTEMS:
-        print(f"Unpacking graphs from {system} system...")
+        print(f"Unpacking multigraphs from {system} system...")
         with open(f'data/graphs-multi/{system}.pkl', 'rb') as file:
             graph_system_dict = pickle.load(file)
         for key, graph in graph_system_dict.items():

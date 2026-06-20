@@ -1,3 +1,4 @@
+import json
 import numpy as np
 import networkx as nx
 from tqdm import tqdm
@@ -7,9 +8,14 @@ from gtda.homology import FlagserPersistence
 from gtda.plotting import plot_diagram
 
 
+def get_max_dist():
+    with open('data/bounds.json', 'r') as f:
+        return json.load(f['max_bond_dist'])
+
+
 GRAPH_DIRECTORY = "data/graphs"
 DIAGRAM_DIRECTORY = "data/diagrams"
-MAX_DIST = 12.43843407284584  # computed from find_max_dist()
+MAX_DIST = get_max_dist()
 DIMENSION_CNT = 3
 
 
@@ -19,18 +25,6 @@ def unpack_all_graphs() -> dict:
         with open(f'data/graphs/{system}.pkl', 'rb') as file:
             graph_dict[system] = pickle.load(file)
     return graph_dict
-
-
-def find_max_dist(graph_dict: dict) -> np.float64:    # max_finite_dist = my_matrix[my_matrix != np.inf].max()
-    '''Finds maximum bond distance across all crystals across all systems'''
-    max_dist = 0
-    for system in CRYSTAL_SYSTEMS: 
-        for graph in graph_dict[system].values():
-            weights = nx.get_edge_attributes(graph, "weight").values()
-            if len(weights) == 0:
-                continue
-            max_dist = max(max_dist, max(weights))
-    return max_dist
 
 
 def convert_graph_to_adj_mat(graph: nx.DiGraph) -> np.ndarray:
@@ -112,5 +106,4 @@ def test():
 
 
 if __name__ == "__main__":
-    # print(find_max_dist(unpack_all_graphs()))
     compute_persistence_diagrams()
