@@ -2,5 +2,4 @@ mp-api
 giotto-tda==0.6.2
 gudhi
 torchPersLay
-optuna
 tqdm

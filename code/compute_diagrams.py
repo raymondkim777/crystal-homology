@@ -22,7 +22,7 @@ def unpack_all_graphs() -> dict:
 
 
 def find_max_dist(graph_dict: dict) -> np.float64:    # max_finite_dist = my_matrix[my_matrix != np.inf].max()
-    '''Finds maximum bond distance across all cyrstals across all systems'''
+    '''Finds maximum bond distance across all crystals across all systems'''
     max_dist = 0
     for system in CRYSTAL_SYSTEMS: 
         for graph in graph_dict[system].values():
