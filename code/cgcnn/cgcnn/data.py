@@ -305,7 +305,7 @@ class GraphData(Dataset):
     def __init__(
             self, 
             root_dir, 
-            max_num_nbr=38, 
+            max_num_nbr=26, 
             dmin=0, 
             dmax=17,  # 16.719527690689166
             step=0.2,
