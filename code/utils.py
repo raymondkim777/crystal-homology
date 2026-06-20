@@ -28,6 +28,8 @@ FIELDS = [
     'efermi', 
     'is_gap_direct'
 ]
+MAX_DIST = 12.43843407284584  # computed from find_max_dist()
+MAX_NBR = 38
 
 
 def open_write_file(dir_path, file_name):
