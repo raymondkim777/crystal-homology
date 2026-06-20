@@ -107,11 +107,14 @@ def collate_pool(dataset_list):
     ----------
 
     dataset_list: list of tuples for each data point.
-      (atom_fea, nbr_fea, nbr_fea_idx, target)
+      (atom_fea, nbr_fea, nbr_fea_idx), 
+      vectorizations, [d0, d1, d2], target, cif_id
 
       atom_fea: torch.Tensor shape (n_i, atom_fea_len)
       nbr_fea: torch.Tensor shape (n_i, M, nbr_fea_len)
       nbr_fea_idx: torch.LongTensor shape (n_i, M)
+      vectorizations: torch.LongTensor shape (1, vec_len*DIM_CNT) 
+      d0/1/2: torch.LongTensor shape (1, ) 
       target: torch.Tensor shape (1, )
       cif_id: str or int
 
@@ -133,9 +136,16 @@ def collate_pool(dataset_list):
     """
     batch_atom_fea, batch_nbr_fea, batch_nbr_fea_idx = [], [], []
     crystal_atom_idx, batch_target = [], []
+    batch_vectorizations = []
+    batch_d0, batch_d1, batch_d2 = [], [], []
     batch_cif_ids = []
     base_idx = 0
-    for i, ((atom_fea, nbr_fea, nbr_fea_idx), target, cif_id)\
+    for i, (
+        (atom_fea, nbr_fea, nbr_fea_idx), 
+        vectorizations, 
+        [d0, d1, d2],
+        target, 
+        cif_id)\
             in enumerate(dataset_list):
         n_i = atom_fea.shape[0]  # number of atoms for this crystal
         batch_atom_fea.append(atom_fea)
@@ -143,6 +153,10 @@ def collate_pool(dataset_list):
         batch_nbr_fea_idx.append(nbr_fea_idx+base_idx)
         new_idx = torch.LongTensor(np.arange(n_i)+base_idx)
         crystal_atom_idx.append(new_idx)
+        batch_vectorizations.append(vectorizations)
+        batch_d0.append(d0)
+        batch_d1.append(d1)
+        batch_d2.append(d2)
         batch_target.append(target)
         batch_cif_ids.append(cif_id)
         base_idx += n_i
@@ -150,6 +164,12 @@ def collate_pool(dataset_list):
             torch.cat(batch_nbr_fea, dim=0),
             torch.cat(batch_nbr_fea_idx, dim=0),
             crystal_atom_idx),\
+        torch.stack(batch_vectorizations, dim=0),\
+        [
+            torch.stack(batch_d0, dim=0),
+            torch.stack(batch_d1, dim=0),
+            torch.stack(batch_d2, dim=0),
+        ],\
         torch.stack(batch_target, dim=0),\
         batch_cif_ids
 
@@ -309,7 +329,8 @@ class GraphData(Dataset):
             dmin=0, 
             dmax=17,  # 16.719527690689166
             step=0.2,
-            random_seed=42
+            random_seed=42,
+            vector='none',  # 'none', 'image', 'landscape', 'perslay
     ):
         self.root_dir = root_dir  # cgcnn/data/graph_data
         self.max_num_nbr = max_num_nbr
