@@ -84,6 +84,8 @@ parser.add_argument('--seed', action='store_true',
 parser.add_argument('--num-classes', default=2, type=int)
 parser.add_argument('--delete', action='store_true',
                     help='deletes generated training files before training')
+parser.add_argument('--id', default=0, type=int, metavar='N',
+                    help='identifier for multiple checkpoint/models')
 
 
 args = parser.parse_args(sys.argv[1:])
@@ -105,9 +107,9 @@ def main():
     print("GPU Available", args.cuda)
 
     if args.delete:
-        check_path = "./checkpoint.pth.tar"
-        model_path = "./model_best.pth.tar"
-        result_path = "./test_results.csv"
+        check_path = f"./checkpoint_{args.id}.pth.tar"
+        model_path = f"./model_best_{args.id}.pth.tar"
+        result_path = f"./test_results_{args.id}.csv"
         
         if os.path.exists(check_path):
             os.remove(check_path)
@@ -230,7 +232,7 @@ def main():
     # test best model
     print('---------Evaluate Model on Test Set---------------')
     # ! PyTorch 2.6 safety measure: only load model weights -> extra argument
-    best_checkpoint = torch.load('model_best.pth.tar', weights_only=False)
+    best_checkpoint = torch.load(f'model_best_{args.id}.pth.tar', weights_only=False)
     model.load_state_dict(best_checkpoint['state_dict'])
     validate(test_loader, model, criterion, normalizer, test=True)
 
@@ -456,7 +458,7 @@ def validate(val_loader, model, criterion, normalizer, test=False):
         star_label = '**'
         import csv
         # ! MODIFIED to write full multiclass predicted probabilities
-        with open('test_results.csv', 'w') as f:
+        with open(f'test_results_{args.id}.csv', 'w') as f:
             writer = csv.writer(f)
 
             header = ['mp-id', 'target', 'predicted_class']
@@ -583,10 +585,10 @@ class AverageMeter(object):
         self.avg = self.sum / self.count
 
 
-def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
+def save_checkpoint(state, is_best, filename=f'checkpoint_{args.id}.pth.tar'):
     torch.save(state, filename)
     if is_best:
-        shutil.copyfile(filename, 'model_best.pth.tar')
+        shutil.copyfile(filename, f'model_best_{args.id}.pth.tar')
 
 
 def adjust_learning_rate(optimizer, epoch, k):
