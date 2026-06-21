@@ -13,7 +13,8 @@ from vectorizers import IM_BANDWIDTH, IM_RESOLUTION, fit_image_transformers
 from utils import CRYSTAL_SYSTEMS, DIMENSION_CNT, get_num_cpus, open_write_file
 
 
-CGCNN_DATAPATH = 'cgcnn/data/graph_data'
+# CGCNN_DATAPATH = 'cgcnn/data/graph_data'
+CGCNN_DATAPATH = 'cgcnn/data/example_graph_data'
 
 
 def _parse_args():
@@ -200,7 +201,7 @@ def graph_process(vector=False):
     
     csv_filepath = open_write_file(CGCNN_DATAPATH, 'id_prop.csv')
     with open(csv_filepath, 'w') as f:
-        # CRYSTAL SYSTEM - classification
+        # multitask regression/classification
         for mp_id, value in graph_dict.items():
             f.write(f"{mp_id[3:]}, {system_to_int[value['system']]}\n")
 
