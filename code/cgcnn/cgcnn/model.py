@@ -84,6 +84,7 @@ class CrystalGraphConvNet(nn.Module):
     def __init__(
             self, orig_atom_fea_len, nbr_fea_len,
             atom_fea_len=64, n_conv=3, h_fea_len=128, n_h=1,
+            vec_fea_len=64, n_vec=1,
             classification=False, num_classes=2,
             vector='none', weight='none', phi='none',
             dims=3, root_dir='data/graph_data'
@@ -120,12 +121,12 @@ class CrystalGraphConvNet(nn.Module):
         if self.vector == 'none':
             self.vector_len = 0
         elif self.vector == 'image':
-            self.vector_len = 400 * dims
+            self.vector_len = 400
         elif self.vector == 'landscape':
-            self.vector_len = 500 * dims
+            self.vector_len = 500
         elif self.vector == 'perslay':
             if self.phi == 'image':
-                self.vector_len = 400 * dims
+                self.vector_len = 400
 
             # ! Don't use landscape/betti for now
             # TentPerslayPhi/FlatPerslayPhi function doesn't compute k-th highest tent,
@@ -144,7 +145,7 @@ class CrystalGraphConvNet(nn.Module):
                                     for _ in range(n_conv)])
         
         # ! vectorization concatenation length
-        conv_to_fc_input_len = atom_fea_len + self.vector_len
+        conv_to_fc_input_len = atom_fea_len + vec_fea_len
         self.conv_to_fc = nn.Linear(conv_to_fc_input_len, h_fea_len)
         self.conv_to_fc_softplus = nn.Softplus()
         if n_h > 1:
@@ -157,6 +158,12 @@ class CrystalGraphConvNet(nn.Module):
         if self.classification:
             self.logsoftmax = nn.LogSoftmax(dim=1)
             self.dropout = nn.Dropout()
+
+        # ! vectorization process layers
+        self.vec_embedding = nn.Linear(self.vector_len * dims, vec_fea_len * dims)
+        self.vec_fcs = nn.ModuleList([nn.Linear(vec_fea_len * dims, vec_fea_len * dims)
+                                     for _ in range(n_vec)])
+        self.vec_pooling = nn.Linear(vec_fea_len * dims, vec_fea_len)
 
         # ! perslay --> experiment with parameters
         if self.vector == 'perslay':
@@ -191,7 +198,7 @@ class CrystalGraphConvNet(nn.Module):
             atom_fea, nbr_fea, nbr_fea_idx, 
             crystal_atom_idx,
             vectorizations, 
-            diag0, diag1, diag2
+            diagrams,    # [d0, d1, d2]
     ):
         """
         Forward pass
@@ -225,13 +232,23 @@ class CrystalGraphConvNet(nn.Module):
         crys_fea = self.pooling(atom_fea, crystal_atom_idx)
 
         # ! concatenating vectorizations
-        if self.vector in ['image', 'landscape']:
-            crys_fea = torch.cat([crys_fea, vectorizations], dim=1)
-        elif self.vector == 'perslay':
-            vec0 = self.perslays[0](diag0).squeeze(-1).flatten(start_dim=1)
-            vec1 = self.perslays[1](diag1).squeeze(-1).flatten(start_dim=1)
-            vec2 = self.perslays[2](diag2).squeeze(-1).flatten(start_dim=1)            
-            crys_fea = torch.cat([crys_fea, vec0, vec1, vec2], dim=1)
+        if self.vector != 'none':
+            # initialize vec embeddings
+            if self.vector in ['image', 'landscape']:
+                vec_fea = vectorizations
+            elif self.vector == 'perslay':
+                vec_fea = torch.cat([
+                    self.perslays[i](diagrams[i]).squeeze(-1).flatten(start_dim=1)
+                    for i in range(len(self.perslays))
+                ], dim=1)
+            # vec processing layers
+            vec_fea = self.vec_embedding(vectorizations)
+            for vec_fc in self.vec_fcs:
+                vec_fea = vec_fc(vec_fea)
+            vec_fea = self.vec_pooling(vec_fea)
+                
+            # concatenating processed vec to crystal features
+            crys_fea = torch.cat([crys_fea, vec_fea], dim=1)
 
         crys_fea = self.conv_to_fc(self.conv_to_fc_softplus(crys_fea))
         crys_fea = self.conv_to_fc_softplus(crys_fea)

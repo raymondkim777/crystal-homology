@@ -77,6 +77,10 @@ parser.add_argument('--n-conv', default=3, type=int, metavar='N',
                     help='number of conv layers')
 parser.add_argument('--n-h', default=1, type=int, metavar='N',
                     help='number of hidden layers after pooling')
+parser.add_argument('--vec-fea-len', default=64, type=int, metavar='N',
+                    help='number of hidden vector features per dimension in hidden layers')
+parser.add_argument('--n-vec', default=1, type=int, metavar='N',
+                    help='number of hidden vector processing layers')
 
 
 parser.add_argument('--seed', action='store_true',
@@ -183,6 +187,9 @@ def main():
         n_h=args.n_h,
         classification=True if args.task == 'classification' else False, 
         num_classes=args.num_classes, 
+        # ! vector layer arguments
+        vec_fea_len=args.vec_fea_len, 
+        n_vec=args.n_vec,
         # ! vectorization arguments
         vector=args.vector,
         weight=args.weight,
@@ -317,9 +324,7 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizer):
             nbr_fea_idx, 
             crys_idx,
             vectorizations, 
-            diagrams[0], 
-            diagrams[1], 
-            diagrams[2]
+            diagrams
         )
 
         # if args.cuda:
@@ -445,9 +450,7 @@ def validate(val_loader, model, criterion, normalizer, test=False):
             nbr_fea_idx, 
             crys_idx,
             vectorizations, 
-            diagrams[0], 
-            diagrams[1], 
-            diagrams[2]
+            diagrams
         )
         # if args.cuda:
         #     with torch.no_grad():
