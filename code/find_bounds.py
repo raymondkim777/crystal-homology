@@ -1,15 +1,17 @@
 import argparse
 import pickle
 import json
+import csv
 import numpy as np
 
 from tqdm import tqdm
-from utils import CRYSTAL_SYSTEMS, DIMENSION_CNT, open_write_file
+from utils import CRYSTAL_SYSTEMS, FIELDS, DIMENSION_CNT, open_write_file
 
 
 def _parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--bounds', action='store_true', help='Computes maximum bond distance and neighbor cnt aross all graphs')
+    parser.add_argument('--stats', action='store_true', help='Computes mean/stdev for each scalar prediction value')
     parser.add_argument('--test', action='store_true', help='Tests all graphs for bidirectionality')
     return parser.parse_args()
 
@@ -58,6 +60,48 @@ def find_graph_bounds():
         json.dump(val_json, f, indent=4)
 
 
+def find_pred_stats():
+    fields = FIELDS[3:]
+    all_crystals = {}
+    crystal_system = {}
+
+    for system in CRYSTAL_SYSTEMS:
+        print(f"Loading crystals from {system} system...")
+        with open(f'data/mp-subset/{system}.pkl', 'rb') as file:
+            crystal_dict = pickle.load(file)
+        crystal_system[system] = crystal_dict
+        all_crystals.update(crystal_dict)
+
+    property_ratios = dict()
+
+    print(f"Computing property distributions for systems...")
+    for system in CRYSTAL_SYSTEMS:
+
+        crystal_json = crystal_system[system]
+        ids = list(crystal_json.keys())
+
+        A = np.zeros((len(ids), len(fields)), dtype=np.float32)
+
+        for i, mp_id in tqdm(enumerate(ids), desc=f"{system}: "):
+            value = crystal_json[mp_id]
+
+            for prop_idx, prop in enumerate(fields):
+                x = value[prop]
+
+                if x is not None:
+                    A[i, prop_idx] = 1.0
+
+        property_ratios[system] = A.sum(axis=0) / len(ids)
+    
+    csv_data = [['system'] + [field for field in fields]] + [
+        [system] + list(property_ratios[system]) for system in CRYSTAL_SYSTEMS
+    ]
+    csv_path = open_write_file('data', 'stats.csv')
+    with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        writer.writerows(csv_data)
+
+
 def bid_test():
     '''
     Testing all digraphs to check for bidirectional edges.
@@ -92,5 +136,7 @@ if __name__ == "__main__":
 
     if args.bounds:
         find_graph_bounds()
+    if args.stats:
+        find_pred_stats()
     if args.test:
         bid_test()

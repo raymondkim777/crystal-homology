@@ -81,6 +81,8 @@ def get_train_val_test_loader(dataset, collate_fn=default_collate,
         indices[-(valid_size + test_size):-test_size])
     if return_test:
         test_sampler = SubsetRandomSampler(indices[-test_size:])
+
+    # use indices[] to extract train mp-IDs, collect mean/stdev info
     train_loader = DataLoader(dataset, batch_size=batch_size,
                               sampler=train_sampler,
                               num_workers=num_workers,
@@ -348,7 +350,7 @@ class GraphData(Dataset):
             reader = csv.reader(f)
             self.id_prop_data = [row for row in reader]
         random.seed(random_seed)
-        # shuffling (before calling get_train_val_test_loader in main)
+        # ! shuffling (before calling get_train_val_test_loader in main)
         random.shuffle(self.id_prop_data)
         atom_init_file = os.path.join(self.root_dir, 'atom_init.json')
         assert os.path.exists(atom_init_file), 'atom_init.json does not exist!'

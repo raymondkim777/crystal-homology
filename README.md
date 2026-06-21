@@ -26,7 +26,7 @@ Uses CrystalNN to compute atomic bonds and create NetworkX digraphs (also stores
 
 ```
 bash scripts/make_graph.sh
-python find_bounds.py --bounds
+python find_bounds.py --bounds --stats
 ```
 
 Generated graphs are stored in `code/data/graphs-multi` and `code/data/graphs` as `.pkl` files (included in repo). Add `--test` argument to `find_bounds.py` to check for bidirectionality in directed graphs.

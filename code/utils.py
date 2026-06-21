@@ -32,9 +32,12 @@ FIELDS = [
 
 PREDICT = [
     'system',
-    'bulk_modulus', 
-    'dos',              # future task
-    'bandstructure', 
+    'bm_voight',
+    'bm_reuss',
+    'bm_vrh', 
+    # 'dos',                # future task
+    # 'bandstructure',      # extract direct_gap (others already exist)
+    'direct_gap',
     'band_gap', 
     'efermi', 
     'is_gap_direct'
