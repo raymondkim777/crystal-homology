@@ -19,9 +19,9 @@ FIELDS = [
     "symmetry", 
     "structure", 
     # Chemist recommended fields
-    'phonon_IDs', 
+    # 'phonon_IDs',     # idk about this one
     'bulk_modulus', 
-    'dos', 
+    # 'dos',            # use mpr.get_dos_by_material_id("mp-id") for DOS curve
     'bandstructure', 
     'band_gap', 
     # 'cbm', 
@@ -29,6 +29,17 @@ FIELDS = [
     'efermi', 
     'is_gap_direct'
 ]
+
+PREDICT = [
+    'system',
+    'bulk_modulus', 
+    'dos',              # future task
+    'bandstructure', 
+    'band_gap', 
+    'efermi', 
+    'is_gap_direct'
+]
+
 DIMENSION_CNT = 3
 MAX_DIST = 12.43843407284584  # computed from find_max_dist()
 MAX_NBR = 38
