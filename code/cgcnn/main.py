@@ -551,7 +551,7 @@ def validate(val_loader, model, criterion, normalizer, test=False):
         accu=accuracies, prec=precisions, recall=recalls,
         f1=fscores, auc=auc_scores))
 
-    print(f"{args.vector}\t{args.atom_fea_len}\t{args.n_conv}\t{args.h_fea_len}\t{args.n_h}")    
+    print(f"{args.vector} red\t{args.atom_fea_len}\t{args.n_conv}\t{args.h_fea_len}\t{args.n_h}")    
     print(f"{losses.avg:.4f}	{accuracies.avg:.3f}	{precisions.avg:.3f}	{recalls.avg:.3f}	{fscores.avg:.3f}	{auc_scores.avg:.3f}")
 
     if test:
