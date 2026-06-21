@@ -24,9 +24,12 @@ CIF_DATA_PATH = 'data/cif'
 
 def _parse_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--seed', action='store_true', help='sets random seed to 42')
     parser.add_argument('--random', action='store_true', help='compute random, not optimal subset')
     parser.add_argument('--subset', action='store_true', help='compute subset')
     parser.add_argument('--size', default=6700, type=int, help='subset size for each class')
+    parser.add_argument('--large', action='store_true', help='add random subset of larger non-optimal crystals')
+    parser.add_argument('--size-large', default=8000, type=int, help='total subset size (including large) for each class')
     parser.add_argument('--cif', action='store_true', help='convert subset to CIF files')
     parser.add_argument('--absorb', action='store_true', help='append absorption data to subsets')
     return parser.parse_args()
@@ -144,15 +147,30 @@ class CrystalSubset:
         return selected_ids
 
 
-    def select_and_save_subset_ids(self, subset_size=6700):
+    def select_and_save_subset_ids(
+            self, subset_size=6700, 
+            subset_large=False, total_size=8000
+    ):
         print(f"Computing optimal subsets...")
         for system in CRYSTAL_SYSTEMS:
             # reset prop counts (each system should be independent)
             self.prop_cnts = np.zeros(len(self.fields), dtype=np.float32)
 
+            # find optimal subset IDs
             subset_id_list = self.select_one_system_fast(system, subset_size)
+
+            # optionally supplement with larger crystals for generalization
+            if subset_large:
+                print(f"Supplementing dataset to class size {total_size}...")
+                num_add = total_size - len(subset_id_list)
+                remaining_ids = tuple(set(self.crystal_system[system].keys()) - set(subset_id_list))
+                subset_add_list = random.sample(remaining_ids, k=num_add)
+                subset_id_list += subset_add_list
+
+            # compile crystal data as dictionary
             subset_json = self.compile_dicts_from_ids(subset_id_list)
 
+            # save dictionary as pickle
             subset_path = open_write_file(SUBSET_DATA_PATH, f"{system}.pkl")
             with open(subset_path, "wb") as f:
                 pickle.dump(subset_json, f)
@@ -397,9 +415,11 @@ def select_random_subset(subset_size=6700) -> None:
 
 
 if __name__ == "__main__":
-    random.seed(42)
-
     args = _parse_args()
+
+    if args.seed:
+        random.seed(42)
+
     crystal_subset = CrystalSubset(
         subset=args.subset,
         absorption_data=args.absorb
@@ -411,7 +431,13 @@ if __name__ == "__main__":
             crystal_subset.convert_subsets_to_cif()
     else:
         if args.subset:
-            crystal_subset.select_and_save_subset_ids(subset_size=args.size)
+            crystal_subset.select_and_save_subset_ids(
+                subset_size=args.size,
+                subset_large=args.large,
+                total_size=args.size_large
+            )
+        if args.large:
+            pass
         if args.absorb:
             crystal_subset.merge_abs_mp_data()
         if args.cif:

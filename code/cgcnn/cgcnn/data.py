@@ -331,9 +331,9 @@ class GraphData(Dataset):
     def __init__(
             self, 
             root_dir, 
-            max_num_nbr=26, 
+            max_num_nbr=36, 
             dmin=0, 
-            dmax=10,  # 9.347676148248363
+            dmax=21,  # 20.741742618109075
             step=0.2,
             random_seed=42,
             vector='none',  # 'none', 'image', 'landscape', 'perslay

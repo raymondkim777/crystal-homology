@@ -85,8 +85,8 @@ class CrystalGraphConvNet(nn.Module):
             self, orig_atom_fea_len, nbr_fea_len,
             atom_fea_len=64, n_conv=3, h_fea_len=128, n_h=1,
             classification=False, num_classes=2,
-            vector='none', weight='none', phi='none', dims=3,
-            root_dir='data/graph_data'
+            vector='none', weight='none', phi='none',
+            dims=3, root_dir='data/graph_data'
     ):
         """
         Initialize CrystalGraphConvNet.
