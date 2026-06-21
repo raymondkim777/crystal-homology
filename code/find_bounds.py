@@ -4,7 +4,7 @@ import json
 import numpy as np
 
 from tqdm import tqdm
-from utils import CRYSTAL_SYSTEMS, open_write_file
+from utils import CRYSTAL_SYSTEMS, DIMENSION_CNT, open_write_file
 
 
 def _parse_args():
@@ -25,7 +25,7 @@ def unpack_all_graphs(undirected=False) -> dict:
     return graph_dict
 
 
-def find_bounds():
+def find_graph_bounds():
     graph_dict = unpack_all_graphs(undirected=False)
 
     # computing bounds
@@ -91,6 +91,6 @@ if __name__ == "__main__":
     args = _parse_args()
 
     if args.bounds:
-        find_bounds()
+        find_graph_bounds()
     if args.test:
         bid_test()

@@ -8,7 +8,7 @@ from pymatgen.io.cif import CifParser
 from pymatgen.analysis.local_env import CrystalNN
 from concurrent.futures import ProcessPoolExecutor
 
-from utils import CRYSTAL_SYSTEMS, open_write_file
+from utils import CRYSTAL_SYSTEMS, get_num_cpus, open_write_file
 
 
 CIF_DIRECTORY = "data/cif"
@@ -17,12 +17,6 @@ GRAPH_DIRECTORY = "data/graphs"
 
 
 CRYSTALNN = None
-
-
-def get_num_cpus(default=1):
-    if "SLURM_CPUS_PER_TASK" in os.environ:
-        return int(os.environ["SLURM_CPUS_PER_TASK"])
-    return default
 
 
 def fetch_cif_filenames(system: str) -> list:
