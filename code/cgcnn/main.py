@@ -131,7 +131,11 @@ def main():
 
     # load data
     # dataset = CIFData(*args.data_options)
-    dataset = GraphData(*args.data_options)
+    dataset = GraphData(
+        *args.data_options, 
+        vector=args.vector,
+        dims=args.dims,
+    )
     collate_fn = collate_pool
 
     # ! multiprocess attempt
@@ -179,12 +183,12 @@ def main():
         n_h=args.n_h,
         classification=True if args.task == 'classification' else False, 
         num_classes=args.num_classes, 
-        root_dir=args.data_options,
         # ! vectorization arguments
         vector=args.vector,
         weight=args.weight,
         phi=args.phi,
         dims=args.dims,
+        root_dir=args.data_options,
     )
     # ! updated tensor cuda code
     # if args.cuda:
@@ -544,7 +548,7 @@ def validate(val_loader, model, criterion, normalizer, test=False):
         accu=accuracies, prec=precisions, recall=recalls,
         f1=fscores, auc=auc_scores))
 
-    print(f"{args.atom_fea_len}\t{args.n_conv}\t{args.h_fea_len}\t{args.n_h}")    
+    print(f"{args.vector}\t{args.atom_fea_len}\t{args.n_conv}\t{args.h_fea_len}\t{args.n_h}")    
     print(f"{losses.avg:.4f}	{accuracies.avg:.3f}	{precisions.avg:.3f}	{recalls.avg:.3f}	{fscores.avg:.3f}	{auc_scores.avg:.3f}")
 
     if test:

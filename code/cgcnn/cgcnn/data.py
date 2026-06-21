@@ -324,7 +324,6 @@ class GraphData(Dataset):
 
     atom_fea: torch.Tensor shape (n_i, atom_fea_len)
     nbr_fea: torch.Tensor shape (n_i, M, nbr_fea_len)
-    # nbr_fea_len includes 27 one-hot encoding for to_jimage
     nbr_fea_idx: torch.LongTensor shape (n_i, M)
     target: torch.Tensor shape (1, )
     cif_id: str or int
@@ -334,7 +333,7 @@ class GraphData(Dataset):
             root_dir, 
             max_num_nbr=26, 
             dmin=0, 
-            dmax=17,  # 16.719527690689166
+            dmax=10,  # 9.347676148248363
             step=0.2,
             random_seed=42,
             vector='none',  # 'none', 'image', 'landscape', 'perslay
