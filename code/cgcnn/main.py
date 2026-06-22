@@ -12,9 +12,11 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from sklearn import metrics
+from torch.utils.data import Subset
 from torch.autograd import Variable
 from torch.optim.lr_scheduler import MultiStepLR
 
+from cgcnn.loss import MultiTaskLoss
 from cgcnn.data import CIFData, GraphData
 from cgcnn.data import collate_pool, get_train_val_test_loader
 from cgcnn.model import CrystalGraphConvNet
@@ -23,9 +25,9 @@ parser = argparse.ArgumentParser(description='Crystal Graph Convolutional Neural
 parser.add_argument('data_options', metavar='OPTIONS', nargs='+',
                     help='dataset options, started with the path to root dir, '
                          'then other options')
-parser.add_argument('--task', choices=['regression', 'classification'],
-                    default='regression', help='complete a regression or '
-                                                   'classification task (default: regression)')
+# parser.add_argument('--task', choices=['regression', 'classification'],
+#                     default='regression', help='complete a regression or '
+#                                                    'classification task (default: regression)')
 parser.add_argument('--disable-cuda', action='store_true',
                     help='Disable CUDA')
 parser.add_argument('-j', '--workers', default=0, type=int, metavar='N',
@@ -88,7 +90,7 @@ parser.add_argument('--n-o', default=1, type=int, metavar='N',
 
 parser.add_argument('--seed', action='store_true',
                     help='sets torch seed to 42')
-parser.add_argument('--num-classes', default=2, type=int)
+# parser.add_argument('--num-classes', default=2, type=int)
 parser.add_argument('--delete', action='store_true',
                     help='deletes generated training files before training')
 parser.add_argument('--id', default=0, type=int, metavar='N',
@@ -109,10 +111,10 @@ args = parser.parse_args(sys.argv[1:])
 args.cuda = not args.disable_cuda and torch.cuda.is_available()
 device = torch.device("cuda" if torch.cuda.is_available() and not args.disable_cuda else "cpu")
 
-if args.task == 'regression':
-    best_mae_error = 1e10
-else:
-    best_mae_error = 0.
+# if args.task == 'regression':
+#     best_mae_error = 1e10
+# else:
+#     best_mae_error = 0.
 
 
 def main():
@@ -163,27 +165,45 @@ def main():
         persistent_workers=True
     )
 
-    # ! CHANGE (for multitask)
-    # obtain target value normalizer
-    if args.task == 'classification':
-        normalizer = Normalizer(torch.zeros(2))
-        normalizer.load_state_dict({'mean': 0., 'std': 1.})
-    else:
-        if len(dataset) < 500:
-            warnings.warn('Dataset has less than 500 data points. '
-                          'Lower accuracy is expected. ')
-            sample_data_list = [dataset[i] for i in range(len(dataset))]
-        else:
-            sample_data_list = [dataset[i] for i in
-                                sample(range(len(dataset)), 500)]
-        _, sample_target, _ = collate_pool(sample_data_list)
-        normalizer = Normalizer(sample_target)
-
     # read in head tasks
     task_filepath = os.path.join(args.data_options, 'tasks', 'tasks.pkl')
     assert os.path.exists(task_filepath), 'Tasks file (tasks.pkl) does not exist!'
     with open(task_filepath, 'rb') as f:
         task_specs = pickle.load(f)
+    
+    # ! CHANGE (for multitask)
+    # # obtain target value normalizer
+    # if args.task == 'classification':
+    #     normalizer = Normalizer(torch.zeros(2))
+    #     normalizer.load_state_dict({'mean': 0., 'std': 1.})
+    # else:
+    #     if len(dataset) < 500:
+    #         warnings.warn('Dataset has less than 500 data points. '
+    #                       'Lower accuracy is expected. ')
+    #         sample_data_list = [dataset[i] for i in range(len(dataset))]
+    #     else:
+    #         sample_data_list = [dataset[i] for i in
+    #                             sample(range(len(dataset)), 500)]
+    #     _, sample_target, _ = collate_pool(sample_data_list)
+    #     normalizer = Normalizer(sample_target)
+
+    # ? do i need to collect ALL training data, or does a representative sample suffice?
+    sampler_indices = list(train_loader.sampler)
+    train_dataset = Subset(dataset, sampler_indices)
+    train_data_list = [train_dataset[i] for i in range(len(train_dataset))]
+    _, _, _, sample_target, sample_mask, _ = collate_pool(train_data_list)
+
+    normalizers = dict()
+    for prop, value in task_specs.items():
+        if value['head'] in ['binary', 'multiclass']:
+            normalizer = NormalizerProp(torch.zeros(2))
+            normalizer.load_state_dict({'mean': 0., 'std': 1.})
+            normalizers[prop] = normalizer
+        elif value['head'] in ['regression']:
+            normalizer = NormalizerProp(sample_target[prop], mask=sample_mask[prop])
+            normalizers[prop] = normalizer
+        else:
+            raise ValueError('[Normalizer] Task not recognized!')
 
     # build model
     structures, _, _, _, _ = dataset[0]
@@ -195,8 +215,8 @@ def main():
         n_conv=args.n_conv,
         h_fea_len=args.h_fea_len,
         n_h=args.n_h,
-        classification=True if args.task == 'classification' else False, 
-        num_classes=args.num_classes, 
+        # classification=True if args.task == 'classification' else False, 
+        # num_classes=args.num_classes, 
         # ! vector layer arguments
         vec_fea_len=args.vec_fea_len, 
         n_vec=args.n_vec,
@@ -219,8 +239,9 @@ def main():
             perslay.phi.mu = perslay.phi.mu.to(device)
             perslay.phi.M = tuple(m.to(device) for m in perslay.phi.M)
 
+    # define loss func and optimizer
     # ! CUSTOM LOSS FUNCTION
-    # # define loss func and optimizer
+    criterion = MultiTaskLoss()
     # if args.task == 'classification':
     #     criterion = nn.NLLLoss()
     # else:
@@ -246,7 +267,9 @@ def main():
             best_mae_error = checkpoint['best_mae_error']
             model.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
-            normalizer.load_state_dict(checkpoint['normalizer'])
+            # normalizer.load_state_dict(checkpoint['normalizer'])
+            for prop in normalizers.keys():
+                normalizers[prop].load_state_dict(checkpoint['normalizer'][prop])
             print("=> loaded checkpoint '{}' (epoch {})"
                   .format(args.resume, checkpoint['epoch']))
         else:
@@ -280,7 +303,9 @@ def main():
             'state_dict': model.state_dict(),
             'best_mae_error': best_mae_error,
             'optimizer': optimizer.state_dict(),
-            'normalizer': normalizer.state_dict(),
+            # 'normalizer': normalizer.state_dict(),
+            'normalizer': {prop: normalizers[prop].state_dict()
+                           for prop in normalizers.keys()},
             'args': vars(args)
         }, is_best)
 
@@ -295,6 +320,7 @@ def main():
 def train(train_loader, model, criterion, optimizer, epoch, normalizer):
     batch_time = AverageMeter()
     data_time = AverageMeter()
+    # ! everything below should be for each property
     losses = AverageMeter()
     if args.task == 'regression':
         mae_errors = AverageMeter()
@@ -352,19 +378,25 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizer):
         #                  input[3])
     
         # normalize target
-        if args.task == 'regression':
-            target_normed = normalizer.norm(target)
-        else:
-            target_normed = target.view(-1).long()
-        if args.cuda:
-            target_var = Variable(target_normed.cuda(non_blocking=True))
-        else:
-            target_var = Variable(target_normed)
+        # ! FIX target normalization (apply to each property)
+
+        # if args.task == 'regression':
+        #     target_normed = normalizer.norm(target)
+        # else:
+        #     target_normed = target.view(-1).long()
+        # if args.cuda:
+        #     target_var = Variable(target_normed.cuda(non_blocking=True))
+        # else:
+        #     target_var = Variable(target_normed)
 
         # compute output
-        output = model(*input_var)
-        loss = criterion(output, target_var)
+        output = model(*input_var)  # dictionary[prop]
+        loss, loss_dict = criterion(
+            input=output, 
+            target_dict=target_var
+        )
 
+        # ! everything below should be for each property
         # measure accuracy and record loss
         if args.task == 'regression':
             mae_error = mae(normalizer.denorm(output.data.cpu()), target)
@@ -389,6 +421,7 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizer):
         batch_time.update(time.time() - end)
         end = time.time()
 
+        # ! adjust to print stats for every property
         if i % args.print_freq == 0:
             if args.task == 'regression':
                 print('Epoch: [{0}][{1}/{2}]\t'
@@ -418,6 +451,7 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizer):
 
 def validate(val_loader, model, criterion, normalizer, test=False):
     batch_time = AverageMeter()
+    # ! everything below should be for every property
     losses = AverageMeter()
     if args.task == 'regression':
         mae_errors = AverageMeter()
@@ -477,21 +511,24 @@ def validate(val_loader, model, criterion, normalizer, test=False):
         #                      Variable(input[1]),
         #                      input[2],
         #                      input[3])
-        if args.task == 'regression':
-            target_normed = normalizer.norm(target)
-        else:
-            target_normed = target.view(-1).long()
-        if args.cuda:
-            with torch.no_grad():
-                target_var = Variable(target_normed.cuda(non_blocking=True))
-        else:
-            with torch.no_grad():
-                target_var = Variable(target_normed)
+
+        # ! FIX target normalization (apply to each property)
+        # if args.task == 'regression':
+        #     target_normed = normalizer.norm(target)
+        # else:
+        #     target_normed = target.view(-1).long()
+        # if args.cuda:
+        #     with torch.no_grad():
+        #         target_var = Variable(target_normed.cuda(non_blocking=True))
+        # else:
+        #     with torch.no_grad():
+        #         target_var = Variable(target_normed)
 
         # compute output
         output = model(*input_var)
         loss = criterion(output, target_var)
 
+        # ! everything below should be for each property
         # measure accuracy and record loss
         if args.task == 'regression':
             mae_error = mae(normalizer.denorm(output.data.cpu()), target)
@@ -532,6 +569,7 @@ def validate(val_loader, model, criterion, normalizer, test=False):
         batch_time.update(time.time() - end)
         end = time.time()
 
+        # ! adjust to print stats for every property
         if i % args.print_freq == 0:
             if args.task == 'regression':
                 print('Test: [{0}/{1}]\t'
@@ -567,6 +605,7 @@ def validate(val_loader, model, criterion, normalizer, test=False):
     print(f"{args.vector} red\t{args.atom_fea_len}\t{args.n_conv}\t{args.h_fea_len}\t{args.n_h}")    
     print(f"{losses.avg:.4f}	{accuracies.avg:.3f}	{precisions.avg:.3f}	{recalls.avg:.3f}	{fscores.avg:.3f}	{auc_scores.avg:.3f}")
 
+    # ! FIX result output
     if test:
         star_label = '**'
         import csv
@@ -592,13 +631,44 @@ def validate(val_loader, model, criterion, normalizer, test=False):
         return auc_scores.avg
 
 
-class Normalizer(object):
-    """Normalize a Tensor and restore it later. """
+# # ! DEPRECATED
+# class Normalizer(object):
+#     """Normalize a Tensor and restore it later. """
 
-    def __init__(self, tensor):
-        """tensor is taken as a sample to calculate the mean and std"""
-        self.mean = torch.mean(tensor)
-        self.std = torch.std(tensor)
+#     def __init__(self, tensor):
+#         """tensor is taken as a sample to calculate the mean and std"""
+#         self.mean = torch.mean(tensor)
+#         self.std = torch.std(tensor)
+
+#     def norm(self, tensor):
+#         return (tensor - self.mean) / self.std
+
+#     def denorm(self, normed_tensor):
+#         return normed_tensor * self.std + self.mean
+
+#     def state_dict(self):
+#         return {'mean': self.mean,
+#                 'std': self.std}
+
+#     def load_state_dict(self, state_dict):
+#         self.mean = state_dict['mean']
+#         self.std = state_dict['std']
+    
+
+class NormalizerProp(object):
+    """Normalize a Tensor for one property and restore it later. """
+
+    def __init__(self, tensor, mask=None):
+        """
+        tensor is taken as a sample to calculate the mean and std.
+        mask is applied for targets with invalid labels.
+        """
+        if mask is None:
+            self.mean = torch.mean(tensor)
+            self.std = torch.std(tensor)
+        else:
+            self.mean = torch.mean(tensor[mask].float())
+            self.std = torch.std(tensor[mask].float())
 
     def norm(self, tensor):
         return (tensor - self.mean) / self.std
