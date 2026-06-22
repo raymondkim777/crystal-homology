@@ -25,5 +25,6 @@ code/cgcnn/data/graph_data/landscapes.pkl
 code/cgcnn/data/graph_data/bounds.pkl
 code/cgcnn/data/graph_data/id_prop.csv
 code/cgcnn/data/graph_data/id_mask.csv
+code/cgcnn/data/graph_data/predict.pkl
 code/cgcnn/*.pth.tar
 code/cgcnn/test_results*.csv
