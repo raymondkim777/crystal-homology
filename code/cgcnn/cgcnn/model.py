@@ -74,6 +74,103 @@ class ConvLayer(nn.Module):
         nbr_sumed = self.bn2(nbr_sumed)
         out = self.softplus2(atom_in_fea + nbr_sumed)
         return out
+    
+
+class CrystalGraphEncoder(nn.Module):
+    def __init__(
+            self, orig_atom_fea_len, nbr_fea_len,
+            atom_fea_len=64, n_conv=3, h_fea_len=128, n_h=1,
+            vec_fea_len=64, n_vec=1,
+            # classification=False, num_classes=2,
+            vector='none', weight='none', phi='none',
+            dims=3, root_dir='data/graph_data'
+    ):
+        super(CrystalGraphEncoder, self).__init__()
+
+        assert vector in ['none', 'image', 'landscape', 'perslay'], 'incorrect vectorization input!'
+        assert weight in ['none', 'power', 'grid', 'gaussian']  # only none or power
+        assert phi in ['none', 'image', 'landscape', 'betti']   # only none or image
+        
+        self.vector = vector
+        self.weight = weight
+        self.phi = phi
+
+        if self.vector == 'none':
+            self.vector_len = 0
+        elif self.vector == 'image':
+            self.vector_len = 400
+        elif self.vector == 'landscape':
+            self.vector_len = 500
+        elif self.vector == 'perslay':
+            if self.phi == 'image':
+                self.vector_len = 400
+
+            # ! Don't use landscape/betti for now
+            # TentPerslayPhi/FlatPerslayPhi function doesn't compute k-th highest tent,
+            # it concatenates tent/betti functions (len: sample) for each point --> sample * point
+            # so vectorization is absurdly long
+
+            # elif self.phi == 'landscape':
+            #     pass
+            # elif self.phi == 'betti':
+            #     pass
+        
+        # self.classification = classification
+        self.embedding = nn.Linear(orig_atom_fea_len, atom_fea_len)
+        self.convs = nn.ModuleList([ConvLayer(atom_fea_len=atom_fea_len,
+                                    nbr_fea_len=nbr_fea_len)
+                                    for _ in range(n_conv)])
+        
+        # ! vectorization concatenation length
+        conv_to_fc_input_len = atom_fea_len + vec_fea_len
+        self.conv_to_fc = nn.Linear(conv_to_fc_input_len, h_fea_len)
+        self.conv_to_fc_softplus = nn.Softplus()
+        if n_h > 1:
+            self.fcs = nn.ModuleList([nn.Linear(h_fea_len, h_fea_len) for _ in range(n_h-1)])
+            self.softpluses = nn.ModuleList([nn.Softplus() for _ in range(n_h-1)])
+        
+        # ! adapt to multitask
+        # if self.classification:
+        #     self.fc_out = nn.Linear(h_fea_len, num_classes)  # ! Changed 2 --> 7 (for systems)
+        # else:
+        #     self.fc_out = nn.Linear(h_fea_len, 1)
+        # if self.classification:
+        #     self.logsoftmax = nn.LogSoftmax(dim=1)
+        #     self.dropout = nn.Dropout()
+
+        # ! vectorization process layers
+        self.vec_embedding = nn.Linear(self.vector_len * dims, vec_fea_len * dims)
+        self.vec_fcs = nn.ModuleList([nn.Linear(vec_fea_len * dims, vec_fea_len * dims)
+                                     for _ in range(n_vec)])
+        self.vec_pooling = nn.Linear(vec_fea_len * dims, vec_fea_len)
+
+        # ! perslay --> experiment with parameters
+        if self.vector == 'perslay':
+            self.weights = nn.ModuleList([
+                tp.PowerPerslayWeight(
+                    constant=1.0,   # learnable
+                    power=1.0
+                )
+                for _ in range(dims)
+            ])
+            # input (read from pickle)
+            with open(f'{root_dir}/bounds.pkl', 'rb') as file:
+                self.image_bnds = pickle.load(file)
+            self.phis = nn.ModuleList([
+                tp.GaussianPerslayPhi(
+                    image_size=(20, 20),
+                    image_bnds=self.image_bnds[i],
+                    variance=0.1,   # learnable
+                )
+                for i in range(dims)
+            ])
+            self.perm_op = torch.sum
+            self.rho = nn.Identity()
+
+            self.perslays = nn.ModuleList([
+                tp.Perslay(weight=self.weights[i], phi=self.phis[i], perm_op=self.perm_op, rho=self.rho)
+                for i in range(dims)
+            ])
 
 
 class MLPHead(nn.Module):
@@ -127,7 +224,7 @@ class CrystalGraphConvNet(nn.Module):
           Number of hidden layers after pooling
         """
         super(CrystalGraphConvNet, self).__init__()
-
+        
         assert vector in ['none', 'image', 'landscape', 'perslay'], 'incorrect vectorization input!'
         assert weight in ['none', 'power', 'grid', 'gaussian']  # only none or power
         assert phi in ['none', 'image', 'landscape', 'betti']   # only none or image
