@@ -160,6 +160,7 @@ def main():
         persistent_workers=True
     )
 
+    # ! CHANGE (for multitask)
     # obtain target value normalizer
     if args.task == 'classification':
         normalizer = Normalizer(torch.zeros(2))

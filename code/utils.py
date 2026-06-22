@@ -32,7 +32,7 @@ FIELDS = [
 
 PREDICT = [
     'system',
-    'bm_voight',
+    'bm_voigt',
     'bm_reuss',
     'bm_vrh', 
     # 'dos',                # future task

@@ -86,6 +86,7 @@ def get_train_val_test_loader(dataset, collate_fn=default_collate,
     train_ids = []
     for i in range(train_size):
         train_ids.append(dataset.id_prop_data[i][0])
+    #############
 
     train_loader = DataLoader(dataset, batch_size=batch_size,
                               sampler=train_sampler,
@@ -143,12 +144,12 @@ def collate_pool(dataset_list):
       Mapping from the crystal idx to atom idx (for each atom, stores crystal idx)
     batch_vectorizations: torch.LongTensor shape (N0, vec_len*DIM_CNT)
     batch_d0/1/2: torch.LongTensor shape (N0, pt_cnt, 2)
-    target: torch.Tensor shape (N0, 1)
+    targets: torch.Tensor shape (N0, 8) --> multitask (classification & regression)
       Target value for prediction
     batch_cif_ids: list
     """
     batch_atom_fea, batch_nbr_fea, batch_nbr_fea_idx = [], [], []
-    crystal_atom_idx, batch_target = [], []
+    crystal_atom_idx, batch_targets = [], []
     batch_vectorizations = []
     batch_d0, batch_d1, batch_d2 = [], [], []
     batch_cif_ids = []
@@ -157,7 +158,7 @@ def collate_pool(dataset_list):
         (atom_fea, nbr_fea, nbr_fea_idx), 
         vectorizations, 
         [d0, d1, d2],
-        target, 
+        targets, 
         cif_id)\
             in enumerate(dataset_list):
         n_i = atom_fea.shape[0]  # number of atoms for this crystal
@@ -170,7 +171,7 @@ def collate_pool(dataset_list):
         batch_d0.append(d0)
         batch_d1.append(d1)
         batch_d2.append(d2)
-        batch_target.append(target)
+        batch_targets.append(targets)
         batch_cif_ids.append(cif_id)
         base_idx += n_i
     return (torch.cat(batch_atom_fea, dim=0),
@@ -183,7 +184,7 @@ def collate_pool(dataset_list):
             torch.stack(batch_d1, dim=0),
             torch.stack(batch_d2, dim=0),
         ],\
-        torch.stack(batch_target, dim=0),\
+        torch.stack(batch_targets, dim=0),\
         batch_cif_ids
 
 
@@ -396,7 +397,11 @@ class GraphData(Dataset):
 
 
     def __getitem__(self, idx):
-        mp_id, target = self.id_prop_data[idx]
+        mp_id = self.id_prop_data[idx][0]
+        # ! multitask targets
+        targets = list(self.id_prop_data[idx][1:])
+        # mask = 
+
         graph_dict = self._load_graph_dict(mp_id)
         graph = graph_dict['graph']
 
@@ -484,8 +489,9 @@ class GraphData(Dataset):
         nbr_fea = torch.Tensor(nbr_fea)
         nbr_fea_idx = torch.LongTensor(nbr_fea_idx)
         vectorizations = torch.Tensor(vectorizations)
-        target = torch.Tensor([float(target)])
-        return (atom_fea, nbr_fea, nbr_fea_idx), vectorizations, diagrams, target, mp_id
+        # target = torch.Tensor([float(target)])
+        targets = torch.Tensor(targets)
+        return (atom_fea, nbr_fea, nbr_fea_idx), vectorizations, diagrams, targets, mp_id
 
 
 class CIFData(Dataset):

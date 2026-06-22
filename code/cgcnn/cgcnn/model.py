@@ -85,7 +85,7 @@ class CrystalGraphConvNet(nn.Module):
             self, orig_atom_fea_len, nbr_fea_len,
             atom_fea_len=64, n_conv=3, h_fea_len=128, n_h=1,
             vec_fea_len=64, n_vec=1,
-            classification=False, num_classes=2,
+            # classification=False, num_classes=2,
             vector='none', weight='none', phi='none',
             dims=3, root_dir='data/graph_data'
     ):
@@ -138,7 +138,7 @@ class CrystalGraphConvNet(nn.Module):
             # elif self.phi == 'betti':
             #     pass
         
-        self.classification = classification
+        # self.classification = classification
         self.embedding = nn.Linear(orig_atom_fea_len, atom_fea_len)
         self.convs = nn.ModuleList([ConvLayer(atom_fea_len=atom_fea_len,
                                     nbr_fea_len=nbr_fea_len)
@@ -151,10 +151,12 @@ class CrystalGraphConvNet(nn.Module):
         if n_h > 1:
             self.fcs = nn.ModuleList([nn.Linear(h_fea_len, h_fea_len) for _ in range(n_h-1)])
             self.softpluses = nn.ModuleList([nn.Softplus() for _ in range(n_h-1)])
-        if self.classification:
-            self.fc_out = nn.Linear(h_fea_len, num_classes)  # ! Changed 2 --> 7 (for systems)
-        else:
-            self.fc_out = nn.Linear(h_fea_len, 1)
+        
+        # ! multitask
+        # if self.classification:
+        #     self.fc_out = nn.Linear(h_fea_len, num_classes)  # ! Changed 2 --> 7 (for systems)
+        # else:
+        #     self.fc_out = nn.Linear(h_fea_len, 1)
         if self.classification:
             self.logsoftmax = nn.LogSoftmax(dim=1)
             self.dropout = nn.Dropout()
@@ -226,6 +228,7 @@ class CrystalGraphConvNet(nn.Module):
           Atom hidden features after convolution
 
         """
+        ################## START OF ENCODER ##################
         atom_fea = self.embedding(atom_fea)
         for conv_func in self.convs:
             atom_fea = conv_func(atom_fea, nbr_fea, nbr_fea_idx)
@@ -252,13 +255,15 @@ class CrystalGraphConvNet(nn.Module):
 
         crys_fea = self.conv_to_fc(self.conv_to_fc_softplus(crys_fea))
         crys_fea = self.conv_to_fc_softplus(crys_fea)
+        ################## END OF ENCODER ##################
+
         if self.classification:
             crys_fea = self.dropout(crys_fea)
         if hasattr(self, 'fcs') and hasattr(self, 'softpluses'):
             for fc, softplus in zip(self.fcs, self.softpluses):
                 crys_fea = softplus(fc(crys_fea))
         out = self.fc_out(crys_fea)
-        if self.classification:
+        if self.classification:         # ! maybe don't use softmax? let loss handle logits directly?
             out = self.logsoftmax(out)
         return out
 

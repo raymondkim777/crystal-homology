@@ -14,8 +14,8 @@ from vectorizers import IM_BANDWIDTH, IM_RESOLUTION, fit_image_transformers
 from utils import CRYSTAL_SYSTEMS, PREDICT, DIMENSION_CNT, get_num_cpus, open_write_file
 
 
-# CGCNN_DATAPATH = 'cgcnn/data/graph_data'
-CGCNN_DATAPATH = 'cgcnn/data/example_graph_data'
+CGCNN_DATAPATH = 'cgcnn/data/graph_data'
+# CGCNN_DATAPATH = 'cgcnn/data/example_graph_data'
 
 
 def _parse_args():
@@ -158,37 +158,67 @@ def retrieve_diagrams():
     return reorganize_list_of_dicts(padded_diagram_dict_by_dim)
 
 
-def make_id_prop():
+def write_id_prop_mask():
     doc_dict = dict()
     for system in CRYSTAL_SYSTEMS:
+        print(f"Unpacking {system} system docs...")
         with open(f'data/mp-subset/{system}.pkl', 'rb') as file:
             system_dict = pickle.load(file)
         doc_dict.update(system_dict)
     
-    csv_data = []
+    csv_prop_data = []
+    csv_mask_data = []
     system_to_int = {CRYSTAL_SYSTEMS[idx]: idx for idx in range(len(CRYSTAL_SYSTEMS))}
 
-    for mp_id, doc in doc_dict.items():
-        id_dict = {
-            'system': system_to_int[str(doc['symmetry'].crystal_system).lower()],   # int7
-            'bm_voight': doc['bulk_modulus']['voight'],                             # float
-            'bm_reuss': doc['bulk_modulus']['reuss'],                               # float
-            'bm_vrh': doc['bulk_modulus']['vrh'],                                   # float
-            'direct_gap': doc['bandstructure'].latimer_munro.direct_gap,            # float
-            'band_gap': doc['band_gap'],                                            # float
-            'efermi': doc['efermi'],                                                # float
-            'is_gap_direct': 1 if doc['is_gap_direct'] else 0,                      # int2
+    print(f"Computing id_prop.csv and id_mask.csv...")
+    for mp_id, doc in tqdm(doc_dict.items()):
+        prop_dict = {
+            'system': system_to_int[str(doc['symmetry'].crystal_system).lower()],
+            'bm_voigt': doc['bulk_modulus']['voigt'] if doc['bulk_modulus'] is not None else 0.0,
+            'bm_reuss': doc['bulk_modulus']['reuss'] if doc['bulk_modulus'] is not None else 0.0,
+            'bm_vrh': doc['bulk_modulus']['vrh'] if doc['bulk_modulus'] is not None else 0.0,
+            'direct_gap': doc['bandstructure'].latimer_munro.direct_gap 
+            if doc['bandstructure'] is not None and doc['bandstructure'].latimer_munro is not None 
+            else 0.0,
+            'band_gap': doc['band_gap'] if doc['band_gap'] is not None else 0.0,
+            'efermi': doc['efermi'] if doc['efermi'] is not None else 0.0,
+            'is_gap_direct': 1 if doc['is_gap_direct'] is not None and doc['is_gap_direct'] else 0,
         }
-        csv_row = [mp_id[3:]]
+        mask_dict = {
+            'system': 1,
+            'bm_voigt': int(doc['bulk_modulus'] is not None),
+            'bm_reuss': int(doc['bulk_modulus'] is not None),
+            'bm_vrh': int(doc['bulk_modulus'] is not None),
+            'direct_gap': int(doc['bandstructure'] is not None and doc['bandstructure'].latimer_munro is not None),
+            'band_gap': int(doc['band_gap'] is not None),
+            'efermi': int(doc['efermi'] is not None),
+            'is_gap_direct': int(doc['is_gap_direct'] is not None),
+        }
+        csv_prop_row = [mp_id[3:]]
+        csv_mask_row = [mp_id[3:]]
+
         # ensure order is same as PREDICT in utils.py
         for prop in PREDICT:
-            csv_row.append(id_dict[prop])
-        csv_data.append(csv_row)
+            csv_prop_row.append(prop_dict[prop])
+            csv_mask_row.append(mask_dict[prop])
+        csv_prop_data.append(csv_prop_row)
+        csv_mask_data.append(csv_mask_row)
     
-    csv_filepath = open_write_file(CGCNN_DATAPATH, 'id_prop.csv')
-    with open(csv_filepath, 'w', newline='', encoding='utf-8') as f:
+    print(f"Writing id_prop.csv and id_mask.csv...")
+    csv_prop_filepath = open_write_file(CGCNN_DATAPATH, 'id_prop.csv')
+    with open(csv_prop_filepath, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
-        writer.writerows(csv_data)
+        writer.writerows(csv_prop_data)
+
+    csv_mask_filepath = open_write_file(CGCNN_DATAPATH, 'id_mask.csv')
+    with open(csv_mask_filepath, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        writer.writerows(csv_mask_data)
+
+    # save PREDICT list to CGCNN data path
+    predict_filepath = open_write_file(f"{CGCNN_DATAPATH}", f'predict.pkl')
+    with open(predict_filepath, 'wb') as f:
+        pickle.dump(PREDICT, f)
 
 
 def graph_process(vector=False):
@@ -211,8 +241,8 @@ def graph_process(vector=False):
         with open(cgcnn_datapath, 'wb') as f:
             pickle.dump(value, f)
     
-    # multitask regression/classification id_prop
-    make_id_prop()
+    # multitask regression/classification id_prop and id_mask
+    write_id_prop_mask()
 
     if vector:
         diagram_dict = retrieve_diagrams()
