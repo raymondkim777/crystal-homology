@@ -76,6 +76,24 @@ class ConvLayer(nn.Module):
         return out
 
 
+class MLPHead(nn.Module):
+    '''
+    Small MLP prediction head for individual crystal properties. 
+    Can modify hidden/output dimension, as well as layer depth. 
+    '''
+    def __init__(self, hidden_dim, output_dim, layer_cnt=1):
+        super(MLPHead, self).__init__()
+        layers = []
+        for _ in range(layer_cnt):
+            layers.append(nn.Linear(hidden_dim, hidden_dim))
+            layers.append(nn.Softplus())
+        layers.append(nn.Linear(hidden_dim, output_dim))
+        self.model = nn.Sequential(*layers)
+
+    def forward(self, input):
+        return self.model(input)
+
+
 class CrystalGraphConvNet(nn.Module):
     """
     Create a crystal graph convolutional neural network for predicting total
