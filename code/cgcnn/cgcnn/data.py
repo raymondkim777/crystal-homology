@@ -390,7 +390,7 @@ class GraphData(Dataset):
 
 
     def __getitem__(self, idx):
-        mp_id, target = self.id_prop_data[idx]
+        mp_id, target = self.id_prop_data[idx][0], self.id_prop_data[idx][1]
         graph_dict = self._load_graph_dict(mp_id)
         graph = graph_dict['graph']
 
