@@ -82,8 +82,10 @@ def get_train_val_test_loader(dataset, collate_fn=default_collate,
     if return_test:
         test_sampler = SubsetRandomSampler(indices[-test_size:])
 
-    # use indices[] to extract train mp-IDs, collect mean/stdev info
-
+    # ! use indices[] to extract train mp-IDs, collect mean/stdev info before train
+    train_ids = []
+    for i in range(train_size):
+        train_ids.append(dataset.id_prop_data[i][0])
 
     train_loader = DataLoader(dataset, batch_size=batch_size,
                               sampler=train_sampler,

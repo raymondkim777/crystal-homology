@@ -10,7 +10,7 @@ from tqdm import tqdm
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from create_bonds import get_structures_from_cif
 from vectorizers import IM_BANDWIDTH, IM_RESOLUTION, fit_image_transformers
-from utils import CRYSTAL_SYSTEMS, DIMENSION_CNT, get_num_cpus, open_write_file
+from utils import CRYSTAL_SYSTEMS, PREDICT, DIMENSION_CNT, get_num_cpus, open_write_file
 
 
 # CGCNN_DATAPATH = 'cgcnn/data/graph_data'
@@ -95,25 +95,6 @@ def remove_diagram_padding(diagram, eps=1e-12):
     return final_diagram
 
 
-# def process_all_diagrams(diagram_dict: dict):
-#     '''
-#     Removes all diagram giotto-tda padding (b == d), organizes triplets into
-#     separate dimensions, and removes dimension field. Applied to list of diagrams.
-#     Input: {id1: diagram1, id2: diagram2, ...} where diagram = [[b, d, dim], ...]
-#     Output: {id1: [h0_diagram1, h1_diagram1, h2_diagram1], ...}
-#             where each Hn diagram is [[b, d], ...]
-#     '''
-#     dim_diagrams = dict()
-#     for mp_id, diagram in diagram_dict.items():
-#         dim_diagrams[mp_id] = []
-#         for dim in range(DIMENSION_CNT):
-#             triplets_in_dim = diagram[diagram[:, 2] == dim]
-#             doubles_in_dim = triplets_in_dim[:, :2]
-#             final_diagram = remove_diagram_padding(doubles_in_dim)
-#             dim_diagrams[mp_id].append(final_diagram)
-#     return dim_diagrams
-
-
 def process_all_diagrams(diagram_dict: dict) -> list:
     '''
     Removes all diagram giotto-tda padding (b == d), organizes triplets into
@@ -176,6 +157,30 @@ def retrieve_diagrams():
     return reorganize_list_of_dicts(padded_diagram_dict_by_dim)
 
 
+def make_id_prop():
+    doc_dict = dict()
+    for system in CRYSTAL_SYSTEMS:
+        with open(f'data/mp-subset/{system}.pkl', 'rb') as file:
+            system_dict = pickle.load(file)
+        doc_dict.update(system_dict)
+    
+    csv_data = []
+    system_to_int = {CRYSTAL_SYSTEMS[idx]: idx for idx in range(len(CRYSTAL_SYSTEMS))}
+
+    for mp_id, doc in doc_dict.values():
+        id_dict = dict()
+        id_dict['system'] = str(doc['symmetry'].crystal_system).lower()
+        id_dict['bm_voight'] = doc['bulk_modulus']
+
+    
+    csv_filepath = open_write_file(CGCNN_DATAPATH, 'id_prop.csv')
+    with open(csv_filepath, 'w') as f:
+        # multitask regression/classification
+        for mp_id, value in graph_dict.items():
+            f.write(f"{mp_id[3:]}, {system_to_int[value['system']]}\n")
+    pass
+
+
 def graph_process(vector=False):
     """
     Saves all graphs with labeled crystal systems in CGCNN data folder. 
@@ -196,14 +201,7 @@ def graph_process(vector=False):
         with open(cgcnn_datapath, 'wb') as f:
             pickle.dump(value, f)
     
-    # create id_prop.csv
-    system_to_int = {CRYSTAL_SYSTEMS[idx]: idx for idx in range(len(CRYSTAL_SYSTEMS))}
-    
-    csv_filepath = open_write_file(CGCNN_DATAPATH, 'id_prop.csv')
-    with open(csv_filepath, 'w') as f:
-        # multitask regression/classification
-        for mp_id, value in graph_dict.items():
-            f.write(f"{mp_id[3:]}, {system_to_int[value['system']]}\n")
+    make_id_prop()
 
     if vector:
         diagram_dict = retrieve_diagrams()
