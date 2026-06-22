@@ -81,13 +81,6 @@ def get_train_val_test_loader(dataset, collate_fn=default_collate,
         indices[-(valid_size + test_size):-test_size])
     if return_test:
         test_sampler = SubsetRandomSampler(indices[-test_size:])
-
-    # ! use indices[] to extract train mp-IDs, collect mean/stdev info before train
-    train_ids = []
-    for i in range(train_size):
-        train_ids.append(dataset.id_prop_data[i][0])
-    #############
-
     train_loader = DataLoader(dataset, batch_size=batch_size,
                               sampler=train_sampler,
                               num_workers=num_workers,
@@ -149,16 +142,18 @@ def collate_pool(dataset_list):
     batch_cif_ids: list
     """
     batch_atom_fea, batch_nbr_fea, batch_nbr_fea_idx = [], [], []
-    crystal_atom_idx, batch_targets = [], []
+    crystal_atom_idx = []
     batch_vectorizations = []
-    batch_d0, batch_d1, batch_d2 = [], [], []
+    batch_diagrams = []
+    batch_targets, batch_mask = dict(), dict()
     batch_cif_ids = []
     base_idx = 0
     for i, (
         (atom_fea, nbr_fea, nbr_fea_idx), 
         vectorizations, 
-        [d0, d1, d2],
+        diagrams,
         targets, 
+        mask, 
         cif_id)\
             in enumerate(dataset_list):
         n_i = atom_fea.shape[0]  # number of atoms for this crystal
@@ -168,10 +163,19 @@ def collate_pool(dataset_list):
         new_idx = torch.LongTensor(np.arange(n_i)+base_idx)
         crystal_atom_idx.append(new_idx)
         batch_vectorizations.append(vectorizations)
-        batch_d0.append(d0)
-        batch_d1.append(d1)
-        batch_d2.append(d2)
-        batch_targets.append(targets)
+        for i in range(len(diagrams)):
+            if len(batch_diagrams) <= i:
+                batch_diagrams.append([])
+            batch_diagrams[i].append(diagrams[i])
+        for key in targets.keys():
+            if key not in batch_targets.keys():
+                batch_targets[key] = []
+            batch_targets[key].append(targets[key])
+        # mask
+        for key in mask.keys():
+            if key not in batch_mask.keys():
+                batch_mask[key] = []
+            batch_mask[key].append(mask[key])
         batch_cif_ids.append(cif_id)
         base_idx += n_i
     return (torch.cat(batch_atom_fea, dim=0),
@@ -180,11 +184,17 @@ def collate_pool(dataset_list):
             crystal_atom_idx),\
         torch.stack(batch_vectorizations, dim=0),\
         [
-            torch.stack(batch_d0, dim=0),
-            torch.stack(batch_d1, dim=0),
-            torch.stack(batch_d2, dim=0),
+            torch.stack(batch_diags, dim=0)
+            for batch_diags in batch_diagrams
         ],\
-        torch.stack(batch_targets, dim=0),\
+        {
+            key: torch.cat(batch_targets[key], dim=0)
+            for key in batch_targets.keys()
+        },\
+        {
+            key: torch.cat(batch_mask[key], dim=0)
+            for key in batch_mask.keys()
+        },\
         batch_cif_ids
 
 
@@ -353,9 +363,24 @@ class GraphData(Dataset):
         assert os.path.exists(id_prop_file), 'id_prop.csv does not exist!'
         with open(id_prop_file) as f:
             reader = csv.reader(f)
-            self.id_prop_data = [row for row in reader]
-        random.seed(random_seed)
+            self.id_prop_data = [[row] for row in reader]
+        # ! appending mask data to prop data
+        id_mask_file = os.path.join(self.root_dir, 'id_mask.csv')
+        assert os.path.exists(id_mask_file)
+        with open(id_mask_file) as f:
+            reader = csv.reader(f)
+            id_mask_data = [row for row in reader]
+        for i in range(self.id_prop_data):
+            assert self.id_prop_data[i][0][0] == id_mask_data[i][0], 'id_prop and id_mask IDs do not match!'
+            self.id_prop_data[i].append(id_mask_data[i])
+        predict_file = os.path.join(self.root_dir, 'predict.pkl')
+        with open(predict_file, 'rb') as f:
+            self.predict_list = pickle.load(f)
+        assert len(self.id_prop_data[0][0][1:] == len(self.predict_list)), 'prop count does not match predict count!'
+        assert len(self.id_prop_data[0][1][1:] == len(self.predict_list)), 'mask count does not match predict count!'
+        
         # ! shuffling (before calling get_train_val_test_loader in main)
+        random.seed(random_seed)
         random.shuffle(self.id_prop_data)
         atom_init_file = os.path.join(self.root_dir, 'atom_init.json')
         assert os.path.exists(atom_init_file), 'atom_init.json does not exist!'
@@ -390,17 +415,23 @@ class GraphData(Dataset):
         return delta_cart
     
 
-    @functools.lru_cache(maxsize=4096)  # Cache computed attributes
+    @functools.lru_cache(maxsize=None)  # Cache computed attributes
     def _load_graph_dict(self, mp_id):
         with open(os.path.join(self.root_dir, "graphs", f"mp-{mp_id}.pkl"), 'rb') as file:
             return pickle.load(file)
 
 
+    @functools.lru_cache(maxsize=None)  # Cache compiled data dictionaries
     def __getitem__(self, idx):
-        mp_id = self.id_prop_data[idx][0]
+        mp_id = self.id_prop_data[idx][0][0]
         # ! multitask targets
-        targets = list(self.id_prop_data[idx][1:])
-        # mask = 
+        target_list = list(self.id_prop_data[idx][0][1:])
+        mask_list = list(self.id_prop_data[idx][1][1:])
+
+        targets, mask = dict(), dict()
+        for i in range(self.predict_list):
+            targets[self.predict_list[i]] = torch.tensor([target_list[i]])
+            mask[self.predict_list[i]] = torch.tensor([mask_list[i]]).bool()
 
         graph_dict = self._load_graph_dict(mp_id)
         graph = graph_dict['graph']
@@ -489,109 +520,4 @@ class GraphData(Dataset):
         nbr_fea = torch.Tensor(nbr_fea)
         nbr_fea_idx = torch.LongTensor(nbr_fea_idx)
         vectorizations = torch.Tensor(vectorizations)
-        # target = torch.Tensor([float(target)])
-        targets = torch.Tensor(targets)
-        return (atom_fea, nbr_fea, nbr_fea_idx), vectorizations, diagrams, targets, mp_id
-
-
-class CIFData(Dataset):
-    """
-    The CIFData dataset is a wrapper for a dataset where the crystal structures
-    are stored in the form of CIF files. The dataset should have the following
-    directory structure:
-
-    root_dir
-    ├── id_prop.csv
-    ├── atom_init.json
-    ├── id0.cif
-    ├── id1.cif
-    ├── ...
-
-    id_prop.csv: a CSV file with two columns. The first column recodes a
-    unique ID for each crystal, and the second column recodes the value of
-    target property.
-
-    atom_init.json: a JSON file that stores the initialization vector for each
-    element.
-
-    ID.cif: a CIF file that recodes the crystal structure, where ID is the
-    unique ID for the crystal.
-
-    Parameters
-    ----------
-
-    root_dir: str
-        The path to the root directory of the dataset
-    max_num_nbr: int
-        The maximum number of neighbors while constructing the crystal graph
-    radius: float
-        The cutoff radius for searching neighbors
-    dmin: float
-        The minimum distance for constructing GaussianDistance
-    step: float
-        The step size for constructing GaussianDistance
-    random_seed: int
-        Random seed for shuffling the dataset
-
-    Returns
-    -------
-
-    atom_fea: torch.Tensor shape (n_i, atom_fea_len)
-    nbr_fea: torch.Tensor shape (n_i, M, nbr_fea_len)
-    nbr_fea_idx: torch.LongTensor shape (n_i, M)
-    target: torch.Tensor shape (1, )
-    cif_id: str or int
-    """
-    def __init__(self, root_dir, max_num_nbr=12, radius=8, dmin=0, step=0.2,
-                 random_seed=123):
-        self.root_dir = root_dir
-        self.max_num_nbr, self.radius = max_num_nbr, radius
-        assert os.path.exists(root_dir), 'root_dir does not exist!'
-        id_prop_file = os.path.join(self.root_dir, 'id_prop.csv')
-        assert os.path.exists(id_prop_file), 'id_prop.csv does not exist!'
-        with open(id_prop_file) as f:
-            reader = csv.reader(f)
-            self.id_prop_data = [row for row in reader]
-        random.seed(random_seed)
-        random.shuffle(self.id_prop_data)
-        atom_init_file = os.path.join(self.root_dir, 'atom_init.json')
-        assert os.path.exists(atom_init_file), 'atom_init.json does not exist!'
-        self.ari = AtomCustomJSONInitializer(atom_init_file)
-        self.gdf = GaussianDistance(dmin=dmin, dmax=self.radius, step=step)
-
-    def __len__(self):
-        return len(self.id_prop_data)
-
-    @functools.lru_cache(maxsize=None)  # Cache loaded structures
-    def __getitem__(self, idx):
-        cif_id, target = self.id_prop_data[idx]
-        crystal = Structure.from_file(os.path.join(self.root_dir,
-                                                   cif_id+'.cif'))
-        atom_fea = np.vstack([self.ari.get_atom_fea(crystal[i].specie.number)
-                              for i in range(len(crystal))])
-        atom_fea = torch.Tensor(atom_fea)
-        all_nbrs = crystal.get_all_neighbors(self.radius, include_index=True)
-        all_nbrs = [sorted(nbrs, key=lambda x: x[1]) for nbrs in all_nbrs]
-        nbr_fea_idx, nbr_fea = [], []
-        for nbr in all_nbrs:
-            if len(nbr) < self.max_num_nbr:
-                warnings.warn('{} not find enough neighbors to build graph. '
-                              'If it happens frequently, consider increase '
-                              'radius.'.format(cif_id))
-                nbr_fea_idx.append(list(map(lambda x: x[2], nbr)) +
-                                   [0] * (self.max_num_nbr - len(nbr)))
-                nbr_fea.append(list(map(lambda x: x[1], nbr)) +
-                               [self.radius + 1.] * (self.max_num_nbr -
-                                                     len(nbr)))
-            else:
-                nbr_fea_idx.append(list(map(lambda x: x[2],
-                                            nbr[:self.max_num_nbr])))
-                nbr_fea.append(list(map(lambda x: x[1],
-                                        nbr[:self.max_num_nbr])))
-        nbr_fea_idx, nbr_fea = np.array(nbr_fea_idx), np.array(nbr_fea)
-        nbr_fea = self.gdf.expand(nbr_fea)
-        atom_fea = torch.Tensor(atom_fea)
-        nbr_fea = torch.Tensor(nbr_fea)
-        nbr_fea_idx = torch.LongTensor(nbr_fea_idx)
-        target = torch.Tensor([float(target)])
-        return (atom_fea, nbr_fea, nbr_fea_idx), target, cif_id
+        return (atom_fea, nbr_fea, nbr_fea_idx), vectorizations, diagrams, targets, mask, mp_id
