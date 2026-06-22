@@ -366,14 +366,14 @@ class GraphData(Dataset):
             self.id_prop_data = [[row] for row in reader]
         # ! appending mask data to prop data
         id_mask_file = os.path.join(self.root_dir, 'id_mask.csv')
-        assert os.path.exists(id_mask_file)
+        assert os.path.exists(id_mask_file), 'id_mask.csv does not exist!'
         with open(id_mask_file) as f:
             reader = csv.reader(f)
             id_mask_data = [row for row in reader]
         for i in range(self.id_prop_data):
             assert self.id_prop_data[i][0][0] == id_mask_data[i][0], 'id_prop and id_mask IDs do not match!'
             self.id_prop_data[i].append(id_mask_data[i])
-        predict_file = os.path.join(self.root_dir, 'predict.pkl')
+        predict_file = os.path.join(self.root_dir, 'tasks', 'predict.pkl')
         with open(predict_file, 'rb') as f:
             self.predict_list = pickle.load(f)
         assert len(self.id_prop_data[0][0][1:] == len(self.predict_list)), 'prop count does not match predict count!'
@@ -393,13 +393,13 @@ class GraphData(Dataset):
         self.vector = vector
         self.vector_dict = dict()
         if self.vector == 'image':
-            with open(os.path.join(self.root_dir, 'images.pkl'), 'rb') as file:
+            with open(os.path.join(self.root_dir, 'vecs', 'images.pkl'), 'rb') as file:
                 self.vector_dict = pickle.load(file)
         elif self.vector == 'landscape':
-            with open(os.path.join(self.root_dir, 'landscapes.pkl'), 'rb') as file:
+            with open(os.path.join(self.root_dir, 'vecs', 'landscapes.pkl'), 'rb') as file:
                 self.vector_dict = pickle.load(file)
         elif self.vector == 'perslay':
-            with open(os.path.join(self.root_dir, 'diagrams.pkl'), 'rb') as file:
+            with open(os.path.join(self.root_dir, 'vecs', 'diagrams.pkl'), 'rb') as file:
                 self.vector_dict = pickle.load(file)  # technically diagrams, not vector
         
 

@@ -43,6 +43,41 @@ PREDICT = [
     'is_gap_direct'
 ]
 
+TASK_SPECS = {
+    'system': {
+        'head': 'multiclass', 
+        'out_dim': 7,
+    },
+    'bm_voigt': {
+        'head': 'regression', 
+        'out_dim': 1,
+    },
+    'bm_reuss': {
+        'head': 'regression', 
+        'out_dim': 1,
+    },
+    'bm_vrh': {
+        'head': 'regression', 
+        'out_dim': 1,
+    },
+    'direct_gap': {
+        'head': 'regression', 
+        'out_dim': 1,
+    },
+    'band_gap': {
+        'head': 'regression', 
+        'out_dim': 1,
+    },
+    'efermi': {
+        'head': 'regression', 
+        'out_dim': 1,
+    },
+    'is_gap_direct': {
+        'head': 'binary', 
+        'out_dim': 1,
+    },
+}
+
 DIMENSION_CNT = 3
 MAX_DIST = 12.43843407284584  # computed from find_max_dist()
 MAX_NBR = 38

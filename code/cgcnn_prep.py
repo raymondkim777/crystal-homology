@@ -11,7 +11,7 @@ from tqdm import tqdm
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from create_bonds import get_structures_from_cif
 from vectorizers import IM_BANDWIDTH, IM_RESOLUTION, fit_image_transformers
-from utils import CRYSTAL_SYSTEMS, PREDICT, DIMENSION_CNT, get_num_cpus, open_write_file
+from utils import CRYSTAL_SYSTEMS, PREDICT, TASK_SPECS, DIMENSION_CNT, get_num_cpus, open_write_file
 
 
 CGCNN_DATAPATH = 'cgcnn/data/graph_data'
@@ -215,11 +215,6 @@ def write_id_prop_mask():
         writer = csv.writer(f)
         writer.writerows(csv_mask_data)
 
-    # save PREDICT list to CGCNN data path
-    predict_filepath = open_write_file(f"{CGCNN_DATAPATH}", f'predict.pkl')
-    with open(predict_filepath, 'wb') as f:
-        pickle.dump(PREDICT, f)
-
 
 def graph_process(vector=False):
     """
@@ -244,6 +239,16 @@ def graph_process(vector=False):
     # multitask regression/classification id_prop and id_mask
     write_id_prop_mask()
 
+    # save PREDICT list to CGCNN data path
+    predict_filepath = open_write_file(f"{CGCNN_DATAPATH}/tasks", f'predict.pkl')
+    with open(predict_filepath, 'wb') as f:
+        pickle.dump(PREDICT, f)
+
+    # save TASK_SPEC dict to CGCNN data path
+    task_filepath = open_write_file(f"{CGCNN_DATAPATH}/tasks", f'tasks.pkl')
+    with open(task_filepath, 'wb') as f:
+        pickle.dump(TASK_SPECS, f)
+
     if vector:
         diagram_dict = retrieve_diagrams()
         image_dict, landscape_dict = dict(), dict()
@@ -256,15 +261,15 @@ def graph_process(vector=False):
                 landscapes = pickle.load(file)
             landscape_dict = landscape_dict | landscapes  # [mat_id][dim]
 
-        cgcnn_diagram_datapath = open_write_file(f"{CGCNN_DATAPATH}", f'diagrams.pkl')
+        cgcnn_diagram_datapath = open_write_file(f"{CGCNN_DATAPATH}/vecs", f'diagrams.pkl')
         with open(cgcnn_diagram_datapath, 'wb') as f:
             pickle.dump(diagram_dict, f)
 
-        cgcnn_image_datapath = open_write_file(f"{CGCNN_DATAPATH}", f'images.pkl')
+        cgcnn_image_datapath = open_write_file(f"{CGCNN_DATAPATH}/vecs", f'images.pkl')
         with open(cgcnn_image_datapath, 'wb') as f:
             pickle.dump(image_dict, f)
 
-        cgcnn_landscape_datapath = open_write_file(f"{CGCNN_DATAPATH}", f'landscapes.pkl')
+        cgcnn_landscape_datapath = open_write_file(f"{CGCNN_DATAPATH}/vecs", f'landscapes.pkl')
         with open(cgcnn_landscape_datapath, 'wb') as f:
             pickle.dump(landscape_dict, f)
 

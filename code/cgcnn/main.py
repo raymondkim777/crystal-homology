@@ -1,5 +1,6 @@
 import argparse
 import os
+import pickle
 import shutil
 import sys
 import time
@@ -81,6 +82,8 @@ parser.add_argument('--vec-fea-len', default=64, type=int, metavar='N',
                     help='number of hidden vector features per dimension in hidden layers')
 parser.add_argument('--n-vec', default=1, type=int, metavar='N',
                     help='number of hidden vector processing layers')
+parser.add_argument('--n-o', default=1, type=int, metavar='N',
+                    help='number of hidden layers in head MLP')
 
 
 parser.add_argument('--seed', action='store_true',
@@ -176,6 +179,12 @@ def main():
         _, sample_target, _ = collate_pool(sample_data_list)
         normalizer = Normalizer(sample_target)
 
+    # read in head tasks
+    task_filepath = os.path.join(args.data_options, 'tasks', 'tasks.pkl')
+    assert os.path.exists(task_filepath), 'Tasks file (tasks.pkl) does not exist!'
+    with open(task_filepath, 'rb') as f:
+        task_specs = pickle.load(f)
+
     # build model
     structures, _, _, _, _ = dataset[0]
     orig_atom_fea_len = structures[0].shape[-1]
@@ -197,6 +206,7 @@ def main():
         phi=args.phi,
         dims=args.dims,
         root_dir=args.data_options,
+        task_specs=task_specs,
     )
     # ! updated tensor cuda code
     # if args.cuda:
@@ -209,11 +219,13 @@ def main():
             perslay.phi.mu = perslay.phi.mu.to(device)
             perslay.phi.M = tuple(m.to(device) for m in perslay.phi.M)
 
-    # define loss func and optimizer
-    if args.task == 'classification':
-        criterion = nn.NLLLoss()
-    else:
-        criterion = nn.MSELoss()
+    # ! CUSTOM LOSS FUNCTION
+    # # define loss func and optimizer
+    # if args.task == 'classification':
+    #     criterion = nn.NLLLoss()
+    # else:
+    #     criterion = nn.MSELoss()
+            
     if args.optim == 'SGD':
         optimizer = optim.SGD(model.parameters(), args.lr,
                               momentum=args.momentum,

@@ -85,7 +85,7 @@ class CrystalGraphEncoder(nn.Module):
             vector='none', weight='none', phi='none',
             dims=3, root_dir='data/graph_data'
     ):
-        super(CrystalGraphEncoder, self).__init__()
+        super().__init__()
 
         assert vector in ['none', 'image', 'landscape', 'perslay'], 'incorrect vectorization input!'
         assert weight in ['none', 'power', 'grid', 'gaussian']  # only none or power
@@ -239,7 +239,7 @@ class MLPHead(nn.Module):
     Can modify hidden/output dimension, as well as layer depth. 
     '''
     def __init__(self, hidden_dim, output_dim, layer_cnt=1, classification=False):
-        super(MLPHead, self).__init__()
+        super().__init__()
         layers = []
         if classification:
             layers.append(nn.Dropout())
@@ -261,10 +261,10 @@ class CrystalGraphConvNet(nn.Module):
     def __init__(
             self, orig_atom_fea_len, nbr_fea_len,
             atom_fea_len=64, n_conv=3, h_fea_len=128, n_h=1,
-            vec_fea_len=64, n_vec=1,
+            vec_fea_len=64, n_vec=1, n_o=1,
             # classification=False, num_classes=2,
             vector='none', weight='none', phi='none',
-            dims=3, root_dir='data/graph_data'
+            dims=3, root_dir='data/graph_data', task_specs=None,
     ):
         """
         Initialize CrystalGraphConvNet.
@@ -295,8 +295,18 @@ class CrystalGraphConvNet(nn.Module):
             vector, weight, phi,
             dims, root_dir
         )
+        # load head information
+        assert task_specs is not None, 'No head tasks inputted!'
+
         # define ModuleDict for each property head
         self.heads = nn.ModuleDict()
+        for task, item in task_specs.items():
+            self.heads[task] = MLPHead(
+                h_fea_len, 
+                item['out_dim'], 
+                layer_cnt=n_o,
+                classification=item['head'] in ['multiclass', 'binary'],
+            )
 
     def forward(
             self, 
@@ -338,8 +348,15 @@ class CrystalGraphConvNet(nn.Module):
             vectorizations, 
             diagrams, 
         )
-        # ! maybe add some more fc layers to encoder? 
         ################## END OF ENCODER ##################
+
+        out = dict()
+        for task, head in self.heads.items():
+            predict = head(crys_fea)
+            if predict.shape[-1] == 1:
+                predict = predict.squeeze(-1)
+            out[task] = predict
+        return out
 
         if self.classification:
             crys_fea = self.dropout(crys_fea)       # add dropout for each classification head instead
