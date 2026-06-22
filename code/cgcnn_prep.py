@@ -1,6 +1,7 @@
 import argparse
 import random
 import pickle
+import csv
 import json
 import numpy as np
 import networkx as nx
@@ -167,18 +168,27 @@ def make_id_prop():
     csv_data = []
     system_to_int = {CRYSTAL_SYSTEMS[idx]: idx for idx in range(len(CRYSTAL_SYSTEMS))}
 
-    for mp_id, doc in doc_dict.values():
-        id_dict = dict()
-        id_dict['system'] = str(doc['symmetry'].crystal_system).lower()
-        id_dict['bm_voight'] = doc['bulk_modulus']
-
+    for mp_id, doc in doc_dict.items():
+        id_dict = {
+            'system': system_to_int[str(doc['symmetry'].crystal_system).lower()],   # int7
+            'bm_voight': doc['bulk_modulus']['voight'],                             # float
+            'bm_reuss': doc['bulk_modulus']['reuss'],                               # float
+            'bm_vrh': doc['bulk_modulus']['vrh'],                                   # float
+            'direct_gap': doc['bandstructure'].latimer_munro.direct_gap,            # float
+            'band_gap': doc['band_gap'],                                            # float
+            'efermi': doc['efermi'],                                                # float
+            'is_gap_direct': 1 if doc['is_gap_direct'] else 0,                      # int2
+        }
+        csv_row = [mp_id[3:]]
+        # ensure order is same as PREDICT in utils.py
+        for prop in PREDICT:
+            csv_row.append(id_dict[prop])
+        csv_data.append(csv_row)
     
     csv_filepath = open_write_file(CGCNN_DATAPATH, 'id_prop.csv')
-    with open(csv_filepath, 'w') as f:
-        # multitask regression/classification
-        for mp_id, value in graph_dict.items():
-            f.write(f"{mp_id[3:]}, {system_to_int[value['system']]}\n")
-    pass
+    with open(csv_filepath, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        writer.writerows(csv_data)
 
 
 def graph_process(vector=False):
@@ -201,6 +211,7 @@ def graph_process(vector=False):
         with open(cgcnn_datapath, 'wb') as f:
             pickle.dump(value, f)
     
+    # multitask regression/classification id_prop
     make_id_prop()
 
     if vector:
