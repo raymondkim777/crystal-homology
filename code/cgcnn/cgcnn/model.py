@@ -171,6 +171,66 @@ class CrystalGraphEncoder(nn.Module):
                 tp.Perslay(weight=self.weights[i], phi=self.phis[i], perm_op=self.perm_op, rho=self.rho)
                 for i in range(dims)
             ])
+    
+    def forward(
+            self, 
+            atom_fea, nbr_fea, nbr_fea_idx, 
+            crystal_atom_idx,
+            vectorizations, 
+            diagrams, 
+        ):
+        atom_fea = self.embedding(atom_fea)
+        for conv_func in self.convs:
+            atom_fea = conv_func(atom_fea, nbr_fea, nbr_fea_idx)
+        crys_fea = self.pooling(atom_fea, crystal_atom_idx)
+
+        # ! concatenating vectorizations
+        if self.vector != 'none':
+            # initialize vec embeddings
+            if self.vector in ['image', 'landscape']:
+                vec_fea = vectorizations
+            elif self.vector == 'perslay':
+                vec_fea = torch.cat([
+                    self.perslays[i](diagrams[i]).squeeze(-1).flatten(start_dim=1)
+                    for i in range(len(self.perslays))
+                ], dim=1)
+            # vec processing layers
+            vec_fea = self.vec_embedding(vectorizations)
+            for vec_fc in self.vec_fcs:
+                vec_fea = vec_fc(vec_fea)
+            vec_fea = self.vec_pooling(vec_fea)
+                
+            # concatenating processed vec to crystal features
+            crys_fea = torch.cat([crys_fea, vec_fea], dim=1)
+
+        crys_fea = self.conv_to_fc(self.conv_to_fc_softplus(crys_fea))
+        crys_fea = self.conv_to_fc_softplus(crys_fea)
+        
+        if hasattr(self, 'fcs') and hasattr(self, 'softpluses'):
+            for fc, softplus in zip(self.fcs, self.softpluses):
+                crys_fea = softplus(fc(crys_fea))
+        return crys_fea
+    
+    def pooling(self, atom_fea, crystal_atom_idx):
+        """
+        Pooling the atom features to crystal features
+
+        N: Total number of atoms in the batch
+        N0: Total number of crystals in the batch
+
+        Parameters
+        ----------
+
+        atom_fea: Variable(torch.Tensor) shape (N, atom_fea_len)
+          Atom feature vectors of the batch
+        crystal_atom_idx: list of torch.LongTensor of length N0
+          Mapping from the crystal idx to atom idx
+        """
+        assert sum([len(idx_map) for idx_map in crystal_atom_idx]) ==\
+            atom_fea.data.shape[0]
+        summed_fea = [torch.mean(atom_fea[idx_map], dim=0, keepdim=True)
+                      for idx_map in crystal_atom_idx]
+        return torch.cat(summed_fea, dim=0)
 
 
 class MLPHead(nn.Module):
@@ -178,9 +238,11 @@ class MLPHead(nn.Module):
     Small MLP prediction head for individual crystal properties. 
     Can modify hidden/output dimension, as well as layer depth. 
     '''
-    def __init__(self, hidden_dim, output_dim, layer_cnt=1):
+    def __init__(self, hidden_dim, output_dim, layer_cnt=1, classification=False):
         super(MLPHead, self).__init__()
         layers = []
+        if classification:
+            layers.append(nn.Dropout())
         for _ in range(layer_cnt):
             layers.append(nn.Linear(hidden_dim, hidden_dim))
             layers.append(nn.Softplus())
@@ -224,98 +286,24 @@ class CrystalGraphConvNet(nn.Module):
           Number of hidden layers after pooling
         """
         super(CrystalGraphConvNet, self).__init__()
-        
-        assert vector in ['none', 'image', 'landscape', 'perslay'], 'incorrect vectorization input!'
-        assert weight in ['none', 'power', 'grid', 'gaussian']  # only none or power
-        assert phi in ['none', 'image', 'landscape', 'betti']   # only none or image
-        
-        self.vector = vector
-        self.weight = weight
-        self.phi = phi
 
-        if self.vector == 'none':
-            self.vector_len = 0
-        elif self.vector == 'image':
-            self.vector_len = 400
-        elif self.vector == 'landscape':
-            self.vector_len = 500
-        elif self.vector == 'perslay':
-            if self.phi == 'image':
-                self.vector_len = 400
-
-            # ! Don't use landscape/betti for now
-            # TentPerslayPhi/FlatPerslayPhi function doesn't compute k-th highest tent,
-            # it concatenates tent/betti functions (len: sample) for each point --> sample * point
-            # so vectorization is absurdly long
-
-            # elif self.phi == 'landscape':
-            #     pass
-            # elif self.phi == 'betti':
-            #     pass
-        
-        # self.classification = classification
-        self.embedding = nn.Linear(orig_atom_fea_len, atom_fea_len)
-        self.convs = nn.ModuleList([ConvLayer(atom_fea_len=atom_fea_len,
-                                    nbr_fea_len=nbr_fea_len)
-                                    for _ in range(n_conv)])
-        
-        # ! vectorization concatenation length
-        conv_to_fc_input_len = atom_fea_len + vec_fea_len
-        self.conv_to_fc = nn.Linear(conv_to_fc_input_len, h_fea_len)
-        self.conv_to_fc_softplus = nn.Softplus()
-        if n_h > 1:
-            self.fcs = nn.ModuleList([nn.Linear(h_fea_len, h_fea_len) for _ in range(n_h-1)])
-            self.softpluses = nn.ModuleList([nn.Softplus() for _ in range(n_h-1)])
-        
-        # ! multitask
-        # if self.classification:
-        #     self.fc_out = nn.Linear(h_fea_len, num_classes)  # ! Changed 2 --> 7 (for systems)
-        # else:
-        #     self.fc_out = nn.Linear(h_fea_len, 1)
-        if self.classification:
-            self.logsoftmax = nn.LogSoftmax(dim=1)
-            self.dropout = nn.Dropout()
-
-        # ! vectorization process layers
-        self.vec_embedding = nn.Linear(self.vector_len * dims, vec_fea_len * dims)
-        self.vec_fcs = nn.ModuleList([nn.Linear(vec_fea_len * dims, vec_fea_len * dims)
-                                     for _ in range(n_vec)])
-        self.vec_pooling = nn.Linear(vec_fea_len * dims, vec_fea_len)
-
-        # ! perslay --> experiment with parameters
-        if self.vector == 'perslay':
-            self.weights = nn.ModuleList([
-                tp.PowerPerslayWeight(
-                    constant=1.0,   # learnable
-                    power=1.0
-                )
-                for _ in range(dims)
-            ])
-            # input (read from pickle)
-            with open(f'{root_dir}/bounds.pkl', 'rb') as file:
-                self.image_bnds = pickle.load(file)
-            self.phis = nn.ModuleList([
-                tp.GaussianPerslayPhi(
-                    image_size=(20, 20),
-                    image_bnds=self.image_bnds[i],
-                    variance=0.1,   # learnable
-                )
-                for i in range(dims)
-            ])
-            self.perm_op = torch.sum
-            self.rho = nn.Identity()
-
-            self.perslays = nn.ModuleList([
-                tp.Perslay(weight=self.weights[i], phi=self.phis[i], perm_op=self.perm_op, rho=self.rho)
-                for i in range(dims)
-            ])
+        self.encoder = CrystalGraphEncoder(
+            orig_atom_fea_len, nbr_fea_len,
+            atom_fea_len, n_conv, h_fea_len, n_h,
+            vec_fea_len, n_vec,
+            # classification, num_classes,
+            vector, weight, phi,
+            dims, root_dir
+        )
+        # define ModuleDict for each property head
+        self.heads = nn.ModuleDict()
 
     def forward(
             self, 
             atom_fea, nbr_fea, nbr_fea_idx, 
             crystal_atom_idx,
             vectorizations, 
-            diagrams,    # [d0, d1, d2]
+            diagrams,
     ):
         """
         Forward pass
@@ -344,61 +332,22 @@ class CrystalGraphConvNet(nn.Module):
 
         """
         ################## START OF ENCODER ##################
-        atom_fea = self.embedding(atom_fea)
-        for conv_func in self.convs:
-            atom_fea = conv_func(atom_fea, nbr_fea, nbr_fea_idx)
-        crys_fea = self.pooling(atom_fea, crystal_atom_idx)
-
-        # ! concatenating vectorizations
-        if self.vector != 'none':
-            # initialize vec embeddings
-            if self.vector in ['image', 'landscape']:
-                vec_fea = vectorizations
-            elif self.vector == 'perslay':
-                vec_fea = torch.cat([
-                    self.perslays[i](diagrams[i]).squeeze(-1).flatten(start_dim=1)
-                    for i in range(len(self.perslays))
-                ], dim=1)
-            # vec processing layers
-            vec_fea = self.vec_embedding(vectorizations)
-            for vec_fc in self.vec_fcs:
-                vec_fea = vec_fc(vec_fea)
-            vec_fea = self.vec_pooling(vec_fea)
-                
-            # concatenating processed vec to crystal features
-            crys_fea = torch.cat([crys_fea, vec_fea], dim=1)
-
-        crys_fea = self.conv_to_fc(self.conv_to_fc_softplus(crys_fea))
-        crys_fea = self.conv_to_fc_softplus(crys_fea)
+        crys_fea = self.encoder(
+            atom_fea, nbr_fea, nbr_fea_idx, 
+            crystal_atom_idx,
+            vectorizations, 
+            diagrams, 
+        )
+        # ! maybe add some more fc layers to encoder? 
         ################## END OF ENCODER ##################
 
         if self.classification:
-            crys_fea = self.dropout(crys_fea)
+            crys_fea = self.dropout(crys_fea)       # add dropout for each classification head instead
         if hasattr(self, 'fcs') and hasattr(self, 'softpluses'):
             for fc, softplus in zip(self.fcs, self.softpluses):
                 crys_fea = softplus(fc(crys_fea))
         out = self.fc_out(crys_fea)
-        if self.classification:         # ! maybe don't use softmax? let loss handle logits directly?
+        # ! custom loss uses crossentropyloss --> don't use softmax, let loss handle logits directly
+        if self.classification:
             out = self.logsoftmax(out)
         return out
-
-    def pooling(self, atom_fea, crystal_atom_idx):
-        """
-        Pooling the atom features to crystal features
-
-        N: Total number of atoms in the batch
-        N0: Total number of crystals in the batch
-
-        Parameters
-        ----------
-
-        atom_fea: Variable(torch.Tensor) shape (N, atom_fea_len)
-          Atom feature vectors of the batch
-        crystal_atom_idx: list of torch.LongTensor of length N0
-          Mapping from the crystal idx to atom idx
-        """
-        assert sum([len(idx_map) for idx_map in crystal_atom_idx]) ==\
-            atom_fea.data.shape[0]
-        summed_fea = [torch.mean(atom_fea[idx_map], dim=0, keepdim=True)
-                      for idx_map in crystal_atom_idx]
-        return torch.cat(summed_fea, dim=0)
