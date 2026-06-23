@@ -27,7 +27,7 @@ FIELDS = [
     # 'cbm', 
     # 'vbm', 
     'efermi', 
-    'is_gap_direct'
+    'is_gap_direct',
 ]
 
 PREDICT = [

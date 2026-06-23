@@ -295,7 +295,7 @@ def save_bounds():
         image_bnds_list.append(bounds_tuple)
     
     # save JSON
-    file_path = open_write_file(CGCNN_DATAPATH, 'bounds.pkl')
+    file_path = open_write_file(f'{CGCNN_DATAPATH}/tasks', 'bounds.pkl')
     with open(file_path, "wb") as f:
         pickle.dump(image_bnds_list, f)
             

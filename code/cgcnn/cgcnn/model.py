@@ -122,7 +122,7 @@ class CrystalGraphEncoder(nn.Module):
                                     for _ in range(n_conv)])
         
         # ! vectorization concatenation length
-        conv_to_fc_input_len = atom_fea_len + vec_fea_len
+        conv_to_fc_input_len = atom_fea_len if self.vector == 'none' else atom_fea_len + vec_fea_len
         self.conv_to_fc = nn.Linear(conv_to_fc_input_len, h_fea_len)
         self.conv_to_fc_softplus = nn.Softplus()
         if n_h > 1:
@@ -154,7 +154,7 @@ class CrystalGraphEncoder(nn.Module):
                 for _ in range(dims)
             ])
             # input (read from pickle)
-            with open(f'{root_dir}/bounds.pkl', 'rb') as file:
+            with open(f'{root_dir}/tasks/bounds.pkl', 'rb') as file:
                 self.image_bnds = pickle.load(file)
             self.phis = nn.ModuleList([
                 tp.GaussianPerslayPhi(

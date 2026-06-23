@@ -363,21 +363,21 @@ class GraphData(Dataset):
         assert os.path.exists(id_prop_file), 'id_prop.csv does not exist!'
         with open(id_prop_file) as f:
             reader = csv.reader(f)
-            self.id_prop_data = [[row] for row in reader]
+            self.id_prop_data = [[[row[0]] + [float(item) for item in row[1:]]] for row in reader]
         # ! appending mask data to prop data
         id_mask_file = os.path.join(self.root_dir, 'id_mask.csv')
         assert os.path.exists(id_mask_file), 'id_mask.csv does not exist!'
         with open(id_mask_file) as f:
             reader = csv.reader(f)
-            id_mask_data = [row for row in reader]
-        for i in range(self.id_prop_data):
+            id_mask_data = [[row[0]] + [float(item) for item in row[1:]] for row in reader]
+        for i in range(len(self.id_prop_data)):
             assert self.id_prop_data[i][0][0] == id_mask_data[i][0], 'id_prop and id_mask IDs do not match!'
             self.id_prop_data[i].append(id_mask_data[i])
         predict_file = os.path.join(self.root_dir, 'tasks', 'predict.pkl')
         with open(predict_file, 'rb') as f:
             self.predict_list = pickle.load(f)
-        assert len(self.id_prop_data[0][0][1:] == len(self.predict_list)), 'prop count does not match predict count!'
-        assert len(self.id_prop_data[0][1][1:] == len(self.predict_list)), 'mask count does not match predict count!'
+        assert len(self.id_prop_data[0][0][1:]) == len(self.predict_list), 'prop count does not match predict count!'
+        assert len(self.id_prop_data[0][1][1:]) == len(self.predict_list), 'mask count does not match predict count!'
         
         # ! shuffling (before calling get_train_val_test_loader in main)
         random.seed(random_seed)
@@ -427,10 +427,12 @@ class GraphData(Dataset):
         # ! multitask targets
         target_list = list(self.id_prop_data[idx][0][1:])
         mask_list = list(self.id_prop_data[idx][1][1:])
+        # print("target list:", target_list)
+        # print("mask list:", mask_list)
 
         targets, mask = dict(), dict()
-        for i in range(self.predict_list):
-            targets[self.predict_list[i]] = torch.tensor([target_list[i]])
+        for i in range(len(self.predict_list)):
+            targets[self.predict_list[i]] = torch.tensor([target_list[i]]).long()
             mask[self.predict_list[i]] = torch.tensor([mask_list[i]]).bool()
 
         graph_dict = self._load_graph_dict(mp_id)

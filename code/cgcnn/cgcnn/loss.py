@@ -5,10 +5,10 @@ import torch.nn as nn
 class MultiTaskLoss(nn.Module):
     def __init__(self):
         super().__init__()
-        self.loss_bin = nn.BCELoss
-        self.loss_class = nn.CrossEntropyLoss()
-        self.loss_reg = nn.HuberLoss()
-        pass
+        self.loss_bin = nn.BCEWithLogitsLoss(reduction='none')
+        self.loss_class = nn.CrossEntropyLoss(reduction='none')
+        self.loss_reg = nn.HuberLoss(reduction='none')
+    
 
     def forward(self, input, target_dict, mask_dict, task_specs):
         '''
@@ -21,12 +21,14 @@ class MultiTaskLoss(nn.Module):
             ...
         }
         '''
-        total_loss = torch.tensor([0], requires_grad=True)
+        losses = []
+        # total_loss = torch.tensor([0], dtype=torch.float32, requires_grad=True)
         loss_dict = dict()  # DEBUGGING: stores loss information for each property
         available_labels = 0    # if 0, every crystal in batch had no labels
 
         # compute each property loss for all crystals in batch
         for prop, value in input.items():
+            task = task_specs[prop]['head']
             targ = target_dict[prop].to(value.device)
             mask = mask_dict[prop].to(value.device)
 
@@ -35,24 +37,30 @@ class MultiTaskLoss(nn.Module):
 
             # Note: empty labels have default value 0
             # reduction none to mask out unlabeled losses in batch
-            if prop == 'binary':
-                prop_loss = self.loss_bin(input[prop], targ, reduction='none')
-            elif prop == 'multiclass':
-                prop_loss = self.loss_class(input[prop], targ, reduction='none')
-            elif prop == 'regression':
-                prop_loss = self.loss_reg(input[prop], targ, reduction='none')
+            if task == 'binary':
+                prop_loss = self.loss_bin(input[prop], targ)
+            elif task == 'multiclass':
+                prop_loss = self.loss_class(input[prop], targ.long())
+            elif task == 'regression':
+                prop_loss = self.loss_reg(input[prop], targ)
             else:
-                raise ValueError(f"[Loss] Unknown property: {prop}")
+                raise ValueError(f"[Loss] Unknown task: {task}")
 
             mask_float = mask.float()
             batch_loss = (prop_loss * mask_float).sum() / mask_float.sum().clamp_min(1.0)
             
-            total_loss += batch_loss
+            # total_loss = total_loss + batch_loss
+            losses.append(batch_loss)
             loss_dict[prop] = {
-                'loss': float(prop_loss.detach().cpu()),
+                'loss': float(batch_loss.detach().cpu()),
                 'num_avail': num_avail,
             }
         
+        if len(losses) > 0:
+            total_loss = torch.stack(losses).sum()
+        else:
+            total_loss = sum(pred.sum() * 0.0 for pred in input.values())
+
         loss_dict['available_labels'] = available_labels
         loss_dict['total_loss'] = float(total_loss.detach().cpu())
         return total_loss, loss_dict
