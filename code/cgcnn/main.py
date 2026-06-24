@@ -122,7 +122,7 @@ with open(task_filepath, 'rb') as f:
     TASK_SPECS = pickle.load(f)
 
 
-best_errors = 100
+best_errors = float('inf')
 
 
 def main():
@@ -136,14 +136,15 @@ def main():
     if args.delete:
         check_path = f"./checkpoint_{args.id}.pth.tar"
         model_path = f"./model_best_{args.id}.pth.tar"
-        result_path = f"./test_results_{args.id}.csv"
+        result_paths = [f"./test_results_{args.id}_{prop}.csv" for prop in TASK_SPECS.keys()]
         
         if os.path.exists(check_path):
             os.remove(check_path)
         if os.path.exists(model_path):
             os.remove(model_path)
-        if os.path.exists(result_path):
-            os.remove(result_path)
+        for result_path in result_paths:
+            if os.path.exists(result_path):
+                os.remove(result_path)
 
 
     # load data
@@ -173,7 +174,7 @@ def main():
         test_size=args.test_size,
         return_test=True,
         # ! added
-        persistent_workers=True
+        # persistent_workers=True
     )
     
     # ! CHANGE (for multitask)
@@ -683,10 +684,14 @@ def validate(val_loader, model, criterion, normalizers, test=False):
                 
                 if test:
                     test_pred = torch.exp(output[prop].detach().cpu())
-                    test_target = target[prop]
-
-                    assert test_pred.shape[1] == TASK_SPECS[prop]['out_dim']
-                    pred_label = torch.argmax(test_pred, dim=1)
+                    test_target = targets[prop]
+                    
+                    if TASK_SPECS[prop]['out_dim'] == 1:
+                        assert test_pred.ndim == 1
+                        test_pred = np.stack([1 - test_pred, test_pred], axis=1)
+                    else:
+                        assert test_pred.shape[1] == TASK_SPECS[prop]['out_dim']
+                    pred_label = np.argmax(test_pred, axis=1)
                     test_stats[prop]['test_preds'] += pred_label.tolist()
                     test_stats[prop]['test_probs'] += test_pred.tolist()
                     test_stats[prop]['test_targets'] += test_target.view(-1).tolist()
@@ -703,7 +708,7 @@ def validate(val_loader, model, criterion, normalizers, test=False):
                 stats[prop]['nrmse_errors'].update(nrmse_error, targets[prop].size(0))
 
                 if test:
-                    test_pred = normalizers[prop].denorm(output.detach().cpu())
+                    test_pred = normalizers[prop].denorm(output[prop].detach().cpu())
                     test_target = targets[prop]
                     test_stats[prop]['test_preds'] += test_pred.view(-1).tolist()
                     test_stats[prop]['test_targets'] += test_target.view(-1).tolist()
@@ -856,7 +861,7 @@ def validate(val_loader, model, criterion, normalizers, test=False):
 
                 if TASK_SPECS[prop]['head'] in ['binary', 'multiclass']:
                     header = ['mp-id', 'target', 'predicted_class']
-                    header += [f'prob_class_{i}' for i in range(args.num_classes)]
+                    header += [f'prob_class_{i}' for i in range(len(item['test_probs'][0]))]
                     writer.writerow(header)
 
                     for cif_id, target, pred, probs in zip(
