@@ -5,6 +5,7 @@ __pycache__
 code/data/mp*
 code/data/cif
 code/data/cif-small
+code/data/rejects.csv
 code/data/bounds.json
 code/data/bid_true.txt
 code/data/stats.csv

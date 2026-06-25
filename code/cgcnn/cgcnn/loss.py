@@ -7,7 +7,8 @@ class MultiTaskLoss(nn.Module):
         super().__init__()
         self.loss_bin = nn.BCEWithLogitsLoss(reduction='none')
         self.loss_class = nn.CrossEntropyLoss(reduction='none')
-        self.loss_reg = nn.HuberLoss(reduction='none')
+        # self.loss_reg = nn.HuberLoss(reduction='none')
+        self.loss_reg = nn.MSELoss(reduction='none')
     
 
     def forward(self, input, target_dict, mask_dict, task_specs):
@@ -35,6 +36,11 @@ class MultiTaskLoss(nn.Module):
             num_avail = int(mask.sum().detach().cpu())
             available_labels += num_avail
 
+            # ! DEBUG
+            # if prop == 'bm_voigt':
+                # print("input:", input[prop])
+                # print("target:", targ)
+
             # Note: empty labels have default value 0
             # reduction none to mask out unlabeled losses in batch
             if task == 'binary':
@@ -49,10 +55,9 @@ class MultiTaskLoss(nn.Module):
             mask_float = mask.float()
             batch_loss = (prop_loss * mask_float).sum() / mask_float.sum().clamp_min(1.0)
             
-            # total_loss = total_loss + batch_loss
-            losses.append(batch_loss)
+            losses.append(batch_loss)   # batch loss across all props (accounting for invalid labels)
             loss_dict[prop] = {
-                'loss': float(batch_loss.detach().cpu()),
+                'loss': float(batch_loss.detach().cpu()), # batch loss for each prop
                 'num_avail': num_avail,
             }
         

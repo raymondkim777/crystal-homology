@@ -174,9 +174,9 @@ def write_id_prop_mask():
     for mp_id, doc in tqdm(doc_dict.items()):
         prop_dict = {
             'system': system_to_int[str(doc['symmetry'].crystal_system).lower()],
-            'bm_voigt': doc['bulk_modulus']['voigt'] if doc['bulk_modulus'] is not None else 0.0,
-            'bm_reuss': doc['bulk_modulus']['reuss'] if doc['bulk_modulus'] is not None else 0.0,
-            'bm_vrh': doc['bulk_modulus']['vrh'] if doc['bulk_modulus'] is not None else 0.0,
+            # 'bm_voigt': doc['bulk_modulus']['voigt'] if doc['bulk_modulus'] is not None else 0.0,
+            # 'bm_reuss': doc['bulk_modulus']['reuss'] if doc['bulk_modulus'] is not None else 0.0,
+            # 'bm_vrh': doc['bulk_modulus']['vrh'] if doc['bulk_modulus'] is not None else 0.0,
             'direct_gap': doc['bandstructure'].latimer_munro.direct_gap 
             if doc['bandstructure'] is not None and doc['bandstructure'].latimer_munro is not None 
             else 0.0,
@@ -184,16 +184,54 @@ def write_id_prop_mask():
             'efermi': doc['efermi'] if doc['efermi'] is not None else 0.0,
             'is_gap_direct': 1 if doc['is_gap_direct'] is not None and doc['is_gap_direct'] else 0,
         }
+        if 'absorption' in doc.keys():
+            doc_abs = doc['absorption']
+            prop_dict.update({
+                'max_absorption': doc_abs['max_absorption'] if doc_abs['max_absorption'] is not None else 0.0,
+                'max_absorption_energy': doc_abs['max_absorption_energy'] if doc_abs['max_absorption_energy'] is not None else 0.0,
+                'integrated_absorption': doc_abs['integrated_absorption'] if doc_abs['integrated_absorption'] is not None else 0.0,
+                'integrated_absorption_visible': doc_abs['integrated_absorption_visible'] if doc_abs['integrated_absorption_visible'] is not None else 0.0,
+                'average_absorption_visible': doc_abs['average_absorption_visible'] if doc_abs['average_absorption_visible'] is not None else 0.0,
+                'absorption_onset_energy': doc_abs['absorption_onset_energy'] if doc_abs['absorption_onset_energy'] is not None else 0.0,
+            })
+        else:
+            prop_dict.update({
+                'max_absorption': 0.0,
+                'max_absorption_energy': 0.0,
+                'integrated_absorption': 0.0,
+                'integrated_absorption_visible': 0.0,
+                'average_absorption_visible': 0.0,
+                'absorption_onset_energy': 0.0,
+            })
         mask_dict = {
             'system': 1,
-            'bm_voigt': int(doc['bulk_modulus'] is not None),
-            'bm_reuss': int(doc['bulk_modulus'] is not None),
-            'bm_vrh': int(doc['bulk_modulus'] is not None),
+            # 'bm_voigt': int(doc['bulk_modulus'] is not None),
+            # 'bm_reuss': int(doc['bulk_modulus'] is not None),
+            # 'bm_vrh': int(doc['bulk_modulus'] is not None),
             'direct_gap': int(doc['bandstructure'] is not None and doc['bandstructure'].latimer_munro is not None),
             'band_gap': int(doc['band_gap'] is not None),
             'efermi': int(doc['efermi'] is not None),
             'is_gap_direct': int(doc['is_gap_direct'] is not None),
         }
+        if 'absorption' in doc.keys():
+            doc_abs = doc['absorption']
+            mask_dict.update({
+                'max_absorption': int(doc_abs['max_absorption'] is not None),
+                'max_absorption_energy': int(doc_abs['max_absorption_energy'] is not None),
+                'integrated_absorption': int(doc_abs['integrated_absorption'] is not None),
+                'integrated_absorption_visible': int(doc_abs['integrated_absorption_visible'] is not None),
+                'average_absorption_visible': int(doc_abs['average_absorption_visible'] is not None),
+                'absorption_onset_energy': int(doc_abs['absorption_onset_energy'] is not None),
+            })
+        else:
+            mask_dict.update({
+                'max_absorption': 0,
+                'max_absorption_energy': 0,
+                'integrated_absorption': 0,
+                'integrated_absorption_visible': 0,
+                'average_absorption_visible': 0,
+                'absorption_onset_energy': 0,
+            })
         csv_prop_row = [mp_id[3:]]
         csv_mask_row = [mp_id[3:]]
 

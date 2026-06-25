@@ -1,8 +1,10 @@
 import argparse
+import os
 import shutil
 import json
-import random
+import csv
 import pickle
+import random
 import numpy as np
 from tqdm import tqdm
 from mp_api.client import MPRester
@@ -17,6 +19,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+DATA_PATH = 'data'
 MP_DATA_PATH = 'data/mp-raw'
 SUBSET_DATA_PATH = 'data/mp-subset'
 CIF_DATA_PATH = 'data/cif'
@@ -27,11 +30,12 @@ def _parse_args():
     parser.add_argument('--seed', action='store_true', help='sets random seed to 42')
     parser.add_argument('--random', action='store_true', help='compute random, not optimal subset')
     parser.add_argument('--subset', action='store_true', help='compute subset')
-    parser.add_argument('--size', default=6700, type=int, help='subset size for each class')
+    parser.add_argument('--size', default=5500, type=int, help='subset size for each class')
     parser.add_argument('--large', action='store_true', help='add random subset of larger non-optimal crystals')
-    parser.add_argument('--size-large', default=8000, type=int, help='total subset size (including large) for each class')
+    parser.add_argument('--size-large', default=7000, type=int, help='total subset size (including large) for each class')
     parser.add_argument('--cif', action='store_true', help='convert subset to CIF files')
     parser.add_argument('--absorb', action='store_true', help='append absorption data to subsets')
+    parser.add_argument('--reject', action='store_true', help='stores rejected mp_ids to CSV')
     return parser.parse_args()
 
 
@@ -89,6 +93,7 @@ class CrystalSubset:
                     x = value[prop]
 
                     if x is not None:
+                        assert self.crystals[mp_id][prop] is not None, "full crystals and system dict don't match!"
                         A[i, prop_idx] = 1.0
 
             ids_by_system[system] = np.asarray(ids, dtype=object)
@@ -104,7 +109,7 @@ class CrystalSubset:
         return ids_by_system, avail_by_system, property_freq, property_rarity
 
 
-    def select_one_system_fast(self, system, subset_size):
+    def select_one_system_fast(self, system, subset_size, rejections=None):
         ids = self.ids_by_system[system]
         A = self.avail_by_system[system]
 
@@ -116,12 +121,43 @@ class CrystalSubset:
 
         # Initial scores for all crystals in this system.
         scores = base_scores + A @ weights
-
         selected_indices = []
 
         for _ in tqdm(range(subset_size), desc=f"{system}: "):
             # Pick best remaining crystal.
             best_idx = int(np.argmax(scores))
+
+            # # check data is valid
+            # invalid = False
+            # crystal_doc = self.crystals[ids[best_idx]]
+
+            # # bulk modulus
+            # if A[best_idx, 0] == 1:
+            #     if 'voigt' in crystal_doc['bulk_modulus'].keys() and crystal_doc['bulk_modulus']['voigt'] < 0:
+            #         invalid = True
+            #         if rejections is not None:
+            #             rejections.add(ids[best_idx], 'neg_voigt')
+            #     if 'reuss' in crystal_doc['bulk_modulus'].keys() and crystal_doc['bulk_modulus']['reuss'] < 0:
+            #         invalid = True
+            #         if rejections is not None:
+            #             rejections.add(ids[best_idx], 'neg_reuss')
+            #     if 'vrh' in crystal_doc['bulk_modulus'].keys() and crystal_doc['bulk_modulus']['vrh'] < 0:
+            #         invalid = True
+            #         if rejections is not None:
+            #             rejections.add(ids[best_idx], 'neg_vrh')
+            # # band gap
+            # if A[best_idx, 2] == 1:
+            #     if crystal_doc['band_gap'] < 0:
+            #         invalid = True
+            #         if rejections is not None:
+            #             rejections.add(ids[best_idx], 'neg_bg')
+            
+            # # ignore invalid crystal
+            # if invalid:
+            #     scores[best_idx] = -np.inf
+            #     continue
+
+            # add crystal to list
             selected_indices.append(best_idx)
 
             selected_avail = A[best_idx]
@@ -148,16 +184,19 @@ class CrystalSubset:
 
 
     def select_and_save_subset_ids(
-            self, subset_size=6700, 
-            subset_large=False, total_size=8000
-    ):
+            self, subset_size=5500, 
+            subset_large=False, total_size=7000, 
+            reject=False
+    ):  
+        rejections = Rejections() if reject else None
+
         print(f"Computing optimal subsets...")
         for system in CRYSTAL_SYSTEMS:
             # reset prop counts (each system should be independent)
             self.prop_cnts = np.zeros(len(self.fields), dtype=np.float32)
 
             # find optimal subset IDs
-            subset_id_list = self.select_one_system_fast(system, subset_size)
+            subset_id_list = self.select_one_system_fast(system, subset_size, rejections=rejections)
 
             # optionally supplement with larger crystals for generalization
             if subset_large:
@@ -174,6 +213,11 @@ class CrystalSubset:
             subset_path = open_write_file(SUBSET_DATA_PATH, f"{system}.pkl")
             with open(subset_path, "wb") as f:
                 pickle.dump(subset_json, f)
+        
+        if reject:
+            reject_path = open_write_file(DATA_PATH, 'rejects.csv')
+            rejections.save(reject_path)
+            print(f"Successfully saved {len(rejections)} rejections as CSV")
 
 
     def compile_dicts_from_ids(self, id_list):
@@ -396,6 +440,39 @@ class AbsorptionSubset:
         return abs_max, abs_max_e, abs_int, abs_int_vis, abs_avg_vis, abs_onset_e
 
 
+class Rejections():
+    '''
+    Class to store rejected (invalid) MP IDs and reasons why. 
+    Saves to CSV if desired.
+    '''
+    def __init__(self):
+        self.items = dict()
+        self.reason_to_idx = {
+            'neg_voigt': 0, 
+            'neg_reuss': 1, 
+            'neg_vrh': 2,
+            'neg_bg': 3,
+        }
+
+    def __len__(self):
+        return len(self.items.keys())
+    
+    def add(self, mp_id, reason):
+        if mp_id not in self.items.keys():
+            self.items[mp_id] = [False for _ in self.reason_to_idx.keys()]
+        self.items[mp_id][self.reason_to_idx[reason]] = True
+    
+    def save(self, filepath):
+        with open(filepath, 'w', newline='', encoding='utf-8') as file:
+            writer = csv.writer(file)
+            header = ['Material ID'] + list(self.reason_to_idx.keys())
+            writer.writerow(header)
+
+            for id, reason in self.items.items():
+                row = [id] + ['XXXXXX' if reason[i] else '' for i in range(len(reason))]
+                writer.writerow(row)
+
+
 ##### DEPRECATED #####
     
 def select_random_subset(subset_size=6700) -> None:
@@ -434,10 +511,9 @@ if __name__ == "__main__":
             crystal_subset.select_and_save_subset_ids(
                 subset_size=args.size,
                 subset_large=args.large,
-                total_size=args.size_large
+                total_size=args.size_large,
+                reject=args.reject
             )
-        if args.large:
-            pass
         if args.absorb:
             crystal_subset.merge_abs_mp_data()
         if args.cif:

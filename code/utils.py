@@ -19,9 +19,9 @@ FIELDS = [
     "symmetry", 
     "structure", 
     # Chemist recommended fields
-    # 'phonon_IDs',     # idk about this one
-    'bulk_modulus', 
-    # 'dos',            # use mpr.get_dos_by_material_id("mp-id") for DOS curve
+    # 'phonon_IDs',         # idk about this one
+    # 'bulk_modulus',       # dataset quality is too bad (values are -10,000 ~ 2,000,000 range)
+    # 'dos',                # use mpr.get_dos_by_material_id("mp-id") for DOS curve
     'bandstructure', 
     'band_gap', 
     # 'cbm', 
@@ -32,50 +32,91 @@ FIELDS = [
 
 PREDICT = [
     'system',
-    'bm_voigt',
-    'bm_reuss',
-    'bm_vrh', 
+    # 'bm_voigt',
+    # 'bm_reuss',
+    # 'bm_vrh', 
     # 'dos',                # future task
     # 'bandstructure',      # extract direct_gap (others already exist)
     'direct_gap',
     'band_gap', 
     'efermi', 
-    'is_gap_direct'
+    'is_gap_direct',
+    'max_absorption',
+    'max_absorption_energy',
+    'integrated_absorption',
+    'integrated_absorption_visible',
+    'average_absorption_visible',
+    'absorption_onset_energy',
 ]
 
 TASK_SPECS = {
     'system': {
         'head': 'multiclass', 
         'out_dim': 7,
+        'weight': 1, 
     },
-    'bm_voigt': {
-        'head': 'regression', 
-        'out_dim': 1,
-    },
-    'bm_reuss': {
-        'head': 'regression', 
-        'out_dim': 1,
-    },
-    'bm_vrh': {
-        'head': 'regression', 
-        'out_dim': 1,
-    },
+    # 'bm_voigt': {
+    #     'head': 'regression', 
+    #     'out_dim': 1,
+    # },
+    # 'bm_reuss': {
+    #     'head': 'regression', 
+    #     'out_dim': 1,
+    # },
+    # 'bm_vrh': {
+    #     'head': 'regression', 
+    #     'out_dim': 1,
+    # },
     'direct_gap': {
         'head': 'regression', 
         'out_dim': 1,
+        'weight': 1, 
     },
     'band_gap': {
         'head': 'regression', 
         'out_dim': 1,
+        'weight': 1, 
     },
     'efermi': {
         'head': 'regression', 
         'out_dim': 1,
+        'weight': 1, 
     },
     'is_gap_direct': {
         'head': 'binary', 
         'out_dim': 1,
+        'weight': 1, 
     },
+    'max_absorption': {
+        'head': 'regression', 
+        'out_dim': 1,
+        'weight': 1, 
+    },
+    'max_absorption_energy': {
+        'head': 'regression', 
+        'out_dim': 1,
+        'weight': 1, 
+    },
+    'integrated_absorption': {
+        'head': 'regression', 
+        'out_dim': 1,
+        'weight': 1, 
+    },
+    'integrated_absorption_visible': {
+        'head': 'regression', 
+        'out_dim': 1,
+        'weight': 1, 
+    },
+    'average_absorption_visible': {
+        'head': 'regression', 
+        'out_dim': 1,
+        'weight': 1, 
+    },
+    'absorption_onset_energy': {
+        'head': 'regression', 
+        'out_dim': 1,
+        'weight': 1, 
+    }, 
 }
 
 DIMENSION_CNT = 3
