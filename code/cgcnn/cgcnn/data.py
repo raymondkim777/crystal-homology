@@ -178,6 +178,7 @@ def collate_pool(dataset_list):
             batch_mask[key].append(mask[key])
         batch_cif_ids.append(cif_id)
         base_idx += n_i
+
     return (torch.cat(batch_atom_fea, dim=0),
             torch.cat(batch_nbr_fea, dim=0),
             torch.cat(batch_nbr_fea_idx, dim=0),
@@ -355,9 +356,11 @@ class GraphData(Dataset):
             random_seed=42,
             vector='none',  # 'none', 'image', 'landscape', 'perslay
             dims=3,
+            task_specs=None,
     ):
         self.root_dir = root_dir  # cgcnn/data/graph_data
         self.max_num_nbr = max_num_nbr
+        self.task_specs = task_specs
         assert os.path.exists(root_dir), 'root_dir does not exist!'
         id_prop_file = os.path.join(self.root_dir, 'id_prop.csv')
         assert os.path.exists(id_prop_file), 'id_prop.csv does not exist!'
@@ -432,7 +435,13 @@ class GraphData(Dataset):
 
         targets, mask = dict(), dict()
         for i in range(len(self.predict_list)):
-            targets[self.predict_list[i]] = torch.tensor([target_list[i]]).long()
+            task_type = self.task_specs[self.predict_list[i]]['head']
+            if task_type in ['binary', 'multiclass']:
+                targets[self.predict_list[i]] = torch.tensor([target_list[i]]).long()
+            elif task_type == 'regression':
+                targets[self.predict_list[i]] = torch.tensor([target_list[i]]).float()
+            else:
+                raise ValueError(f'[GraphData] unrecognized target task {task_type}')
             mask[self.predict_list[i]] = torch.tensor([mask_list[i]]).bool()
 
         graph_dict = self._load_graph_dict(mp_id)
@@ -462,8 +471,6 @@ class GraphData(Dataset):
             for node in graph.nodes
         ]
         atom_fea = np.hstack((feature_list, periodic_coords))
-
-        # ! perhaps site properties (if my results contain any)
 
         # neighbor features (edge attributes)
         nbr_fea_idx, nbr_fea = [], []

@@ -5,6 +5,7 @@ import json
 import csv
 import pickle
 import random
+import math
 import numpy as np
 from tqdm import tqdm
 from mp_api.client import MPRester
@@ -436,6 +437,16 @@ class AbsorptionSubset:
             self.find_absorption_onset(all_abs[i], all_energy[i])
             for i in range(len(all_abs))
         ])
+
+        # ! check if abs_onset_e is NaN or Inf
+        if np.isnan(abs_onset_e).any():
+            coords = np.argwhere(np.isnan(abs_onset_e))
+            for coord in coords:
+                print(f"NaN value for {abs_docs[coord[0]].material_id}")
+        if np.isinf(abs_onset_e).any():
+            coords = np.argwhere(np.isinf(abs_onset_e))
+            for coord in coords:
+                print(f"Inf value for {abs_docs[coord[0]].material_id}")
 
         return abs_max, abs_max_e, abs_int, abs_int_vis, abs_avg_vis, abs_onset_e
 

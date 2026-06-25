@@ -7,8 +7,8 @@ class MultiTaskLoss(nn.Module):
         super().__init__()
         self.loss_bin = nn.BCEWithLogitsLoss(reduction='none')
         self.loss_class = nn.CrossEntropyLoss(reduction='none')
-        # self.loss_reg = nn.HuberLoss(reduction='none')
-        self.loss_reg = nn.MSELoss(reduction='none')
+        self.loss_reg = nn.HuberLoss(reduction='none')
+        # self.loss_reg = nn.MSELoss(reduction='none')
     
 
     def forward(self, input, target_dict, mask_dict, task_specs):
@@ -51,9 +51,18 @@ class MultiTaskLoss(nn.Module):
                 prop_loss = self.loss_reg(input[prop], targ)
             else:
                 raise ValueError(f"[Loss] Unknown task: {task}")
+            
+            # if prop == 'absorption_onset_energy':
+            #     print(f'input for {prop}', input[prop])
+            #     print(f'targets for {prop}', targ)
+            #     print(f'prop loss for {prop}:', prop_loss)
+            #     if torch.isnan(prop_loss).any().item():
+            #         raise ValueError(f"[Loss] prop loss is NaN: {prop}")
 
             mask_float = mask.float()
             batch_loss = (prop_loss * mask_float).sum() / mask_float.sum().clamp_min(1.0)
+            # if prop == 'absorption_onset_energy':
+            #     print(f'batch loss for {prop}:', batch_loss)
             
             losses.append(batch_loss)   # batch loss across all props (accounting for invalid labels)
             loss_dict[prop] = {

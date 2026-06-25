@@ -155,6 +155,7 @@ def main():
         *args.data_options, 
         vector=args.vector,
         dims=args.dims,
+        task_specs=TASK_SPECS
     )
     collate_fn = collate_pool
 
@@ -427,9 +428,9 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers):
             for prop in targets.keys()
         }
 
-        if args.debug:
-            print("targets:", targets['bm_voigt'])
-            print("targets_normed:", targets_normed['bm_voigt'])
+        # if args.debug:
+        #     print("targets:", targets['absorption_onset_energy'])
+        #     print("targets_normed:", targets_normed['absorption_onset_energy'])
 
         # if args.task == 'regression':
         #     target_normed = normalizer.norm(target)
@@ -498,7 +499,7 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers):
 
         # ! adjust to print stats for every property
         if i % args.print_freq == 0:
-            print('Epoch: [{0}][{1}/{2}]\tLoss {loss.val:.4f} ({loss.avg:.4f})'.format(
+            print('\nEpoch: [{0}][{1}/{2}]\tLoss {loss.val:.4f} ({loss.avg:.4f})'.format(
                 epoch, i, len(train_loader), loss=losses))
             for prop, values in stats.items():
                 if TASK_SPECS[prop]['head'] in ['binary', 'multiclass']:
@@ -523,7 +524,7 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers):
                         'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                         'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
                         'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                        'MSE {nrmse_errors.val:.3f} ({nrmse_errors.avg:.3f})'.format(
+                        'NRMSE {nrmse_errors.val:.3f} ({nrmse_errors.avg:.3f})'.format(
                         epoch, i, len(train_loader), batch_time=batch_time, prop=prop,
                         data_time=data_time, loss=values['loss'], nrmse_errors=values['nrmse_errors'])
                     )
@@ -593,12 +594,14 @@ def validate(val_loader, model, criterion, normalizers, test=False):
                     'test_preds': [], 
                     'test_probs': [], 
                     'test_cif_ids':[],
+                    'test_masks': [],
                 }
             elif value['head'] == 'regression':
                 prop_stats = {
                     'test_targets': [], 
                     'test_preds': [], 
                     'test_cif_ids':[],
+                    'test_masks': [],
                 }
             else:
                 raise ValueError(f"[TRAIN STATS] Unknown task {value['head']}")
@@ -709,6 +712,7 @@ def validate(val_loader, model, criterion, normalizers, test=False):
                     test_stats[prop]['test_probs'] += test_pred.tolist()
                     test_stats[prop]['test_targets'] += test_target.view(-1).tolist()
                     test_stats[prop]['test_cif_ids'] += batch_cif_ids
+                    test_stats[prop]['test_masks'] += mask[prop].view(-1).tolist()
 
             
             elif task == 'regression':
@@ -725,6 +729,7 @@ def validate(val_loader, model, criterion, normalizers, test=False):
                     test_stats[prop]['test_preds'] += test_pred.view(-1).tolist()
                     test_stats[prop]['test_targets'] += test_target.view(-1).tolist()
                     test_stats[prop]['test_cif_ids'] += batch_cif_ids
+                    test_stats[prop]['test_masks'] += mask[prop].view(-1).tolist()
 
             else:
                 raise ValueError(f"[STAT SAVE] Unknown task {value['head']}")
@@ -772,7 +777,7 @@ def validate(val_loader, model, criterion, normalizers, test=False):
 
         # ! adjust to print stats for every property
         if i % args.print_freq == 0:
-            print('Test: [{1}/{2}]\tLoss {loss.val:.4f} ({loss.avg:.4f})'.format(
+            print('Test: [{0}/{1}]\tLoss {loss.val:.4f} ({loss.avg:.4f})'.format(
                 i, len(val_loader), loss=losses))
             for prop, values in stats.items():
                 if TASK_SPECS[prop]['head'] in ['binary', 'multiclass']:
@@ -843,7 +848,7 @@ def validate(val_loader, model, criterion, normalizers, test=False):
                 'PROP {prop}\t'
                 'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                 'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                'MSE {nrmse_errors.val:.3f} ({nrmse_errors.avg:.3f})'.format(
+                'NRMSE {nrmse_errors.val:.3f} ({nrmse_errors.avg:.3f})'.format(
                 i, len(val_loader), batch_time=batch_time, prop=prop,
                 loss=values['loss'], nrmse_errors=values['nrmse_errors'])
             )
@@ -911,28 +916,30 @@ def validate(val_loader, model, criterion, normalizers, test=False):
                 writer = csv.writer(file_results)
 
                 if TASK_SPECS[prop]['head'] in ['binary', 'multiclass']:
-                    header = ['mp-id', 'target', 'predicted_class']
+                    header = ['mp-id', 'mask', 'target', 'predicted_class']
                     header += [f'prob_class_{i}' for i in range(len(values['test_probs'][0]))]
                     writer.writerow(header)
 
-                    for cif_id, target, pred, probs in zip(
+                    for cif_id, mask, target, pred, probs in zip(
                         values['test_cif_ids'], 
+                        values['test_masks'],
                         values['test_targets'], 
                         values['test_preds'], 
                         values['test_probs'],
                     ):
-                        writer.writerow([cif_id, target, pred] + probs)
+                        writer.writerow([cif_id, mask, target, pred] + probs)
 
                 elif TASK_SPECS[prop]['head'] == 'regression':
-                    header = ['mp-id', 'target', 'predicted_value']
+                    header = ['mp-id', 'mask', 'target', 'predicted_value']
                     writer.writerow(header)
 
-                    for cif_id, target, pred in zip(
+                    for cif_id, mask,  target, pred in zip(
                         values['test_cif_ids'], 
+                        values['test_masks'],
                         values['test_targets'], 
                         values['test_preds'], 
                     ):
-                        writer.writerow([cif_id, target, pred])
+                        writer.writerow([cif_id, mask, target, pred])
                 else:
                     raise ValueError(f"[TEST CSV] Unrecognized task {TASK_SPECS[prop]['head']}")
     else:
@@ -954,7 +961,7 @@ def validate(val_loader, model, criterion, normalizers, test=False):
     
     overall_error = w_cls * cls_error.avg + w_reg + reg_error.avg
 
-    print(f' Model -- \tVector: {args.vector}\tAtom Len: {args.atom_fea_len}\tConv Num: {args.n_conv}\tHidden Len: {args.h_fea_len}\tHidden Num: {args.n_h}')
+    print(f'\n Model -- \tVector: {args.vector}\tAtom Len: {args.atom_fea_len}\tConv Num: {args.n_conv}\tHidden Len: {args.h_fea_len}\tHidden Num: {args.n_h}')
     print(f'\t\tHead Layer Num: {args.n_o}\tVec Len: {args.vec_fea_len}\tVec Layer Num: {args.n_vec}')
     
     print(' {star} ERROR {error:.3f}'.format(star=star_label, error=overall_error))
@@ -1012,7 +1019,8 @@ class NormalizerProp(object):
             self.std = torch.std(tensor[mask].float())
             self.min, self.max = torch.min(tensor[mask].float()), torch.max(tensor[mask].float())
             self.bound = self.max - self.min
-        print('normalprop:', self.mean, self.std, self.min, self.max, self.bound)
+        if args.debug:
+            print('normalprop:', self.mean, self.std, self.min, self.max, self.bound)
 
     def norm(self, tensor):
         return (tensor - self.mean) / self.std
@@ -1095,18 +1103,19 @@ def class_eval(prediction, target):
             probs = torch.sigmoid(logits).detach().cpu().numpy()
             pred_label = (probs >= 0.5).astype(int)
             # if args.debug:
-                # print("prediction:", prediction)
-                # print("probs", probs)
-                # print("pred", pred_label)
-                # print("targ", target_label)
-            # prediction = np.stack([1 - probs, probs], axis=1)
+            #     print("CLASS EVAL INPUT")
+            #     print("prediction:", prediction)
+            #     print("probs", probs)
+            #     print("pred", pred_label)
+            #     print("targ", target_label)
+            prediction = np.stack([1 - probs, probs], axis=1)
 
             accuracy = metrics.accuracy_score(target_label, pred_label)
             precision, recall, fscore, _ = metrics.precision_recall_fscore_support(
                 target_label, pred_label, average='binary', zero_division=0)
             # if args.debug:
-                # print("CLASS EVAL DEBUG")
-                # print(precision, recall, fscore)
+            #     print("CLASS EVAL DEBUG")
+            #     print(precision, recall, fscore)
             auc_score = metrics.roc_auc_score(target_label, probs)
 
         else:
@@ -1146,7 +1155,7 @@ class AverageMeter(object):
         self.val = val
         self.sum += val * n
         self.count += n
-        self.avg = self.sum / self.count
+        self.avg = self.sum / self.count if self.count != 0 else 0
 
 
 def save_checkpoint(state, is_best, filename=f'checkpoint_{args.id}.pth.tar'):
