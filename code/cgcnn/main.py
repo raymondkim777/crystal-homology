@@ -204,7 +204,7 @@ def main():
     # _, _, _, sample_target, sample_mask, _ = collate_pool(train_data_list)
     
     train_indices = list(train_loader.sampler)
-    sample_indices = sample(train_indices, 500)
+    sample_indices = sample(train_indices, 2000)
     sample_data_list = [dataset[i] for i in tqdm(sample_indices)]
     _, _, _, sample_target, sample_mask, _ = collate_pool(sample_data_list)
 
@@ -869,6 +869,22 @@ def validate(val_loader, model, criterion, normalizers, test=False):
     # print(f"{args.vector} red\t{args.atom_fea_len}\t{args.n_conv}\t{args.h_fea_len}\t{args.n_h}")    
     # print(f"{losses.avg:.4f}	{accuracies.avg:.3f}	{precisions.avg:.3f}	{recalls.avg:.3f}	{fscores.avg:.3f}	{auc_scores.avg:.3f}")
 
+    w_cls = 0.5
+    w_reg = 0.5
+    
+    cls_error = AverageMeter()
+    reg_error = AverageMeter()
+
+    for prop, values in stats.items():
+        if TASK_SPECS[prop]['head'] in ['binary', 'multiclass']:
+            cls_error.update(2 * (1 - values['auc_scores'].avg))
+        elif TASK_SPECS[prop]['head'] == 'regression':
+            reg_error.update(values['nrmse_errors'].avg)
+        else:
+            raise ValueError(f"[VAL ERROR] Unrecognized task {TASK_SPECS[prop]['head']}")
+    
+    overall_error = w_cls * cls_error.avg + w_reg + reg_error.avg
+
     if test:
         if args.debug:
             print("Saving test stats/results")
@@ -880,6 +896,7 @@ def validate(val_loader, model, criterion, normalizers, test=False):
             writer = csv.writer(file_stats)
             header = ['head', 'task', 'loss', 'nrmse', 'accuracy', 'precision', 'recall', 'f1', 'auroc']
             writer.writerow(header)
+            writer.writerow(['total', overall_error, losses.avg])
                     
             for prop, values in stats.items():
                 if TASK_SPECS[prop]['head'] in ['binary', 'multiclass']:
@@ -944,22 +961,6 @@ def validate(val_loader, model, criterion, normalizers, test=False):
                     raise ValueError(f"[TEST CSV] Unrecognized task {TASK_SPECS[prop]['head']}")
     else:
         star_label = '*'
-
-    w_cls = 0.5
-    w_reg = 0.5
-    
-    cls_error = AverageMeter()
-    reg_error = AverageMeter()
-
-    for prop, values in stats.items():
-        if TASK_SPECS[prop]['head'] in ['binary', 'multiclass']:
-            cls_error.update(2 * (1 - values['auc_scores'].avg))
-        elif TASK_SPECS[prop]['head'] == 'regression':
-            reg_error.update(values['nrmse_errors'].avg)
-        else:
-            raise ValueError(f"[VAL ERROR] Unrecognized task {TASK_SPECS[prop]['head']}")
-    
-    overall_error = w_cls * cls_error.avg + w_reg + reg_error.avg
 
     print(f'\n Model -- \tVector: {args.vector}\tAtom Len: {args.atom_fea_len}\tConv Num: {args.n_conv}\tHidden Len: {args.h_fea_len}\tHidden Num: {args.n_h}')
     print(f'\t\tHead Layer Num: {args.n_o}\tVec Len: {args.vec_fea_len}\tVec Layer Num: {args.n_vec}')

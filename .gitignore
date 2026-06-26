@@ -2,10 +2,19 @@
 .vscode
 __pycache__
 
-code/data/mp*
-code/data/cif
-code/data/cif-small
-code/data/rejects.csv
+
+code/data/mp-raw
+
+code/data/pretrain/cif-pre
+!code/data/pretrain/cif-pre.zip
+code/data/pretrain/mp-subset
+code/data/pretrain/rejects.csv
+
+code/data/abs/cif-abs
+!code/data/abs/cif-abs.zip
+code/data/abs/mp-abs.pkl
+
+
 code/data/bounds.json
 code/data/bid_true.txt
 code/data/stats.csv

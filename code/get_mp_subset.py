@@ -21,9 +21,15 @@ load_dotenv()
 
 
 DATA_PATH = 'data'
-MP_DATA_PATH = 'data/mp-raw'
-SUBSET_DATA_PATH = 'data/mp-subset'
-CIF_DATA_PATH = 'data/cif'
+MP_DATA_PATH = f'{DATA_PATH}/mp-raw'
+
+DATA_PRE_PATH = f'{DATA_PATH}/pretrain'
+DATA_PRE_SUBSET_PATH = f'{DATA_PRE_PATH}/mp-subset'
+DATA_PRE_CIF_PATH = f'{DATA_PRE_PATH}/cif-pre'
+
+DATA_ABS_PATH = f'{DATA_PATH}/abs'
+# DATA_ABS_SUBSET_PATH = f'{DATA_ABS_PATH}/mp-abs'
+DATA_ABS_CIF_PATH = f'{DATA_ABS_PATH}/cif-abs'
 
 
 def _parse_args():
@@ -35,7 +41,8 @@ def _parse_args():
     parser.add_argument('--large', action='store_true', help='add random subset of larger non-optimal crystals')
     parser.add_argument('--size-large', default=7000, type=int, help='total subset size (including large) for each class')
     parser.add_argument('--cif', action='store_true', help='convert subset to CIF files')
-    parser.add_argument('--absorb', action='store_true', help='append absorption data to subsets')
+    parser.add_argument('--absorb', action='store_true', help='collect absorption data')
+    parser.add_argument('--merge', action='store_true', help='merge absorption data to subsets')
     parser.add_argument('--reject', action='store_true', help='stores rejected mp_ids to CSV')
     return parser.parse_args()
 
@@ -211,12 +218,12 @@ class CrystalSubset:
             subset_json = self.compile_dicts_from_ids(subset_id_list)
 
             # save dictionary as pickle
-            subset_path = open_write_file(SUBSET_DATA_PATH, f"{system}.pkl")
+            subset_path = open_write_file(DATA_PRE_SUBSET_PATH, f"{system}.pkl")
             with open(subset_path, "wb") as f:
                 pickle.dump(subset_json, f)
         
         if reject:
-            reject_path = open_write_file(DATA_PATH, 'rejects.csv')
+            reject_path = open_write_file(DATA_PRE_PATH, 'rejects.csv')
             rejections.save(reject_path)
             print(f"Successfully saved {len(rejections)} rejections as CSV")
 
@@ -225,7 +232,7 @@ class CrystalSubset:
         return {mp_id: self.crystals[mp_id] for mp_id in id_list}
     
 
-    def merge_abs_mp_data(self):
+    def collect_abs_mp_data(self, merge=False):
         with MPRester(force_renew=True) as mpr:
 
             print(f"Querying summary data (absorption)...")
@@ -254,6 +261,8 @@ class CrystalSubset:
             abs_docs_by_id = dict()
             for doc in abs_docs:
                 abs_docs_by_id[doc.material_id] = doc
+
+            subset_json_dict = dict()
             
             for system in CRYSTAL_SYSTEMS:
                 mp_id_list = mp_id_list_by_system[system]
@@ -275,38 +284,59 @@ class CrystalSubset:
                     abs_onset_e
                 ) = self.absorption_subset.extract_absorption_features(abs_docs_list)
 
-                print(f"Merging absorption data with subset...")
-                # append to existing subset
-                with open(f"{SUBSET_DATA_PATH}/{system}.pkl", 'rb') as file:
-                    subset_json_dict = pickle.load(file)
-                    
-                id_set = set(subset_json_dict.keys())
-                for i in tqdm(range(len(mp_id_list)), desc=f'{system}: '):
-                    mp_id = mp_id_list[i]
-                    if mp_id not in id_set:
-                        subset_json_dict[mp_id] = save_doc_as_dict(docs_by_id[mp_id])
-                    subset_json_dict[mp_id]['absorption'] = {
-                        'max_absorption': abs_max[i], 
-                        'max_absorption_energy': abs_max_e[i], 
-                        'integrated_absorption': abs_int[i], 
-                        'integrated_absorption_visible': abs_int_vis[i], 
-                        'average_absorption_visible': abs_avg_vis[i], 
-                        'absorption_onset_energy': abs_onset_e[i]
-                    }
+                if merge:
+                    print(f"Merging absorption data with subset...")
+                    # append to existing subset
+                    with open(f"{DATA_PRE_SUBSET_PATH}/{system}.pkl", 'rb') as file:
+                        subset_json_dict = pickle.load(file)
+                        
+                    id_set = set(subset_json_dict.keys())
+                    for i in tqdm(range(len(mp_id_list)), desc=f'{system}: '):
+                        mp_id = mp_id_list[i]
+                        if mp_id not in id_set:
+                            subset_json_dict[mp_id] = save_doc_as_dict(docs_by_id[mp_id])
+                        subset_json_dict[mp_id]['absorption'] = {
+                            'max_absorption': abs_max[i], 
+                            'max_absorption_energy': abs_max_e[i], 
+                            'integrated_absorption': abs_int[i], 
+                            'integrated_absorption_visible': abs_int_vis[i], 
+                            'average_absorption_visible': abs_avg_vis[i], 
+                            'absorption_onset_energy': abs_onset_e[i]
+                        }
 
-                # save updated subset pickle files
-                subset_path = open_write_file(SUBSET_DATA_PATH, f"{system}.pkl")
-                with open(subset_path, "wb") as f:
+                    # save updated subset pickle files
+                    subset_path = open_write_file(DATA_PRE_SUBSET_PATH, f"{system}.pkl")
+                    with open(subset_path, "wb") as f:
+                        pickle.dump(subset_json_dict, f)
+                
+                else:
+                    print(f"Saving absorption data separately...")
+                    for i in tqdm(range(len(mp_id_list)), desc=f'{system}: '):
+                        mp_id = mp_id_list[i]
+                        subset_json_dict[mp_id] = {
+                            'structure': docs_by_id[mp_id]['structure'],
+                            'max_absorption': abs_max[i], 
+                            'max_absorption_energy': abs_max_e[i], 
+                            'integrated_absorption': abs_int[i], 
+                            'integrated_absorption_visible': abs_int_vis[i], 
+                            'average_absorption_visible': abs_avg_vis[i], 
+                            'absorption_onset_energy': abs_onset_e[i]
+                        }
+            
+            if not merge:
+                # save abs pickle file separately
+                subset_abs_path = open_write_file(DATA_ABS_PATH, 'mp-abs.pkl')
+                with open(subset_abs_path, 'wb') as f:
                     pickle.dump(subset_json_dict, f)
 
     
-    def convert_subsets_to_cif(self) -> None:
+    def convert_subsets_to_cif(self, absorb=False) -> None:
         print(f"Converting structure files into CIF...")
         for system in CRYSTAL_SYSTEMS:
-            with open(f"{SUBSET_DATA_PATH}/{system}.pkl", 'rb') as file:
+            with open(f"{DATA_PRE_SUBSET_PATH}/{system}.pkl", 'rb') as file:
                 mp_json_list = pickle.load(file)
 
-            data_cif_dir = f'{CIF_DATA_PATH}/{system}'
+            data_cif_dir = f'{DATA_PRE_CIF_PATH}/{system}'
             for mp_id, value in tqdm(mp_json_list.items(), desc=f"{system}: "):
                 file_cif_name = f'{mp_id}.cif'
                 data_cif_path = open_write_file(data_cif_dir, file_cif_name)
@@ -314,6 +344,21 @@ class CrystalSubset:
                 cif_data = value["structure"].to(fmt="cif")
                 with open(data_cif_path, 'w') as f:
                     f.write(cif_data)
+        shutil.make_archive(f'{DATA_PRE_PATH}/cif-pre', 'zip', DATA_PRE_CIF_PATH)
+        
+        if absorb:
+            print(f"Converting abs structure files into CIF...")
+            with open(f"{DATA_ABS_PATH}/mp-abs.pkl", 'rb') as file:
+                mp_json_list = pickle.load(file)
+            
+            for mp_id, value in tqdm(mp_json_list.items(), desc=f"{system}: "):
+                file_cif_name = f'{mp_id}.cif'
+                data_cif_path = open_write_file(DATA_ABS_CIF_PATH, file_cif_name)
+
+                cif_data = value["structure"].to(fmt="cif")
+                with open(data_cif_path, 'w') as f:
+                    f.write(cif_data)
+            shutil.make_archive(f'{DATA_ABS_PATH}/cif-abs', 'zip', DATA_ABS_CIF_PATH)
 
 
 class AbsorptionSubset:
@@ -526,6 +571,6 @@ if __name__ == "__main__":
                 reject=args.reject
             )
         if args.absorb:
-            crystal_subset.merge_abs_mp_data()
+            crystal_subset.collect_abs_mp_data(merge=args.merge)
         if args.cif:
-            crystal_subset.convert_subsets_to_cif()
+            crystal_subset.convert_subsets_to_cif(absorb=args.absorb)

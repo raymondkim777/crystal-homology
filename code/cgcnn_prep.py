@@ -14,13 +14,14 @@ from vectorizers import IM_BANDWIDTH, IM_RESOLUTION, fit_image_transformers
 from utils import CRYSTAL_SYSTEMS, PREDICT, TASK_SPECS, DIMENSION_CNT, get_num_cpus, open_write_file
 
 
-CGCNN_DATAPATH = 'cgcnn/data/graph_data'
-# CGCNN_DATAPATH = 'cgcnn/data/example_graph_data'
+CGCNN_PRE_DATAPATH = 'cgcnn/data/pretrain_data'
+CGCNN_ABS_DATAPATH = 'cgcnn/data/abs_data'
 
 
 def _parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--save', action='store_true', help='Saves graph data to CGCNN data path')
+    parser.add_argument('--abs-merge', action='store_true', help='Merges absorption data and subset data')
     parser.add_argument('--vector', action='store_true', help='Saves vectorizations to CGCNN data path')
     parser.add_argument('--bound', action='store_true', help='Saves persistence bounds to CGCNN data path')
     return parser.parse_args()
@@ -158,7 +159,7 @@ def retrieve_diagrams():
     return reorganize_list_of_dicts(padded_diagram_dict_by_dim)
 
 
-def write_id_prop_mask():
+def write_id_prop_mask(merge=False):
     doc_dict = dict()
     for system in CRYSTAL_SYSTEMS:
         print(f"Unpacking {system} system docs...")
@@ -184,25 +185,6 @@ def write_id_prop_mask():
             'efermi': doc['efermi'] if doc['efermi'] is not None else 0.0,
             'is_gap_direct': 1 if doc['is_gap_direct'] is not None and doc['is_gap_direct'] else 0,
         }
-        if 'absorption' in doc.keys():
-            doc_abs = doc['absorption']
-            prop_dict.update({
-                'max_absorption': doc_abs['max_absorption'] if doc_abs['max_absorption'] is not None else 0.0,
-                'max_absorption_energy': doc_abs['max_absorption_energy'] if doc_abs['max_absorption_energy'] is not None else 0.0,
-                'integrated_absorption': doc_abs['integrated_absorption'] if doc_abs['integrated_absorption'] is not None else 0.0,
-                'integrated_absorption_visible': doc_abs['integrated_absorption_visible'] if doc_abs['integrated_absorption_visible'] is not None else 0.0,
-                'average_absorption_visible': doc_abs['average_absorption_visible'] if doc_abs['average_absorption_visible'] is not None else 0.0,
-                'absorption_onset_energy': doc_abs['absorption_onset_energy'] if doc_abs['absorption_onset_energy'] is not None else 0.0,
-            })
-        else:
-            prop_dict.update({
-                'max_absorption': 0.0,
-                'max_absorption_energy': 0.0,
-                'integrated_absorption': 0.0,
-                'integrated_absorption_visible': 0.0,
-                'average_absorption_visible': 0.0,
-                'absorption_onset_energy': 0.0,
-            })
         mask_dict = {
             'system': 1,
             # 'bm_voigt': int(doc['bulk_modulus'] is not None),
@@ -213,25 +195,45 @@ def write_id_prop_mask():
             'efermi': int(doc['efermi'] is not None),
             'is_gap_direct': int(doc['is_gap_direct'] is not None),
         }
-        if 'absorption' in doc.keys():
-            doc_abs = doc['absorption']
-            mask_dict.update({
-                'max_absorption': int(doc_abs['max_absorption'] is not None),
-                'max_absorption_energy': int(doc_abs['max_absorption_energy'] is not None),
-                'integrated_absorption': int(doc_abs['integrated_absorption'] is not None),
-                'integrated_absorption_visible': int(doc_abs['integrated_absorption_visible'] is not None),
-                'average_absorption_visible': int(doc_abs['average_absorption_visible'] is not None),
-                'absorption_onset_energy': int(doc_abs['absorption_onset_energy'] is not None),
-            })
-        else:
-            mask_dict.update({
-                'max_absorption': 0,
-                'max_absorption_energy': 0,
-                'integrated_absorption': 0,
-                'integrated_absorption_visible': 0,
-                'average_absorption_visible': 0,
-                'absorption_onset_energy': 0,
-            })
+        if merge:
+            if 'absorption' in doc.keys():
+                doc_abs = doc['absorption']
+                prop_dict.update({
+                    'max_absorption': doc_abs['max_absorption'] if doc_abs['max_absorption'] is not None else 0.0,
+                    'max_absorption_energy': doc_abs['max_absorption_energy'] if doc_abs['max_absorption_energy'] is not None else 0.0,
+                    'integrated_absorption': doc_abs['integrated_absorption'] if doc_abs['integrated_absorption'] is not None else 0.0,
+                    'integrated_absorption_visible': doc_abs['integrated_absorption_visible'] if doc_abs['integrated_absorption_visible'] is not None else 0.0,
+                    'average_absorption_visible': doc_abs['average_absorption_visible'] if doc_abs['average_absorption_visible'] is not None else 0.0,
+                    'absorption_onset_energy': doc_abs['absorption_onset_energy'] if doc_abs['absorption_onset_energy'] is not None else 0.0,
+                })
+            else:
+                prop_dict.update({
+                    'max_absorption': 0.0,
+                    'max_absorption_energy': 0.0,
+                    'integrated_absorption': 0.0,
+                    'integrated_absorption_visible': 0.0,
+                    'average_absorption_visible': 0.0,
+                    'absorption_onset_energy': 0.0,
+                })
+            if 'absorption' in doc.keys():
+                doc_abs = doc['absorption']
+                mask_dict.update({
+                    'max_absorption': int(doc_abs['max_absorption'] is not None),
+                    'max_absorption_energy': int(doc_abs['max_absorption_energy'] is not None),
+                    'integrated_absorption': int(doc_abs['integrated_absorption'] is not None),
+                    'integrated_absorption_visible': int(doc_abs['integrated_absorption_visible'] is not None),
+                    'average_absorption_visible': int(doc_abs['average_absorption_visible'] is not None),
+                    'absorption_onset_energy': int(doc_abs['absorption_onset_energy'] is not None),
+                })
+            else:
+                mask_dict.update({
+                    'max_absorption': 0,
+                    'max_absorption_energy': 0,
+                    'integrated_absorption': 0,
+                    'integrated_absorption_visible': 0,
+                    'average_absorption_visible': 0,
+                    'absorption_onset_energy': 0,
+                })
         csv_prop_row = [mp_id[3:]]
         csv_mask_row = [mp_id[3:]]
 
@@ -243,12 +245,12 @@ def write_id_prop_mask():
         csv_mask_data.append(csv_mask_row)
     
     print(f"Writing id_prop.csv and id_mask.csv...")
-    csv_prop_filepath = open_write_file(CGCNN_DATAPATH, 'id_prop.csv')
+    csv_prop_filepath = open_write_file(CGCNN_PRE_DATAPATH, 'id_prop.csv')
     with open(csv_prop_filepath, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         writer.writerows(csv_prop_data)
 
-    csv_mask_filepath = open_write_file(CGCNN_DATAPATH, 'id_mask.csv')
+    csv_mask_filepath = open_write_file(CGCNN_PRE_DATAPATH, 'id_mask.csv')
     with open(csv_mask_filepath, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         writer.writerows(csv_mask_data)
@@ -267,23 +269,25 @@ def graph_process(vector=False):
     Optionally saves diagrams and vectorizations as pickle files in CGCNN data folder. 
     """
     graph_dict = unpack_all_graphs()
-    print(f"Saving files to {CGCNN_DATAPATH}")
+    print(f"Saving files to {CGCNN_PRE_DATAPATH}")
     # save graphs to CGCNN data folder
     for mp_id, value in graph_dict.items():
-        cgcnn_datapath = open_write_file(f"{CGCNN_DATAPATH}/graphs", f'{mp_id}.pkl')
+        cgcnn_datapath = open_write_file(f"{CGCNN_PRE_DATAPATH}/graphs", f'{mp_id}.pkl')
         with open(cgcnn_datapath, 'wb') as f:
             pickle.dump(value, f)
     
     # multitask regression/classification id_prop and id_mask
-    write_id_prop_mask()
+    write_id_prop_mask(args.abs_merge)
+
+    
 
     # save PREDICT list to CGCNN data path
-    predict_filepath = open_write_file(f"{CGCNN_DATAPATH}/tasks", f'predict.pkl')
+    predict_filepath = open_write_file(f"{CGCNN_PRE_DATAPATH}/tasks", f'predict.pkl')
     with open(predict_filepath, 'wb') as f:
         pickle.dump(PREDICT, f)
 
     # save TASK_SPEC dict to CGCNN data path
-    task_filepath = open_write_file(f"{CGCNN_DATAPATH}/tasks", f'tasks.pkl')
+    task_filepath = open_write_file(f"{CGCNN_PRE_DATAPATH}/tasks", f'tasks.pkl')
     with open(task_filepath, 'wb') as f:
         pickle.dump(TASK_SPECS, f)
 
@@ -299,15 +303,15 @@ def graph_process(vector=False):
                 landscapes = pickle.load(file)
             landscape_dict = landscape_dict | landscapes  # [mat_id][dim]
 
-        cgcnn_diagram_datapath = open_write_file(f"{CGCNN_DATAPATH}/vecs", f'diagrams.pkl')
+        cgcnn_diagram_datapath = open_write_file(f"{CGCNN_PRE_DATAPATH}/vecs", f'diagrams.pkl')
         with open(cgcnn_diagram_datapath, 'wb') as f:
             pickle.dump(diagram_dict, f)
 
-        cgcnn_image_datapath = open_write_file(f"{CGCNN_DATAPATH}/vecs", f'images.pkl')
+        cgcnn_image_datapath = open_write_file(f"{CGCNN_PRE_DATAPATH}/vecs", f'images.pkl')
         with open(cgcnn_image_datapath, 'wb') as f:
             pickle.dump(image_dict, f)
 
-        cgcnn_landscape_datapath = open_write_file(f"{CGCNN_DATAPATH}/vecs", f'landscapes.pkl')
+        cgcnn_landscape_datapath = open_write_file(f"{CGCNN_PRE_DATAPATH}/vecs", f'landscapes.pkl')
         with open(cgcnn_landscape_datapath, 'wb') as f:
             pickle.dump(landscape_dict, f)
 
@@ -333,7 +337,7 @@ def save_bounds():
         image_bnds_list.append(bounds_tuple)
     
     # save JSON
-    file_path = open_write_file(f'{CGCNN_DATAPATH}/tasks', 'bounds.pkl')
+    file_path = open_write_file(f'{CGCNN_PRE_DATAPATH}/tasks', 'bounds.pkl')
     with open(file_path, "wb") as f:
         pickle.dump(image_bnds_list, f)
             
