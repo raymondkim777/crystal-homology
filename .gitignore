@@ -37,11 +37,8 @@ logs
 
 code/ignore*
 
-code/cgcnn/data/graph_data/graphs
-code/cgcnn/data/graph_data/tasks
-code/cgcnn/data/graph_data/vecs
-code/cgcnn/data/graph_data/id_prop.csv
-code/cgcnn/data/graph_data/id_mask.csv
+code/cgcnn/data/abs
+code/cgcnn/data/pretrain
 code/cgcnn/*.pth.tar
 code/cgcnn/test_results*.csv
 code/cgcnn/test_stats*.csv

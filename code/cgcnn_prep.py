@@ -17,8 +17,9 @@ from utils import CRYSTAL_SYSTEMS, PREDICT, ABS_PREDICT, TASK_SPECS, ABS_TASK_SP
 DATA_PRE_DIRECTORY = "data/pretrain"
 DATA_ABS_DIRECTORY = "data/abs"
 
-CGCNN_PRE_DATAPATH = 'cgcnn/data/pretrain'
-CGCNN_ABS_DATAPATH = 'cgcnn/data/abs'
+CGCNN_DATAPATH = 'cgcnn/data'
+CGCNN_PRE_DATAPATH = f'{CGCNN_DATAPATH}/pretrain'
+CGCNN_ABS_DATAPATH = f'{CGCNN_DATAPATH}/abs'
 
 
 def _parse_args():
@@ -75,13 +76,13 @@ def unpack_all_graphs(data_dir) -> dict:
     return graph_dict
 
 
-def collect_all_diagrams():
+def collect_all_diagrams(data_dir):
     '''Collects all persistence diagrams from .pkl files from all systems into one dict/list.'''
     all_diagrams_dict = dict()
     all_diagrams_list = []
 
     for system in CRYSTAL_SYSTEMS:
-        with open(f'{DATA_PRE_DIRECTORY}/diagrams/{system}.pkl', 'rb') as file:
+        with open(f'{data_dir}/diagrams/{system}.pkl', 'rb') as file:
             diagrams = pickle.load(file)
         all_diagrams_dict = all_diagrams_dict | diagrams
         all_diagrams_list += list(diagrams.values())
@@ -155,14 +156,15 @@ def reorganize_list_of_dicts(list_of_dicts: list) -> dict:
     return diagram_dict
 
 
-def retrieve_diagrams():
-    diagrams_dict, _ = collect_all_diagrams()
+def retrieve_diagrams(data_dir):
+    diagrams_dict, _ = collect_all_diagrams(data_dir)
     processed_diagrams_by_dim = process_all_diagrams(diagrams_dict)     # [mp_id][dim] --> processed diagram
     padded_diagram_dict_by_dim = [homogenize_diags_in_dict(processed_diagrams_by_dim[dim]) for dim in range(DIMENSION_CNT)]
     return reorganize_list_of_dicts(padded_diagram_dict_by_dim)
 
 
 def write_pretrain_id_prop_mask(abs=False, merge=False):
+    print(f"\nPreparing PRETRAIN prop/mask CSVs...")
     doc_dict = dict()
     for system in CRYSTAL_SYSTEMS:
         print(f"Unpacking pretrain {system} system docs...")
@@ -174,7 +176,7 @@ def write_pretrain_id_prop_mask(abs=False, merge=False):
     csv_mask_data = []
     system_to_int = {CRYSTAL_SYSTEMS[idx]: idx for idx in range(len(CRYSTAL_SYSTEMS))}
 
-    print(f"Computing PRETRAIN{'/ABS' if abs and merge else ''} id_prop.csv and id_mask.csv...")
+    print(f"\nComputing PRETRAIN{'/ABS' if abs and merge else ''} id_prop.csv and id_mask.csv...")
     for mp_id, doc in tqdm(doc_dict.items()):
         prop_dict = {
             'system': system_to_int[str(doc['symmetry'].crystal_system).lower()],
@@ -247,7 +249,7 @@ def write_pretrain_id_prop_mask(abs=False, merge=False):
         csv_prop_data.append(csv_prop_row)
         csv_mask_data.append(csv_mask_row)
     
-    print(f"Writing PRETRAIN id_prop.csv and id_mask.csv...")
+    print(f"\nWriting PRETRAIN id_prop.csv and id_mask.csv...")
     csv_prop_filepath = open_write_file(CGCNN_PRE_DATAPATH, 'id_prop.csv')
     with open(csv_prop_filepath, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
@@ -260,7 +262,7 @@ def write_pretrain_id_prop_mask(abs=False, merge=False):
 
 
 def write_abs_id_prop_mask():
-    print(f"Unpacking absorption docs...")
+    print(f"\nPreparing ABS prop/mask CSVs...")
     doc_dict = dict()
     for system in CRYSTAL_SYSTEMS:
         print(f"Unpacking pretrain {system} system docs...")
@@ -271,7 +273,7 @@ def write_abs_id_prop_mask():
     csv_prop_data = []
     csv_mask_data = []
 
-    print(f"Computing ABS id_prop.csv and id_mask.csv...")
+    print(f"\nComputing ABS id_prop.csv and id_mask.csv...")
     for mp_id, doc_abs in tqdm(doc_dict.items()):
         prop_dict = {
             'max_absorption': doc_abs['max_absorption'] if doc_abs['max_absorption'] is not None else 0.0,
@@ -299,7 +301,7 @@ def write_abs_id_prop_mask():
         csv_prop_data.append(csv_prop_row)
         csv_mask_data.append(csv_mask_row)
     
-    print(f"Writing ABS id_prop.csv and id_mask.csv...")
+    print(f"\nWriting ABS id_prop.csv and id_mask.csv...")
     csv_prop_filepath = open_write_file(CGCNN_ABS_DATAPATH, 'id_prop.csv')
     with open(csv_prop_filepath, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
@@ -324,20 +326,23 @@ def graph_process(abs=False, merge=False, vector=False):
     Optionally saves diagrams and vectorizations as pickle files in CGCNN data folder. 
     """
     # save pretrain data
+    print(f"\nUnpacking PRETRAIN graphs...")
     graph_dict = unpack_all_graphs(DATA_PRE_DIRECTORY)
-    print(f"Saving pretrain graph files to {CGCNN_PRE_DATAPATH}")
+
+    print(f"Saving PRETRAIN graph files to {CGCNN_PRE_DATAPATH}")
     # save graphs to CGCNN data folder
-    for mp_id, value in graph_dict.items():
+    for mp_id, value in tqdm(graph_dict.items()):
         cgcnn_datapath = open_write_file(f"{CGCNN_PRE_DATAPATH}/graphs", f'{mp_id}.pkl')
         with open(cgcnn_datapath, 'wb') as f:
             pickle.dump(value, f)
 
     # save abs data if needed
     if abs:
+        print(f"\nUnpacking ABS graphs...")
         graph_dict = unpack_all_graphs(DATA_ABS_DIRECTORY)
-        print(f"Saving pretrain graph files to {CGCNN_ABS_DATAPATH}")
+        print(f"Saving ABS graph files to {CGCNN_ABS_DATAPATH}")
         # save graphs to CGCNN data folder
-        for mp_id, value in graph_dict.items():
+        for mp_id, value in tqdm(graph_dict.items()):
             cgcnn_datapath = open_write_file(f"{CGCNN_ABS_DATAPATH}/graphs", f'{mp_id}.pkl')
             with open(cgcnn_datapath, 'wb') as f:
                 pickle.dump(value, f)
@@ -345,6 +350,7 @@ def graph_process(abs=False, merge=False, vector=False):
     # multitask regression/classification id_prop and id_mask
     write_pretrain_id_prop_mask(abs=abs, merge=merge)
 
+    print(f"\nSaving PRETRAIN task specs...")
     # save PREDICT list to CGCNN data path
     predict_filepath = open_write_file(f"{CGCNN_PRE_DATAPATH}/tasks", f'predict.pkl')
     with open(predict_filepath, 'wb') as f:
@@ -355,10 +361,16 @@ def graph_process(abs=False, merge=False, vector=False):
     with open(task_filepath, 'wb') as f:
         pickle.dump(TASK_SPECS, f)
 
+    # copy atom_init.json to CGCNN data path
+    source_file = f'{CGCNN_DATAPATH}/atom_init.json'
+    destination = open_write_file(f'{CGCNN_PRE_DATAPATH}', '')
+    shutil.copy(source_file, destination)
+
     if abs and not merge:
         # multitask regression/classification id_prop and id_mask
         write_abs_id_prop_mask()
 
+        print(f"\nSaving ABS task specs...")
         # save ABS_PREDICT list to CGCNN data path
         predict_filepath = open_write_file(f"{CGCNN_ABS_DATAPATH}/tasks", f'predict.pkl')
         with open(predict_filepath, 'wb') as f:
@@ -369,38 +381,51 @@ def graph_process(abs=False, merge=False, vector=False):
         with open(task_filepath, 'wb') as f:
             pickle.dump(ABS_TASK_SPECS, f)
 
+        # copy atom_init.json to CGCNN data path
+        source_file = f'{CGCNN_DATAPATH}/atom_init.json'
+        destination = open_write_file(f'{CGCNN_ABS_DATAPATH}', '')
+        shutil.copy(source_file, destination)
+
     if vector:
-        diagram_dict = retrieve_diagrams()
-        image_dict, landscape_dict = dict(), dict()
-        for system in CRYSTAL_SYSTEMS:
-            with open(f'{DATA_PRE_DIRECTORY}/images/{system}.pkl', 'rb') as file:
-                images = pickle.load(file)
-            image_dict = image_dict | images  # [mat_id][dim]
-            
-            with open(f'{DATA_PRE_DIRECTORY}/landscapes/{system}.pkl', 'rb') as file:
-                landscapes = pickle.load(file)
-            landscape_dict = landscape_dict | landscapes  # [mat_id][dim]
+        vec_dirs = [DATA_PRE_DIRECTORY, DATA_ABS_DIRECTORY]
+        des_dirs = [CGCNN_PRE_DATAPATH, CGCNN_ABS_DATAPATH]
 
-        cgcnn_diagram_datapath = open_write_file(f"{CGCNN_PRE_DATAPATH}/vecs", f'diagrams.pkl')
-        with open(cgcnn_diagram_datapath, 'wb') as f:
-            pickle.dump(diagram_dict, f)
+        cnt = 2 if abs and not merge else 1
+        for i in range(cnt):
+            print(f"\nSaving {'PRETRAIN' if i == 0 else 'ABS'} vectorizations...")
+            diagram_dict = retrieve_diagrams(vec_dirs[i])
+            image_dict, landscape_dict = dict(), dict()
+            for system in CRYSTAL_SYSTEMS:
+                with open(f'{vec_dirs[i]}/images/{system}.pkl', 'rb') as file:
+                    images = pickle.load(file)
+                image_dict = image_dict | images  # [mat_id][dim]
+                
+                with open(f'{vec_dirs[i]}/landscapes/{system}.pkl', 'rb') as file:
+                    landscapes = pickle.load(file)
+                landscape_dict = landscape_dict | landscapes  # [mat_id][dim]
 
-        cgcnn_image_datapath = open_write_file(f"{CGCNN_PRE_DATAPATH}/vecs", f'images.pkl')
-        with open(cgcnn_image_datapath, 'wb') as f:
-            pickle.dump(image_dict, f)
+            cgcnn_diagram_datapath = open_write_file(f"{des_dirs[i]}/vecs", f'diagrams.pkl')
+            with open(cgcnn_diagram_datapath, 'wb') as f:
+                pickle.dump(diagram_dict, f)
 
-        cgcnn_landscape_datapath = open_write_file(f"{CGCNN_PRE_DATAPATH}/vecs", f'landscapes.pkl')
-        with open(cgcnn_landscape_datapath, 'wb') as f:
-            pickle.dump(landscape_dict, f)
+            cgcnn_image_datapath = open_write_file(f"{des_dirs[i]}/vecs", f'images.pkl')
+            with open(cgcnn_image_datapath, 'wb') as f:
+                pickle.dump(image_dict, f)
+
+            cgcnn_landscape_datapath = open_write_file(f"{des_dirs[i]}/vecs", f'landscapes.pkl')
+            with open(cgcnn_landscape_datapath, 'wb') as f:
+                pickle.dump(landscape_dict, f)
 
 
 def save_bounds(abs=False, merge=False):
-    source_file = f'{DATA_PRE_DIRECTORY}/bounds.pkl'
+    print(f"\n Saving PRETRAIN image transformer bounds...")
+    source_file = f'{DATA_PRE_DIRECTORY}/image_bounds.pkl'
     destination = open_write_file(f'{CGCNN_PRE_DATAPATH}/tasks', '')
     shutil.copy(source_file, destination)
 
     if abs and not merge:
-        source_file = f'{DATA_ABS_DIRECTORY}/bounds.pkl'
+        print(f"\n Saving ABS image transformer bounds...")
+        source_file = f'{DATA_ABS_DIRECTORY}/image_bounds.pkl'
         destination = open_write_file(f'{CGCNN_ABS_DATAPATH}/tasks', '')
         shutil.copy(source_file, destination)
             
