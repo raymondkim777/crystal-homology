@@ -5,7 +5,8 @@ import csv
 import numpy as np
 
 from tqdm import tqdm
-from utils import CRYSTAL_SYSTEMS, FIELDS, ABS_PREDICT, open_write_file
+import matplotlib.pyplot as plt
+from utils import CRYSTAL_SYSTEMS, FIELDS, PREDICT, ABS_PREDICT, TASK_SPECS, ABS_TASK_SPECS, open_write_file
 
 
 # DATA_DIRECTORY = "data/pretrain"
@@ -19,9 +20,11 @@ MULTIGRAPH_DIRECTORY = None
 
 def _parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--abs', action='store_true', help='Only focusees separately on data/abs')
+    parser.add_argument('--abs', action='store_true', help='Only focuses separately on data/abs')
+    parser.add_argument('--merge', action='store_true', help='Pretrain data contains absorption data')
     parser.add_argument('--bounds', action='store_true', help='Computes maximum bond distance and neighbor cnt aross all graphs')
-    parser.add_argument('--stats', action='store_true', help='Computes mean/stdev for each scalar prediction value')
+    parser.add_argument('--avail', action='store_true', help='Computes availability for each property in dataset')
+    parser.add_argument('--dist', action='store_true', help='Computes label distribution for each property in dataset')
     parser.add_argument('--test', action='store_true', help='Tests all graphs for bidirectionality')
     return parser.parse_args()
 
@@ -38,6 +41,7 @@ def unpack_all_graphs(undirected=False) -> dict:
 
 
 def find_graph_bounds():
+    # pretrain/abs is already defined
     graph_dict = unpack_all_graphs(undirected=False)
 
     # computing bounds
@@ -70,7 +74,7 @@ def find_graph_bounds():
         json.dump(val_json, f, indent=4)
 
 
-def find_pred_stats():
+def find_data_avail():
     fields = FIELDS[3:] if not args.abs else ABS_PREDICT
     all_crystals = {}
     crystal_system = {}
@@ -106,10 +110,104 @@ def find_pred_stats():
     csv_data = [['system'] + [field for field in fields]] + [
         [system] + list(property_ratios[system]) for system in CRYSTAL_SYSTEMS
     ]
-    csv_path = open_write_file(DATA_DIRECTORY, 'stats.csv')
+    csv_path = open_write_file(f'{DATA_DIRECTORY}/stats', 'avail.csv')
     with open(csv_path, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         writer.writerows(csv_data)
+
+
+def find_data_dist(abs, merge):
+    # collect all crystal docs
+    all_crystal_list = []
+    for system in CRYSTAL_SYSTEMS:
+        print(f"Loading crystals from {system} system...")
+        with open(f'{DATA_SUBSET_PATH}/{system}.pkl', 'rb') as file:
+            crystal_dict = pickle.load(file)
+        all_crystal_list += list(crystal_dict.values())
+    
+    props = ABS_PREDICT if abs else PREDICT
+    tasks = ABS_TASK_SPECS if abs else TASK_SPECS
+    all_values = {prop: [] for prop in props}
+
+    # store all dataset values
+    system_to_int = {CRYSTAL_SYSTEMS[idx]: idx for idx in range(len(CRYSTAL_SYSTEMS))}
+    for doc in tqdm(all_crystal_list):    
+        if not abs:
+            all_values['system'].append(system_to_int[str(doc['symmetry'].crystal_system).lower()])
+            if doc['bandstructure'] is not None and doc['bandstructure'].latimer_munro is not None:
+                all_values['direct_gap'].append(doc['bandstructure'].latimer_munro.direct_gap)
+            if doc['band_gap'] is not None:
+                all_values['band_gap'].append(doc['band_gap'])
+            if doc['efermi'] is not None:
+                all_values['efermi'].append(doc['efermi'])
+            if doc['is_gap_direct'] is not None:
+                all_values['is_gap_direct'].append(int(doc['is_gap_direct']))
+            
+            if merge and 'absorption' in doc.keys():
+                doc_abs = doc['absorption']
+                if doc_abs['max_absorption'] is not None:
+                    all_values['max_absorption'].append(doc_abs['max_absorption'])
+                if doc_abs['max_absorption_energy'] is not None:
+                    all_values['max_absorption_energy'].append(doc_abs['max_absorption_energy'])
+                if doc_abs['integrated_absorption'] is not None:
+                    all_values['integrated_absorption'].append(doc_abs['integrated_absorption'])
+                if doc_abs['integrated_absorption_visible'] is not None:
+                    all_values['integrated_absorption_visible'].append(doc_abs['integrated_absorption_visible'])
+                if doc_abs['average_absorption_visible'] is not None:
+                    all_values['average_absorption_visible'].append(doc_abs['average_absorption_visible'])
+                if doc_abs['absorption_onset_energy'] is not None:
+                    all_values['absorption_onset_energy'].append(doc_abs['absorption_onset_energy'])
+        else:
+            doc_abs = doc
+            if doc_abs['max_absorption'] is not None:
+                all_values['max_absorption'].append(doc_abs['max_absorption'])
+            if doc_abs['max_absorption_energy'] is not None:
+                all_values['max_absorption_energy'].append(doc_abs['max_absorption_energy'])
+            if doc_abs['integrated_absorption'] is not None:
+                all_values['integrated_absorption'].append(doc_abs['integrated_absorption'])
+            if doc_abs['integrated_absorption_visible'] is not None:
+                all_values['integrated_absorption_visible'].append(doc_abs['integrated_absorption_visible'])
+            if doc_abs['average_absorption_visible'] is not None:
+                all_values['average_absorption_visible'].append(doc_abs['average_absorption_visible'])
+            if doc_abs['absorption_onset_energy'] is not None:
+                all_values['absorption_onset_energy'].append(doc_abs['absorption_onset_energy'])
+
+    open_write_file(f'{DATA_DIRECTORY}/stats', '')
+    for prop, values in all_values.items():
+        if tasks[prop]['head'] in ['binary', 'multiclass']:
+            labels, counts = np.unique(values, return_counts=True)
+            csv_data = [['Label', 'Counts']]
+            csv_data += [[labels[i], counts[i]] for i in range(len(labels))]
+            csv_path = open_write_file(f'{DATA_DIRECTORY}/stats', f'{prop}.csv')
+            with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerows(csv_data)
+
+            plt.clf()
+            plt.bar(labels, counts, color='skyblue', edgecolor='black')
+            plt.title(f'{prop} label distribution')
+            plt.xlabel(f'{prop} classes')
+            plt.ylabel('frequency')
+            plt.savefig(f"{DATA_DIRECTORY}/stats/{prop}.png")
+
+        elif tasks[prop]['head'] == 'regression':
+            plt.clf()
+            counts, bin_edges, patches = plt.hist(values, bins=30, edgecolor='black', color='skyblue')
+            csv_data = [['Intervals', 'Counts']]
+            csv_data += [[f'{bin_edges[i]:.2f}~{bin_edges[i + 1]:.2f}', counts[i]] for i in range(len(counts))]
+            csv_path = open_write_file(f'{DATA_DIRECTORY}/stats', f'{prop}.csv')
+            with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerows(csv_data)
+            plt.title(f"{prop} label distribution")
+            plt.xlabel(f"{prop} value intervals")
+            plt.ylabel("frequency")
+            plt.savefig(f"{DATA_DIRECTORY}/stats/{prop}.png")
+        else:
+            raise ValueError(f"[Find Dist] Unrecognized task {tasks[prop]}")
+        pass
+
+     
 
 
 def bid_test():
@@ -145,12 +243,16 @@ if __name__ == "__main__":
     args = _parse_args()
 
     DATA_DIRECTORY = "data/abs" if args.abs else "data/pretrain"
-    DATA_SUBSET_PATH = f"{DATA_DIRECTORY}/mp-abs" if args.abs else f"{DATA_DIRECTORY}/mp-abs"
+    DATA_SUBSET_PATH = f"{DATA_DIRECTORY}/mp-abs" if args.abs else f"{DATA_DIRECTORY}/mp-subset"
     MULTIGRAPH_DIRECTORY = f"{DATA_DIRECTORY}/graphs-multi"
+
+    assert not (args.abs and args.merge), "--abs changes directory to data/abs --> can't also do --merge"
 
     if args.bounds:
         find_graph_bounds()
-    if args.stats:
-        find_pred_stats()
+    if args.avail:
+        find_data_avail()
+    if args.dist:
+        find_data_dist(abs=args.abs, merge=args.merge)
     if args.test:
         bid_test()

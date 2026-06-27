@@ -16,7 +16,7 @@ code/data/abs/mp-abs
 
 code/data/pretrain/bounds.json
 code/data/pretrain/bid_true.txt
-code/data/pretrain/stats.csv
+code/data/pretrain/stats
 code/data/pretrain/struct-issues
 code/data/pretrain/diagrams*
 code/data/pretrain/images*
@@ -25,7 +25,7 @@ code/data/pretrain/image_bounds.pkl
 
 code/data/abs/bounds.json
 code/data/abs/bid_true.txt
-code/data/abs/stats.csv
+code/data/abs/stats
 code/data/abs/struct-issues
 code/data/abs/diagrams*
 code/data/abs/images*

@@ -6,6 +6,7 @@ class MultiTaskLoss(nn.Module):
     def __init__(self):
         super().__init__()
         self.loss_bin = nn.BCEWithLogitsLoss(reduction='none')
+        self.loss_bin_w = nn.BCEWithLogitsLoss(reduction='none', pos_weight=6.94)  # computed from find_bounds.py --dist
         self.loss_class = nn.CrossEntropyLoss(reduction='none')
         self.loss_reg = nn.HuberLoss(reduction='none')
         # self.loss_reg = nn.MSELoss(reduction='none')
@@ -36,11 +37,6 @@ class MultiTaskLoss(nn.Module):
             num_avail = int(mask.sum().detach().cpu())
             available_labels += num_avail
 
-            # ! DEBUG
-            # if prop == 'bm_voigt':
-                # print("input:", input[prop])
-                # print("target:", targ)
-
             # Note: empty labels have default value 0
             # reduction none to mask out unlabeled losses in batch
             if task == 'binary':
@@ -51,18 +47,11 @@ class MultiTaskLoss(nn.Module):
                 prop_loss = self.loss_reg(input[prop], targ)
             else:
                 raise ValueError(f"[Loss] Unknown task: {task}")
-            
-            # if prop == 'absorption_onset_energy':
-            #     print(f'input for {prop}', input[prop])
-            #     print(f'targets for {prop}', targ)
-            #     print(f'prop loss for {prop}:', prop_loss)
-            #     if torch.isnan(prop_loss).any().item():
-            #         raise ValueError(f"[Loss] prop loss is NaN: {prop}")
 
             mask_float = mask.float()
+            # batch loss for each prop
             batch_loss = (prop_loss * mask_float).sum() / mask_float.sum().clamp_min(1.0)
-            # if prop == 'absorption_onset_energy':
-            #     print(f'batch loss for {prop}:', batch_loss)
+            batch_loss *= task_specs[prop]['weight']
             
             losses.append(batch_loss)   # batch loss across all props (accounting for invalid labels)
             loss_dict[prop] = {
