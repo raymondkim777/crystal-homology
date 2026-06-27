@@ -334,7 +334,6 @@ class CrystalSubset:
                         pickle.dump(subset_json_dict, f)
     
 
-    
     def convert_subsets_to_cif(self, absorb=False) -> None:
         print(f"Converting structure files into CIF...")
         for system in CRYSTAL_SYSTEMS:

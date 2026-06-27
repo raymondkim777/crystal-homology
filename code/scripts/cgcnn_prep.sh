@@ -3,4 +3,4 @@ export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 
-python cgcnn_prep.py --save --vector --bound
+python cgcnn_prep.py --abs --vector --bound

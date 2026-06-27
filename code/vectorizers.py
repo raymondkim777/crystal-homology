@@ -230,6 +230,26 @@ def persistence_landscape(
                 pickle.dump(system_landscapes, f)
 
 
+def pad_bounds(bound_x, bound_y, eps=0.001):
+    if bound_x == bound_y:
+        bound_x -= eps
+        bound_y -= eps
+    return (bound_x, bound_y)
+
+
+def save_image_transformer_bounds(image_transformers):
+    image_bnds_list = []
+    for dim in range(DIMENSION_CNT):
+        bounds = image_transformers[dim].im_range_fixed_
+        bounds_tuple = (pad_bounds(bounds[0], bounds[1]), pad_bounds(bounds[2], bounds[3]))
+        image_bnds_list.append(bounds_tuple)
+    
+    # save JSON
+    file_path = open_write_file(f'{DATA_DIRECTORY}', 'image_bounds.pkl')
+    with open(file_path, "wb") as f:
+        pickle.dump(image_bnds_list, f)
+
+
 def compute_images_for_system(args):
     '''
     Generates persistence images for one system for each dimension. 
@@ -275,6 +295,9 @@ def persistence_image(
     '''
     n_workers = get_num_cpus()
     image_transformers = fit_image_transformers(bandwidth, resolution)
+
+    # save image bounds
+    save_image_transformer_bounds(image_transformers)
 
     print(f"Computing images with {n_workers} workers...")
     with ProcessPoolExecutor(

@@ -128,6 +128,39 @@ TASK_SPECS = {
     # }, 
 }
 
+ABS_TASK_SPECS = {
+    'max_absorption': {
+        'head': 'regression', 
+        'out_dim': 1,
+        'weight': 1, 
+    },
+    'max_absorption_energy': {
+        'head': 'regression', 
+        'out_dim': 1,
+        'weight': 1, 
+    },
+    'integrated_absorption': {
+        'head': 'regression', 
+        'out_dim': 1,
+        'weight': 1, 
+    },
+    'integrated_absorption_visible': {
+        'head': 'regression', 
+        'out_dim': 1,
+        'weight': 1, 
+    },
+    'average_absorption_visible': {
+        'head': 'regression', 
+        'out_dim': 1,
+        'weight': 1, 
+    },
+    'absorption_onset_energy': {
+        'head': 'regression', 
+        'out_dim': 1,
+        'weight': 1, 
+    }, 
+}
+
 DIMENSION_CNT = 3
 
 

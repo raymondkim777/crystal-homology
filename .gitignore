@@ -21,6 +21,7 @@ code/data/pretrain/struct-issues
 code/data/pretrain/diagrams*
 code/data/pretrain/images*
 code/data/pretrain/landscapes*
+code/data/pretrain/image_bounds.pkl
 
 code/data/abs/bounds.json
 code/data/abs/bid_true.txt
@@ -29,6 +30,7 @@ code/data/abs/struct-issues
 code/data/abs/diagrams*
 code/data/abs/images*
 code/data/abs/landscapes*
+code/data/abs/image_bounds.pkl
 
 code/error.log
 logs
