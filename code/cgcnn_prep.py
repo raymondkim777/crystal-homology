@@ -14,28 +14,32 @@ from vectorizers import IM_BANDWIDTH, IM_RESOLUTION, fit_image_transformers
 from utils import CRYSTAL_SYSTEMS, PREDICT, TASK_SPECS, DIMENSION_CNT, get_num_cpus, open_write_file
 
 
+DATA_PRE_DIRECTORY = "data/pretrain"
+DATA_ABS_DIRECTORY = "data/abs"
+
 CGCNN_PRE_DATAPATH = 'cgcnn/data/pretrain_data'
 CGCNN_ABS_DATAPATH = 'cgcnn/data/abs_data'
 
 
 def _parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--save', action='store_true', help='Saves graph data to CGCNN data path')
-    parser.add_argument('--abs-merge', action='store_true', help='Merges absorption data and subset data')
+    # parser.add_argument('--pretrain', action='store_true', help='Saves pretrain data to CGCNN data path')
+    parser.add_argument('--abs', action='store_true', help='Saves absorption data to CGCNN data path')
+    parser.add_argument('--merge', action='store_true', help='Merges absorption data and subset data')
     parser.add_argument('--vector', action='store_true', help='Saves vectorizations to CGCNN data path')
     parser.add_argument('--bound', action='store_true', help='Saves persistence bounds to CGCNN data path')
     return parser.parse_args()
 
 
-def unpack_system_graphs(args):
+def unpack_pre_system_graphs(args):
     system = args
     graph_system_dict = dict()
     
-    with open(f'data/graphs-multi/{system}.pkl', 'rb') as file:
+    with open(f'{DATA_PRE_DIRECTORY}/graphs-multi/{system}.pkl', 'rb') as file:
         graph_system_dict = pickle.load(file)
 
     for mp_id, graph in graph_system_dict.items():
-        structure_filename = f'data/cif/{system}/{mp_id}.cif'
+        structure_filename = f'{DATA_PRE_DIRECTORY}/cif/{system}/{mp_id}.cif'
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -50,13 +54,13 @@ def unpack_system_graphs(args):
     return system, graph_system_dict
 
 
-def unpack_all_graphs() -> dict:
+def unpack_all_pre_graphs() -> dict:
     num_workers = get_num_cpus()
     graph_dict = {}
 
     with ProcessPoolExecutor(max_workers=num_workers) as executor:
         futures = {
-            executor.submit(unpack_system_graphs, system): system
+            executor.submit(unpack_pre_system_graphs, system): system
             for system in CRYSTAL_SYSTEMS
         }
 
@@ -78,7 +82,7 @@ def collect_all_diagrams():
     all_diagrams_list = []
 
     for system in CRYSTAL_SYSTEMS:
-        with open(f'data/diagrams/{system}.pkl', 'rb') as file:
+        with open(f'{DATA_PRE_DIRECTORY}/diagrams/{system}.pkl', 'rb') as file:
             diagrams = pickle.load(file)
         all_diagrams_dict = all_diagrams_dict | diagrams
         all_diagrams_list += list(diagrams.values())
@@ -159,11 +163,11 @@ def retrieve_diagrams():
     return reorganize_list_of_dicts(padded_diagram_dict_by_dim)
 
 
-def write_id_prop_mask(merge=False):
+def write_pretrain_id_prop_mask(abs=False, merge=False):
     doc_dict = dict()
     for system in CRYSTAL_SYSTEMS:
-        print(f"Unpacking {system} system docs...")
-        with open(f'data/mp-subset/{system}.pkl', 'rb') as file:
+        print(f"Unpacking pretrain {system} system docs...")
+        with open(f'{DATA_PRE_DIRECTORY}/mp-subset/{system}.pkl', 'rb') as file:
             system_dict = pickle.load(file)
         doc_dict.update(system_dict)
     
@@ -171,7 +175,7 @@ def write_id_prop_mask(merge=False):
     csv_mask_data = []
     system_to_int = {CRYSTAL_SYSTEMS[idx]: idx for idx in range(len(CRYSTAL_SYSTEMS))}
 
-    print(f"Computing id_prop.csv and id_mask.csv...")
+    print(f"Computing PRETRAIN{'/ABS' if abs and merge else ''} id_prop.csv and id_mask.csv...")
     for mp_id, doc in tqdm(doc_dict.items()):
         prop_dict = {
             'system': system_to_int[str(doc['symmetry'].crystal_system).lower()],
@@ -195,7 +199,100 @@ def write_id_prop_mask(merge=False):
             'efermi': int(doc['efermi'] is not None),
             'is_gap_direct': int(doc['is_gap_direct'] is not None),
         }
-        if merge:
+        if abs and merge:
+            if 'absorption' in doc.keys():
+                doc_abs = doc['absorption']
+                prop_dict.update({
+                    'max_absorption': doc_abs['max_absorption'] if doc_abs['max_absorption'] is not None else 0.0,
+                    'max_absorption_energy': doc_abs['max_absorption_energy'] if doc_abs['max_absorption_energy'] is not None else 0.0,
+                    'integrated_absorption': doc_abs['integrated_absorption'] if doc_abs['integrated_absorption'] is not None else 0.0,
+                    'integrated_absorption_visible': doc_abs['integrated_absorption_visible'] if doc_abs['integrated_absorption_visible'] is not None else 0.0,
+                    'average_absorption_visible': doc_abs['average_absorption_visible'] if doc_abs['average_absorption_visible'] is not None else 0.0,
+                    'absorption_onset_energy': doc_abs['absorption_onset_energy'] if doc_abs['absorption_onset_energy'] is not None else 0.0,
+                })
+            else:
+                prop_dict.update({
+                    'max_absorption': 0.0,
+                    'max_absorption_energy': 0.0,
+                    'integrated_absorption': 0.0,
+                    'integrated_absorption_visible': 0.0,
+                    'average_absorption_visible': 0.0,
+                    'absorption_onset_energy': 0.0,
+                })
+            if 'absorption' in doc.keys():
+                doc_abs = doc['absorption']
+                mask_dict.update({
+                    'max_absorption': int(doc_abs['max_absorption'] is not None),
+                    'max_absorption_energy': int(doc_abs['max_absorption_energy'] is not None),
+                    'integrated_absorption': int(doc_abs['integrated_absorption'] is not None),
+                    'integrated_absorption_visible': int(doc_abs['integrated_absorption_visible'] is not None),
+                    'average_absorption_visible': int(doc_abs['average_absorption_visible'] is not None),
+                    'absorption_onset_energy': int(doc_abs['absorption_onset_energy'] is not None),
+                })
+            else:
+                mask_dict.update({
+                    'max_absorption': 0,
+                    'max_absorption_energy': 0,
+                    'integrated_absorption': 0,
+                    'integrated_absorption_visible': 0,
+                    'average_absorption_visible': 0,
+                    'absorption_onset_energy': 0,
+                })
+        csv_prop_row = [mp_id[3:]]
+        csv_mask_row = [mp_id[3:]]
+
+        # ensure order is same as PREDICT in utils.py
+        for prop in PREDICT:
+            csv_prop_row.append(prop_dict[prop])
+            csv_mask_row.append(mask_dict[prop])
+        csv_prop_data.append(csv_prop_row)
+        csv_mask_data.append(csv_mask_row)
+    
+    print(f"Writing id_prop.csv and id_mask.csv...")
+    csv_prop_filepath = open_write_file(CGCNN_PRE_DATAPATH, 'id_prop.csv')
+    with open(csv_prop_filepath, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        writer.writerows(csv_prop_data)
+
+    csv_mask_filepath = open_write_file(CGCNN_PRE_DATAPATH, 'id_mask.csv')
+    with open(csv_mask_filepath, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        writer.writerows(csv_mask_data)
+
+
+def write_abs_id_prop_mask():
+    print(f"Unpacking absorption docs...")
+    with open(f'{DATA_ABS_DIRECTORY}/mp-abs.pkl', 'rb') as file:
+        doc_dict = pickle.load(file)
+    
+    csv_prop_data = []
+    csv_mask_data = []
+
+    print(f"Computing ABS id_prop.csv and id_mask.csv...")
+    for mp_id, doc in tqdm(doc_dict.items()):
+        prop_dict = {
+            'system': system_to_int[str(doc['symmetry'].crystal_system).lower()],
+            # 'bm_voigt': doc['bulk_modulus']['voigt'] if doc['bulk_modulus'] is not None else 0.0,
+            # 'bm_reuss': doc['bulk_modulus']['reuss'] if doc['bulk_modulus'] is not None else 0.0,
+            # 'bm_vrh': doc['bulk_modulus']['vrh'] if doc['bulk_modulus'] is not None else 0.0,
+            'direct_gap': doc['bandstructure'].latimer_munro.direct_gap 
+            if doc['bandstructure'] is not None and doc['bandstructure'].latimer_munro is not None 
+            else 0.0,
+            'band_gap': doc['band_gap'] if doc['band_gap'] is not None else 0.0,
+            'efermi': doc['efermi'] if doc['efermi'] is not None else 0.0,
+            'is_gap_direct': 1 if doc['is_gap_direct'] is not None and doc['is_gap_direct'] else 0,
+        }
+        mask_dict = {
+            'system': 1,
+            # 'bm_voigt': int(doc['bulk_modulus'] is not None),
+            # 'bm_reuss': int(doc['bulk_modulus'] is not None),
+            # 'bm_vrh': int(doc['bulk_modulus'] is not None),
+            'direct_gap': int(doc['bandstructure'] is not None and doc['bandstructure'].latimer_munro is not None),
+            'band_gap': int(doc['band_gap'] is not None),
+            'efermi': int(doc['efermi'] is not None),
+            'is_gap_direct': int(doc['is_gap_direct'] is not None),
+        }
+        if abs and merge:
             if 'absorption' in doc.keys():
                 doc_abs = doc['absorption']
                 prop_dict.update({
@@ -268,8 +365,8 @@ def graph_process(vector=False):
     }
     Optionally saves diagrams and vectorizations as pickle files in CGCNN data folder. 
     """
-    graph_dict = unpack_all_graphs()
-    print(f"Saving files to {CGCNN_PRE_DATAPATH}")
+    graph_dict = unpack_all_pre_graphs()
+    print(f"Saving pretrain graph files to {CGCNN_PRE_DATAPATH}")
     # save graphs to CGCNN data folder
     for mp_id, value in graph_dict.items():
         cgcnn_datapath = open_write_file(f"{CGCNN_PRE_DATAPATH}/graphs", f'{mp_id}.pkl')
@@ -277,9 +374,8 @@ def graph_process(vector=False):
             pickle.dump(value, f)
     
     # multitask regression/classification id_prop and id_mask
-    write_id_prop_mask(args.abs_merge)
-
-    
+    write_pretrain_id_prop_mask(abs=args.abs, merge=args.merge)
+    write_abs_id_prop_mask()
 
     # save PREDICT list to CGCNN data path
     predict_filepath = open_write_file(f"{CGCNN_PRE_DATAPATH}/tasks", f'predict.pkl')
@@ -295,11 +391,11 @@ def graph_process(vector=False):
         diagram_dict = retrieve_diagrams()
         image_dict, landscape_dict = dict(), dict()
         for system in CRYSTAL_SYSTEMS:
-            with open(f'data/images/{system}.pkl', 'rb') as file:
+            with open(f'{DATA_PRE_DIRECTORY}/images/{system}.pkl', 'rb') as file:
                 images = pickle.load(file)
             image_dict = image_dict | images  # [mat_id][dim]
             
-            with open(f'data/landscapes/{system}.pkl', 'rb') as file:
+            with open(f'{DATA_PRE_DIRECTORY}/landscapes/{system}.pkl', 'rb') as file:
                 landscapes = pickle.load(file)
             landscape_dict = landscape_dict | landscapes  # [mat_id][dim]
 
@@ -325,11 +421,6 @@ def pad_bounds(bound_x, bound_y, eps=0.001):
 
 def save_bounds():
     image_transformers = fit_image_transformers(IM_BANDWIDTH, IM_RESOLUTION)
-    # self.image_bnds = [
-    #     ((-1.0e-03, 1.0e-03), (0.54836184, 16.7195282)), 
-    #     ((1.22288406e+00, 1.44270658e+01), (2.38418579e-07, 1.54966436e+01)), 
-    #     ((1.71408939e+00, 1.52640104e+01), (2.38418579e-07, 1.49896426e+01))
-    # ]
     image_bnds_list = []
     for dim in range(DIMENSION_CNT):
         bounds = image_transformers[dim].im_range_fixed_
@@ -345,7 +436,6 @@ def save_bounds():
 if __name__ == "__main__":
     args = _parse_args()
 
-    if args.save:
-        graph_process(args.vector)
+    graph_process(args.vector)
     if args.bound:
         save_bounds()

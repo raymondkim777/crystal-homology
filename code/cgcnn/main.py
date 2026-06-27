@@ -892,11 +892,11 @@ def validate(val_loader, model, criterion, normalizers, test=False):
         star_label = '**'
         import csv
         # ! saving stats for each prop
-        with open(f'test_stats_{args.id}.csv', 'w') as file_stats:
+        with open(f'test_stats_{args.id}.csv', 'w', newline='', encoding='utf-8') as file_stats:
             writer = csv.writer(file_stats)
             header = ['head', 'task', 'loss', 'nrmse', 'accuracy', 'precision', 'recall', 'f1', 'auroc']
             writer.writerow(header)
-            writer.writerow(['total', overall_error, losses.avg])
+            writer.writerow(['total', overall_error, losses.avg, '', '', '', '', '', ''])
                     
             for prop, values in stats.items():
                 if TASK_SPECS[prop]['head'] in ['binary', 'multiclass']:
@@ -929,7 +929,7 @@ def validate(val_loader, model, criterion, normalizers, test=False):
         
         # ! saving results for each prop
         for prop, values in test_stats.items():
-            with open(f'test_results_{args.id}_{prop}.csv', 'w') as file_results:
+            with open(f'test_results_{args.id}_{prop}.csv', 'w', newline='', encoding='utf-8') as file_results:
                 writer = csv.writer(file_results)
 
                 if TASK_SPECS[prop]['head'] in ['binary', 'multiclass']:

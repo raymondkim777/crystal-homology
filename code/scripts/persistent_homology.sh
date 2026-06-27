@@ -5,3 +5,6 @@ export NUMEXPR_NUM_THREADS=1
 
 python compute_diagrams.py
 python vectorizers.py --landscape --image
+
+python compute_diagrams.py --abs
+python vectorizers.py --abs --landscape --image

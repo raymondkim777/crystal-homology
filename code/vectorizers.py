@@ -11,12 +11,21 @@ from gudhi.representations import Landscape, PersistenceImage
 
 from concurrent.futures import ProcessPoolExecutor
 from compute_diagrams import plot_persistence_diagram
-from utils import CRYSTAL_SYSTEMS, DIMENSION_CNT, get_num_cpus, open_write_file
+from utils import CRYSTAL_SYSTEMS, DIMENSION_CNT, get_num_cpus, open_write_file, get_max_dist
 
 
-LANDSCAPE_DIRECTORY = "data/landscapes"
-IMAGE_DIRECTORY = "data/images"
-MAX_DIST = 12.43843407284584  # computed from find_max_dist()
+# DATA_DIRECTORY = "data/pretrain"
+# DATA_DIRECTORY = "data/abs"
+# DIAGRAM_DIRECTORY = f"{DATA_DIRECTORY}/diagrams"
+# LANDSCAPE_DIRECTORY = f"{DATA_DIRECTORY}/landscapes"
+# IMAGE_DIRECTORY = f"{DATA_DIRECTORY}/images"
+# MAX_DIST = get_max_dist(DATA_DIRECTORY) 
+
+DATA_DIRECTORY = None
+DIAGRAM_DIRECTORY = None
+LANDSCAPE_DIRECTORY = None
+IMAGE_DIRECTORY = None
+MAX_DIST = None
 
 LANDSCAPE_TRANSFORMERS = None
 IMAGE_TRANSFORMERS = None
@@ -32,6 +41,7 @@ IM_RESOLUTION = [20, 20]
 
 def _parse_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--abs', action='store_true', help='vectorizes absorption PDs')
     parser.add_argument('--landscape', action='store_true', help='generates persistence landscapes')
     parser.add_argument('--image', action='store_true', help='generates persistence images')
     parser.add_argument('--example', action='store_true', help='display some examples')
@@ -40,7 +50,7 @@ def _parse_args():
 
 def collect_system_diagrams(system: str) -> dict:
     '''Collects persistence diagrams from .pkl files from one system as a dict.'''
-    with open(f'data/diagrams/{system}.pkl', 'rb') as file:
+    with open(f'{DIAGRAM_DIRECTORY}/{system}.pkl', 'rb') as file:
         diagrams = pickle.load(file)
     return diagrams
 
@@ -49,7 +59,7 @@ def collect_all_diagrams() -> list:
     '''Collects all persistence diagrams from .pkl files from all systems into one list.'''
     all_diagrams = []
     for system in CRYSTAL_SYSTEMS:
-        with open(f'data/diagrams/{system}.pkl', 'rb') as file:
+        with open(f'{DIAGRAM_DIRECTORY}/{system}.pkl', 'rb') as file:
             diagrams = pickle.load(file)
         all_diagrams += list(diagrams.values())
     return all_diagrams
@@ -173,6 +183,8 @@ def compute_landscapes_for_system(args):
     # process all diagrams in system
     system_diagrams = collect_system_diagrams(system)
     keys_list = list(system_diagrams.keys())
+    if len(keys_list) == 0:
+        return system, dict()
     diagrams_by_dims = process_all_diagrams(list(system_diagrams.values()))
 
     # generate persistence landscapes for all diagrams for each dimension
@@ -228,6 +240,8 @@ def compute_images_for_system(args):
     # process all diagrams in system
     system_diagrams = collect_system_diagrams(system)
     keys_list = list(system_diagrams.keys())
+    if len(keys_list) == 0:
+        return system, dict()
     diagrams_by_dims = process_all_diagrams(list(system_diagrams.values()))
 
     # generate persistence images for all diagrams for each dimension
@@ -285,7 +299,7 @@ def plot_landscape(system: str, mat_id: str, dim: int=0):
     plot_persistence_diagram(diagram)
 
     transformers = fit_landscape_transformers(num_landscapes=LA_LAYER, resolution=LA_RESOLUTION)
-    with open(f'data/landscapes/{system}.pkl', 'rb') as file:
+    with open(f'{LANDSCAPE_DIRECTORY}/{system}.pkl', 'rb') as file:
         landscapes = pickle.load(file)
     landscape_to_plot = landscapes[mat_id][dim]  # all three dimensions
     
@@ -302,7 +316,7 @@ def plot_landscape(system: str, mat_id: str, dim: int=0):
     plt.legend()
     plt.grid(True, alpha=0.3)
     # plt.show()
-    plt.savefig('data/landscapes/example_gudhi.png')
+    plt.savefig(f'{LANDSCAPE_DIRECTORY}/example_gudhi.png')
 
 
 def plot_image(system: str, mat_id: str, dim: int=0):
@@ -313,7 +327,7 @@ def plot_image(system: str, mat_id: str, dim: int=0):
     plot_persistence_diagram(diagram)
 
     transformers = fit_image_transformers(bandwidth=IM_BANDWIDTH, resolution=IM_RESOLUTION)
-    with open(f'data/images/{system}.pkl', 'rb') as file:
+    with open(f'{IMAGE_DIRECTORY}/{system}.pkl', 'rb') as file:
         images = pickle.load(file)
     image_to_plot = images[mat_id][dim]  # all three dimensions
     
@@ -326,7 +340,7 @@ def plot_image(system: str, mat_id: str, dim: int=0):
     plt.ylabel("Death")
     plt.colorbar(label="Pixel Intensity")
     # plt.show()
-    plt.savefig('data/images/example_gudhi.png')
+    plt.savefig(f'{IMAGE_DIRECTORY}/example_gudhi.png')
 
 
 ################   UNUSED FROM BELOW   ################
@@ -358,6 +372,12 @@ def plot_landscape_gtda(
 
 if __name__ == "__main__":
     args = _parse_args()
+
+    DATA_DIRECTORY = "data/abs"  if args.abs else "data/pretrain"
+    DIAGRAM_DIRECTORY = f"{DATA_DIRECTORY}/diagrams"
+    LANDSCAPE_DIRECTORY = f"{DATA_DIRECTORY}/landscapes"
+    IMAGE_DIRECTORY = f"{DATA_DIRECTORY}/images"
+    MAX_DIST = get_max_dist(DATA_DIRECTORY) 
 
     if args.landscape:
         persistence_landscape()

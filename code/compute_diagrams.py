@@ -1,5 +1,6 @@
 import os
 import json
+import argparse
 import numpy as np
 import networkx as nx
 from tqdm import tqdm
@@ -9,15 +10,28 @@ from gtda.homology import FlagserPersistence
 from gtda.plotting import plot_diagram
     
 
-GRAPH_DIRECTORY = "data/graphs"
-DIAGRAM_DIRECTORY = "data/diagrams"
-MAX_DIST = get_max_dist()
+# DATA_DIRECTORY = "data/pretrain"
+# DATA_DIRECTORY = "data/abs"
+# GRAPH_DIRECTORY = f"{DATA_DIRECTORY}/graphs"
+# DIAGRAM_DIRECTORY = f"{DATA_DIRECTORY}/diagrams"
+# MAX_DIST = get_max_dist(DATA_DIRECTORY)
+
+DATA_DIRECTORY = None
+GRAPH_DIRECTORY = None
+DIAGRAM_DIRECTORY = None
+MAX_DIST = None
+
+
+def _parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--abs', action='store_true', help='constructs diagrams for absorption data')
+    return parser.parse_args()
 
 
 def unpack_all_graphs() -> dict:
     graph_dict = dict()
     for system in CRYSTAL_SYSTEMS:
-        with open(f'data/graphs/{system}.pkl', 'rb') as file:
+        with open(f'{GRAPH_DIRECTORY}/{system}.pkl', 'rb') as file:
             graph_dict[system] = pickle.load(file)
     return graph_dict
 
@@ -71,6 +85,14 @@ def compute_persistence_diagrams(dims: tuple=tuple(range(DIMENSION_CNT))) -> Non
         print(f"Computing PD for {system}...")
         
         adj_mat_list = list(adj_mat_system[system].values())
+        if len(adj_mat_list) == 0:
+            print(f"No graphs for {system} system!")
+            diagrams_with_id = dict()
+            diag_filepath = open_write_file(DIAGRAM_DIRECTORY, f'{system}.pkl')
+            with open(diag_filepath, 'wb') as f:
+                pickle.dump(diagrams_with_id, f)
+            continue
+
         diagrams = flagser.transform(adj_mat_list)
 
         # match diagrams to mat_id
@@ -92,16 +114,12 @@ def compute_persistence_diagrams(dims: tuple=tuple(range(DIMENSION_CNT))) -> Non
             pickle.dump(diagrams_with_id, f)
 
 
-def test():
-    with open('data/diagrams/cubic.pkl', 'rb') as file:
-        diagrams = pickle.load(file)
-    
-    index = 100
-    keys_list = list(diagrams.keys())
-    print(keys_list[index])
-    plot_persistence_diagram(keys_list[index], diagrams[keys_list[index]])
-    pass
-
-
 if __name__ == "__main__":
+    args = _parse_args()
+
+    DATA_DIRECTORY = "data/abs" if args.abs else "data/pretrain"
+    GRAPH_DIRECTORY = f"{DATA_DIRECTORY}/graphs"
+    DIAGRAM_DIRECTORY = f"{DATA_DIRECTORY}/diagrams"
+    MAX_DIST = get_max_dist(DATA_DIRECTORY)
+
     compute_persistence_diagrams()

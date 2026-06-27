@@ -25,11 +25,11 @@ MP_DATA_PATH = f'{DATA_PATH}/mp-raw'
 
 DATA_PRE_PATH = f'{DATA_PATH}/pretrain'
 DATA_PRE_SUBSET_PATH = f'{DATA_PRE_PATH}/mp-subset'
-DATA_PRE_CIF_PATH = f'{DATA_PRE_PATH}/cif-pre'
+DATA_PRE_CIF_PATH = f'{DATA_PRE_PATH}/cif'
 
 DATA_ABS_PATH = f'{DATA_PATH}/abs'
-# DATA_ABS_SUBSET_PATH = f'{DATA_ABS_PATH}/mp-abs'
-DATA_ABS_CIF_PATH = f'{DATA_ABS_PATH}/cif-abs'
+DATA_ABS_SUBSET_PATH = f'{DATA_ABS_PATH}/mp-abs'
+DATA_ABS_CIF_PATH = f'{DATA_ABS_PATH}/cif'
 
 
 def _parse_args():
@@ -261,8 +261,6 @@ class CrystalSubset:
             abs_docs_by_id = dict()
             for doc in abs_docs:
                 abs_docs_by_id[doc.material_id] = doc
-
-            subset_json_dict = dict()
             
             for system in CRYSTAL_SYSTEMS:
                 mp_id_list = mp_id_list_by_system[system]
@@ -270,6 +268,11 @@ class CrystalSubset:
 
                 if len(mp_id_list) == 0:
                     print(f"No absorption data for {system} system!")
+                    if not merge:
+                        subset_json_dict = dict()
+                        subset_abs_path = open_write_file(DATA_ABS_SUBSET_PATH, f'{system}.pkl')
+                        with open(subset_abs_path, 'wb') as f:
+                            pickle.dump(subset_json_dict, f)
                     continue
 
                 print(f"Extracting absorption data for {system} system...")
@@ -311,6 +314,8 @@ class CrystalSubset:
                 
                 else:
                     print(f"Saving absorption data separately...")
+                    subset_json_dict = dict()
+
                     for i in tqdm(range(len(mp_id_list)), desc=f'{system}: '):
                         mp_id = mp_id_list[i]
                         subset_json_dict[mp_id] = {
@@ -322,12 +327,12 @@ class CrystalSubset:
                             'average_absorption_visible': abs_avg_vis[i], 
                             'absorption_onset_energy': abs_onset_e[i]
                         }
-            
-            if not merge:
-                # save abs pickle file separately
-                subset_abs_path = open_write_file(DATA_ABS_PATH, 'mp-abs.pkl')
-                with open(subset_abs_path, 'wb') as f:
-                    pickle.dump(subset_json_dict, f)
+
+                    # save abs pickle file separately
+                    subset_abs_path = open_write_file(DATA_ABS_SUBSET_PATH, f'{system}.pkl')
+                    with open(subset_abs_path, 'wb') as f:
+                        pickle.dump(subset_json_dict, f)
+    
 
     
     def convert_subsets_to_cif(self, absorb=False) -> None:
@@ -348,16 +353,19 @@ class CrystalSubset:
         
         if absorb:
             print(f"Converting abs structure files into CIF...")
-            with open(f"{DATA_ABS_PATH}/mp-abs.pkl", 'rb') as file:
-                mp_json_list = pickle.load(file)
-            
-            for mp_id, value in tqdm(mp_json_list.items(), desc=f"{system}: "):
-                file_cif_name = f'{mp_id}.cif'
-                data_cif_path = open_write_file(DATA_ABS_CIF_PATH, file_cif_name)
+            for system in CRYSTAL_SYSTEMS:
+                with open(f"{DATA_ABS_SUBSET_PATH}/{system}.pkl", 'rb') as file:
+                    mp_json_list = pickle.load(file)
 
-                cif_data = value["structure"].to(fmt="cif")
-                with open(data_cif_path, 'w') as f:
-                    f.write(cif_data)
+                data_cif_dir = f'{DATA_ABS_CIF_PATH}/{system}'
+                open_write_file(data_cif_dir, '')
+                for mp_id, value in tqdm(mp_json_list.items(), desc=f"{system}: "):
+                    file_cif_name = f'{mp_id}.cif'
+                    data_cif_path = open_write_file(data_cif_dir, file_cif_name)
+
+                    cif_data = value["structure"].to(fmt="cif")
+                    with open(data_cif_path, 'w') as f:
+                        f.write(cif_data)
             shutil.make_archive(f'{DATA_ABS_PATH}/cif-abs', 'zip', DATA_ABS_CIF_PATH)
 
 

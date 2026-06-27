@@ -41,6 +41,15 @@ PREDICT = [
     'band_gap', 
     'efermi', 
     'is_gap_direct',
+    # 'max_absorption',
+    # 'max_absorption_energy',
+    # 'integrated_absorption',
+    # 'integrated_absorption_visible',
+    # 'average_absorption_visible',
+    # 'absorption_onset_energy',
+]
+
+ABS_PREDICT = [
     'max_absorption',
     'max_absorption_energy',
     'integrated_absorption',
@@ -87,41 +96,39 @@ TASK_SPECS = {
         'out_dim': 1,
         'weight': 1, 
     },
-    'max_absorption': {
-        'head': 'regression', 
-        'out_dim': 1,
-        'weight': 1, 
-    },
-    'max_absorption_energy': {
-        'head': 'regression', 
-        'out_dim': 1,
-        'weight': 1, 
-    },
-    'integrated_absorption': {
-        'head': 'regression', 
-        'out_dim': 1,
-        'weight': 1, 
-    },
-    'integrated_absorption_visible': {
-        'head': 'regression', 
-        'out_dim': 1,
-        'weight': 1, 
-    },
-    'average_absorption_visible': {
-        'head': 'regression', 
-        'out_dim': 1,
-        'weight': 1, 
-    },
-    'absorption_onset_energy': {
-        'head': 'regression', 
-        'out_dim': 1,
-        'weight': 1, 
-    }, 
+    # 'max_absorption': {
+    #     'head': 'regression', 
+    #     'out_dim': 1,
+    #     'weight': 1, 
+    # },
+    # 'max_absorption_energy': {
+    #     'head': 'regression', 
+    #     'out_dim': 1,
+    #     'weight': 1, 
+    # },
+    # 'integrated_absorption': {
+    #     'head': 'regression', 
+    #     'out_dim': 1,
+    #     'weight': 1, 
+    # },
+    # 'integrated_absorption_visible': {
+    #     'head': 'regression', 
+    #     'out_dim': 1,
+    #     'weight': 1, 
+    # },
+    # 'average_absorption_visible': {
+    #     'head': 'regression', 
+    #     'out_dim': 1,
+    #     'weight': 1, 
+    # },
+    # 'absorption_onset_energy': {
+    #     'head': 'regression', 
+    #     'out_dim': 1,
+    #     'weight': 1, 
+    # }, 
 }
 
 DIMENSION_CNT = 3
-MAX_DIST = 12.43843407284584  # computed from find_max_dist()
-MAX_NBR = 38
 
 
 def get_num_cpus(default=1):
@@ -151,6 +158,6 @@ def plot_nxgraph(graph: nx.DiGraph) -> None:
     plt.show()
 
 
-def get_max_dist():
-    with open('data/bounds.json', 'r') as f:
+def get_max_dist(data_dir):
+    with open(f'{data_dir}/bounds.json', 'r') as f:
         return json.load(f)['max_bond_dist']

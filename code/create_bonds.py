@@ -1,5 +1,6 @@
 import os
 import pickle
+import argparse
 import networkx as nx
 
 from tqdm import tqdm
@@ -11,12 +12,25 @@ from concurrent.futures import ProcessPoolExecutor
 from utils import CRYSTAL_SYSTEMS, get_num_cpus, open_write_file
 
 
-CIF_DIRECTORY = "data/cif"
-MULTIGRAPH_DIRECTORY = "data/graphs-multi"
-GRAPH_DIRECTORY = "data/graphs"
+# DATA_DIRECTORY = "data/pretrain"
+# DATA_DIRECTORY = "data/abs"
+# CIF_DIRECTORY = f"{DATA_DIRECTORY}/cif"
+# MULTIGRAPH_DIRECTORY = f"{DATA_DIRECTORY}/graphs-multi"
+# GRAPH_DIRECTORY = f"{DATA_DIRECTORY}/graphs"
+
+DATA_DIRECTORY = None
+CIF_DIRECTORY = None
+MULTIGRAPH_DIRECTORY = None
+GRAPH_DIRECTORY = None
 
 
 CRYSTALNN = None
+
+
+def _parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--abs', action='store_true', help='Only focusees separately on data/abs')
+    return parser.parse_args()
 
 
 def fetch_cif_filenames(system: str) -> list:
@@ -163,5 +177,12 @@ def check_structures() -> None:
 
 
 if __name__ == "__main__":
+    args = _parse_args()
+
+    DATA_DIRECTORY = "data/abs" if args.abs else "data/pretrain"
+    CIF_DIRECTORY = f"{DATA_DIRECTORY}/cif"
+    MULTIGRAPH_DIRECTORY = f"{DATA_DIRECTORY}/graphs-multi"
+    GRAPH_DIRECTORY = f"{DATA_DIRECTORY}/graphs"
+
     construct_crystalnn_graph()
     # check_structures()

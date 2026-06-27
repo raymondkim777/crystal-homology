@@ -5,23 +5,30 @@ __pycache__
 
 code/data/mp-raw
 
-code/data/pretrain/cif-pre
+code/data/pretrain/cif
 !code/data/pretrain/cif-pre.zip
 code/data/pretrain/mp-subset
 code/data/pretrain/rejects.csv
 
-code/data/abs/cif-abs
+code/data/abs/cif
 !code/data/abs/cif-abs.zip
-code/data/abs/mp-abs.pkl
+code/data/abs/mp-abs
 
+code/data/pretrain/bounds.json
+code/data/pretrain/bid_true.txt
+code/data/pretrain/stats.csv
+code/data/pretrain/struct-issues
+code/data/pretrain/diagrams*
+code/data/pretrain/images*
+code/data/pretrain/landscapes*
 
-code/data/bounds.json
-code/data/bid_true.txt
-code/data/stats.csv
-code/data/struct-issues
-code/data/diagrams*
-code/data/images*
-code/data/landscapes*
+code/data/abs/bounds.json
+code/data/abs/bid_true.txt
+code/data/abs/stats.csv
+code/data/abs/struct-issues
+code/data/abs/diagrams*
+code/data/abs/images*
+code/data/abs/landscapes*
 
 code/error.log
 logs

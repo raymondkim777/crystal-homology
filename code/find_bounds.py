@@ -5,11 +5,21 @@ import csv
 import numpy as np
 
 from tqdm import tqdm
-from utils import CRYSTAL_SYSTEMS, FIELDS, DIMENSION_CNT, open_write_file
+from utils import CRYSTAL_SYSTEMS, FIELDS, ABS_PREDICT, open_write_file
+
+
+# DATA_DIRECTORY = "data/pretrain"
+# DATA_DIRECTORY = "data/abs"
+# DATA_SUBSET_PATH = f"{DATA_DIRECTORY}/mp-subset"
+# DATA_SUBSET_PATH = f"{DATA_DIRECTORY}/mp-abs"
+DATA_DIRECTORY = None
+DATA_SUBSET_PATH = None
+MULTIGRAPH_DIRECTORY = None
 
 
 def _parse_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--abs', action='store_true', help='Only focusees separately on data/abs')
     parser.add_argument('--bounds', action='store_true', help='Computes maximum bond distance and neighbor cnt aross all graphs')
     parser.add_argument('--stats', action='store_true', help='Computes mean/stdev for each scalar prediction value')
     parser.add_argument('--test', action='store_true', help='Tests all graphs for bidirectionality')
@@ -20,7 +30,7 @@ def unpack_all_graphs(undirected=False) -> dict:
     graph_dict = dict()
     for system in CRYSTAL_SYSTEMS:
         print(f"Unpacking multigraphs from {system} system...")
-        with open(f'data/graphs-multi/{system}.pkl', 'rb') as file:
+        with open(f'{MULTIGRAPH_DIRECTORY}/{system}.pkl', 'rb') as file:
             graph_system_dict = pickle.load(file)
         for key, graph in graph_system_dict.items():
             graph_dict[key] = graph.to_undirected() if undirected else graph
@@ -55,19 +65,19 @@ def find_graph_bounds():
         'max_num_nbr': max_num_nbr, 
         'max_bond_dist': max_bond_dist,
     }
-    json_path = open_write_file('data/', 'bounds.json')
+    json_path = open_write_file(DATA_DIRECTORY, 'bounds.json')
     with open(json_path, 'w') as f:
         json.dump(val_json, f, indent=4)
 
 
 def find_pred_stats():
-    fields = FIELDS[3:]
+    fields = FIELDS[3:] if not args.abs else ABS_PREDICT
     all_crystals = {}
     crystal_system = {}
 
     for system in CRYSTAL_SYSTEMS:
         print(f"Loading crystals from {system} system...")
-        with open(f'data/mp-subset/{system}.pkl', 'rb') as file:
+        with open(f'{DATA_SUBSET_PATH}/{system}.pkl', 'rb') as file:
             crystal_dict = pickle.load(file)
         crystal_system[system] = crystal_dict
         all_crystals.update(crystal_dict)
@@ -96,7 +106,7 @@ def find_pred_stats():
     csv_data = [['system'] + [field for field in fields]] + [
         [system] + list(property_ratios[system]) for system in CRYSTAL_SYSTEMS
     ]
-    csv_path = open_write_file('data', 'stats.csv')
+    csv_path = open_write_file(DATA_DIRECTORY, 'stats.csv')
     with open(csv_path, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         writer.writerows(csv_data)
@@ -110,7 +120,7 @@ def bid_test():
     bidirectional = False
 
     bid_id_list = []
-    json_path = open_write_file('data/', 'bid_true.txt')
+    json_path = open_write_file(DATA_DIRECTORY, 'bid_true.txt')
 
     print("Testing bidirectionality...")
     for key, graph in tqdm(graph_dict.items()):
@@ -133,6 +143,10 @@ def bid_test():
 
 if __name__ == "__main__":
     args = _parse_args()
+
+    DATA_DIRECTORY = "data/abs" if args.abs else "data/pretrain"
+    DATA_SUBSET_PATH = f"{DATA_DIRECTORY}/mp-abs" if args.abs else f"{DATA_DIRECTORY}/mp-abs"
+    MULTIGRAPH_DIRECTORY = f"{DATA_DIRECTORY}/graphs-multi"
 
     if args.bounds:
         find_graph_bounds()
