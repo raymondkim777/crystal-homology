@@ -262,7 +262,7 @@ def main():
     # ! CUSTOM LOSS FUNCTION
     if args.debug:
         print("Instantiating custom loss function")
-    criterion = MultiTaskLoss()
+    criterion = MultiTaskLoss(device)
     # if args.task == 'classification':
     #     criterion = nn.NLLLoss()
     # else:

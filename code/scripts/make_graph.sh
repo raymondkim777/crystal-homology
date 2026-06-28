@@ -4,7 +4,7 @@ export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 
 python create_bonds.py
-python find_bounds.py --bounds --stats
+python find_bounds.py --bounds --avail --dist
 
 python create_bonds.py --abs
-python find_bounds.py --abs --bounds --stats
+python find_bounds.py --abs --bounds --avail --dist

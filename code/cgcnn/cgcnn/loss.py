@@ -3,10 +3,13 @@ import torch.nn as nn
 
 
 class MultiTaskLoss(nn.Module):
-    def __init__(self):
+    def __init__(self, device):
         super().__init__()
         self.loss_bin = nn.BCEWithLogitsLoss(reduction='none')
-        self.loss_bin_w = nn.BCEWithLogitsLoss(reduction='none', pos_weight=torch.tensor([6.94]))  # computed from find_bounds.py --dist
+        self.loss_bin_w = nn.BCEWithLogitsLoss(
+            reduction='none', 
+            pos_weight=torch.tensor([6.94]).to(device)    # computed from find_bounds.py --dist
+        )  
         self.loss_class = nn.CrossEntropyLoss(reduction='none')
         self.loss_reg = nn.HuberLoss(reduction='none')
         # self.loss_reg = nn.MSELoss(reduction='none')
@@ -40,7 +43,7 @@ class MultiTaskLoss(nn.Module):
             # Note: empty labels have default value 0
             # reduction none to mask out unlabeled losses in batch
             if task == 'binary':
-                prop_loss = self.loss_bin(input[prop], targ)
+                prop_loss = self.loss_bin_w(input[prop], targ)
             elif task == 'multiclass':
                 prop_loss = self.loss_class(input[prop], targ.long())
             elif task == 'regression':
