@@ -6,7 +6,7 @@ class MultiTaskLoss(nn.Module):
     def __init__(self):
         super().__init__()
         self.loss_bin = nn.BCEWithLogitsLoss(reduction='none')
-        self.loss_bin_w = nn.BCEWithLogitsLoss(reduction='none', pos_weight=6.94)  # computed from find_bounds.py --dist
+        self.loss_bin_w = nn.BCEWithLogitsLoss(reduction='none', pos_weight=torch.tensor([6.94]))  # computed from find_bounds.py --dist
         self.loss_class = nn.CrossEntropyLoss(reduction='none')
         self.loss_reg = nn.HuberLoss(reduction='none')
         # self.loss_reg = nn.MSELoss(reduction='none')

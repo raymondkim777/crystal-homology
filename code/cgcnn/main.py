@@ -197,7 +197,7 @@ def main():
 
     # ? do i need to collect ALL training data, or does a representative sample suffice?
     if args.debug:
-        print("Computing normalizers from train sample size 500")
+        print("Computing normalizers from train sample size 2000")
     # sampler_indices = list(train_loader.sampler)
     # train_dataset = Subset(dataset, sampler_indices)
     # train_data_list = [train_dataset[i] for i in tqdm(range(len(train_dataset)))]
