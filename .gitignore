@@ -14,6 +14,11 @@ code/data/abs/cif
 !code/data/abs/cif-abs.zip
 code/data/abs/mp-abs
 
+code/data/plqy/cif
+code/data/plqy/cif-plqy
+!code/data/plqy/cif-plqy.zip
+code/data/plqy/mp-plqy
+
 code/data/pretrain/bounds.json
 code/data/pretrain/bid_true.txt
 code/data/pretrain/stats
@@ -31,6 +36,15 @@ code/data/abs/diagrams*
 code/data/abs/images*
 code/data/abs/landscapes*
 code/data/abs/image_bounds.pkl
+
+code/data/plqy/bounds.json
+code/data/plqy/bid_true.txt
+code/data/plqy/stats
+code/data/plqy/struct-issues
+code/data/plqy/diagrams*
+code/data/plqy/images*
+code/data/plqy/landscapes*
+code/data/plqy/image_bounds.pkl
 
 code/error.log
 logs

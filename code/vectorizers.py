@@ -42,6 +42,7 @@ IM_RESOLUTION = [20, 20]
 def _parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--abs', action='store_true', help='vectorizes absorption PDs')
+    parser.add_argument('--plqy', action='store_true', help='Only focuses separately on data/plqys')
     parser.add_argument('--landscape', action='store_true', help='generates persistence landscapes')
     parser.add_argument('--image', action='store_true', help='generates persistence images')
     parser.add_argument('--example', action='store_true', help='display some examples')
@@ -395,8 +396,14 @@ def plot_landscape_gtda(
 
 if __name__ == "__main__":
     args = _parse_args()
+    assert not args.abs or not args.plqy, "Can only choose one of abs/plqy"
 
-    DATA_DIRECTORY = "data/abs"  if args.abs else "data/pretrain"
+    DATA_DIRECTORY = "data/pretrain"
+    if args.abs:
+        DATA_DIRECTORY = "data/abs"
+    if args.plqy:
+        DATA_DIRECTORY = "data/plqy"
+
     DIAGRAM_DIRECTORY = f"{DATA_DIRECTORY}/diagrams"
     LANDSCAPE_DIRECTORY = f"{DATA_DIRECTORY}/landscapes"
     IMAGE_DIRECTORY = f"{DATA_DIRECTORY}/images"

@@ -458,7 +458,7 @@ class GraphData(Dataset):
 
         # atom features (node features)
         feature_list = [
-                self.ari.get_atom_fea(graph.nodes[node]['specie'].number)
+                self.ari.get_atom_fea(graph.nodes[node]['species']) # species number
                 for node in graph.nodes
         ]
 

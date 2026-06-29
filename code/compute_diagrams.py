@@ -25,6 +25,7 @@ MAX_DIST = None
 def _parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--abs', action='store_true', help='constructs diagrams for absorption data')
+    parser.add_argument('--plqy', action='store_true', help='constructs diagrams for plqy data')
     return parser.parse_args()
 
 
@@ -116,8 +117,14 @@ def compute_persistence_diagrams(dims: tuple=tuple(range(DIMENSION_CNT))) -> Non
 
 if __name__ == "__main__":
     args = _parse_args()
+    assert not args.abs or not args.plqy, "Can only choose one of abs/plqy"
 
-    DATA_DIRECTORY = "data/abs" if args.abs else "data/pretrain"
+    DATA_DIRECTORY = "data/pretrain"
+    if args.abs:
+        DATA_DIRECTORY = "data/abs"
+    if args.plqy:
+        DATA_DIRECTORY = "data/plqy"
+        
     GRAPH_DIRECTORY = f"{DATA_DIRECTORY}/graphs"
     DIAGRAM_DIRECTORY = f"{DATA_DIRECTORY}/diagrams"
     MAX_DIST = get_max_dist(DATA_DIRECTORY)

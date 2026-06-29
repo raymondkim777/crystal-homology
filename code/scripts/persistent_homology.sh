@@ -8,3 +8,6 @@ python vectorizers.py --landscape --image
 
 python compute_diagrams.py --abs
 python vectorizers.py --abs --landscape --image
+
+python compute_diagrams.py --plqy
+python vectorizers.py --plqy --landscape --image

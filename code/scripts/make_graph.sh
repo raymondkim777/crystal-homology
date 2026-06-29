@@ -8,3 +8,6 @@ python find_bounds.py --bounds --avail --dist
 
 python create_bonds.py --abs
 python find_bounds.py --abs --bounds --avail --dist
+
+python create_bonds.py --plqy
+python find_bounds.py --plqy --bounds

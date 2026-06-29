@@ -13,6 +13,11 @@ from monty.json import MontyEncoder
 from monty.serialization import loadfn
 from emmet.core.summary import HasProps
 
+from pymatgen.io.cif import CifParser
+from pymatgen.core import Structure
+from pymatgen.core.composition import Composition
+from pymatgen.symmetry.analyzer import SpacegroupAnalyzer, SymmetryUndeterminedError
+
 from get_mp_data import save_doc_as_dict
 from utils import CRYSTAL_SYSTEMS, FIELDS, open_write_file
 
@@ -31,6 +36,13 @@ DATA_ABS_PATH = f'{DATA_PATH}/abs'
 DATA_ABS_SUBSET_PATH = f'{DATA_ABS_PATH}/mp-abs'
 DATA_ABS_CIF_PATH = f'{DATA_ABS_PATH}/cif'
 
+DATA_PLQY_PATH = f'{DATA_PATH}/plqy'
+DATA_PLQY_SUBSET_PATH = f'{DATA_PLQY_PATH}/mp-plqy'
+DATA_PLQY_CIF_PATH_RAW = f'{DATA_PLQY_PATH}/cif-plqy'
+DATA_PLQY_CIF_PATH = f'{DATA_PLQY_PATH}/cif'
+
+PROBLEM_CIFS = ['2349961.cif']
+
 
 def _parse_args():
     parser = argparse.ArgumentParser()
@@ -41,8 +53,9 @@ def _parse_args():
     parser.add_argument('--large', action='store_true', help='add random subset of larger non-optimal crystals')
     parser.add_argument('--size-large', default=7000, type=int, help='total subset size (including large) for each class')
     parser.add_argument('--cif', action='store_true', help='convert subset to CIF files')
-    parser.add_argument('--absorb', action='store_true', help='collect absorption data')
+    parser.add_argument('--abs', action='store_true', help='collect absorption data')
     parser.add_argument('--merge', action='store_true', help='merge absorption data to subsets')
+    parser.add_argument('--plqy', action='store_true', help='create plqy mp doc data')
     parser.add_argument('--reject', action='store_true', help='stores rejected mp_ids to CSV')
     return parser.parse_args()
 
@@ -366,6 +379,97 @@ class CrystalSubset:
                     with open(data_cif_path, 'w') as f:
                         f.write(cif_data)
             shutil.make_archive(f'{DATA_ABS_PATH}/cif-abs', 'zip', DATA_ABS_CIF_PATH)
+    
+
+    def get_structure_from_cif(self, filepath: str) -> list:
+        # ! parse_structures() returns "Incorrect stoichiometry" error
+        # ! --> bypass occupancy checks
+        cif_parser = CifParser(filepath, occupancy_tolerance=np.inf)
+        structures = cif_parser.parse_structures(check_occu=False)
+        if len(structures) > 1:
+            print(f"[PLQY Structures] File {filepath} generates multiple structures")
+
+        for site in structures[0]:
+            total_occ = sum(site.species.values())
+            if total_occ > 1.0:
+                new_species_dict = {sp: occ / total_occ for sp, occ in site.species.items()}
+                new_species = Composition.from_weight_dict(new_species_dict)
+                site.species = new_species
+
+        # for struct in structures:
+        #     check_result = cif_parser.check(struct)
+        #     if check_result is not None:
+        #         print(f"CIF Error: {filepath}")
+        #         print(f"Error Message: {check_result}")
+        #         raise ValueError(f"Struct contained in {filepath} is invalid")
+        for site in structures[0]:
+            if sum(site.species.values()) > 1:
+                print(sum(site.species.values()))
+        return structures[0]
+
+
+    def get_crystal_system(self, structure, filepath):
+        try:
+            analyzer = SpacegroupAnalyzer(structure, symprec=0.1)
+            system = analyzer.get_crystal_system().lower()
+            return system
+        except SymmetryUndeterminedError:
+            with open(filepath, 'r') as file:
+                cif_text = file.read()
+            found_systems = []
+            for system in CRYSTAL_SYSTEMS:
+                if system in cif_text:
+                    found_systems.append(system)
+            if len(found_systems) != 1:
+                print(f"Multiple systmes found: {found_systems}")
+            return found_systems[0].lower()
+
+
+    def create_plqy_docs(self):
+        # read CIF filenames, create dictionary with pymatgen Structures
+        print(f"Fetching PLQY CIF files...")
+        cif_files = []
+        # os.scandir() returns an iterator of DirEntry objects
+        with os.scandir(f"{DATA_PLQY_CIF_PATH_RAW}") as entries:
+            for entry in entries:
+                if not entry.is_file():
+                    continue
+                cif_files.append(entry.name) 
+        
+        print(f"Retrieving PLQY structures from CIF files...")
+        plqy_doc_systems = dict()
+        for system in CRYSTAL_SYSTEMS:
+            plqy_doc_systems[system] = dict()
+            open_write_file(f"{DATA_PLQY_CIF_PATH}/{system}", '')
+        
+        for filename in cif_files:
+            # ! ignore problematic CIF files
+            if filename in PROBLEM_CIFS:
+                print(f"Skipping {filename}")
+                continue
+
+            print("CIF:", filename)
+            crystal_id = filename[:-4]
+            file_path = f"{DATA_PLQY_CIF_PATH_RAW}/{filename}"
+
+            # ! get structure (bypass warnings)
+            structure = self.get_structure_from_cif(file_path)
+            # structure = Structure.from_file(file_path)
+
+            # ! get crystal system (lower string)
+            system = self.get_crystal_system(structure, file_path)
+            
+            # save structure doc & CIF file
+            plqy_doc_systems[system][crystal_id] = {
+                'structure': structure,
+            }
+            shutil.copy(file_path, f"{DATA_PLQY_CIF_PATH}/{system}")
+        
+        print(f"Saving PLQY docs...")
+        for system in CRYSTAL_SYSTEMS:
+            subset_plqy_path = open_write_file(DATA_PLQY_SUBSET_PATH, f'{system}.pkl')
+            with open(subset_plqy_path, 'wb') as f:
+                pickle.dump(plqy_doc_systems[system], f)
 
 
 class AbsorptionSubset:
@@ -535,8 +639,6 @@ class Rejections():
                 row = [id] + ['XXXXXX' if reason[i] else '' for i in range(len(reason))]
                 writer.writerow(row)
 
-
-##### DEPRECATED #####
     
 def select_random_subset(subset_size=6700) -> None:
     print(f"Subset Size: {subset_size}")
@@ -562,7 +664,7 @@ if __name__ == "__main__":
 
     crystal_subset = CrystalSubset(
         subset=args.subset,
-        absorption_data=args.absorb
+        absorption_data=args.abs
     )
 
     if args.random:
@@ -577,7 +679,9 @@ if __name__ == "__main__":
                 total_size=args.size_large,
                 reject=args.reject
             )
-        if args.absorb:
+        if args.abs:
             crystal_subset.collect_abs_mp_data(merge=args.merge)
         if args.cif:
-            crystal_subset.convert_subsets_to_cif(absorb=args.absorb)
+            crystal_subset.convert_subsets_to_cif(absorb=args.abs)
+    if args.plqy:
+        crystal_subset.create_plqy_docs()

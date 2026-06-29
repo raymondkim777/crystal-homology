@@ -1,12 +1,15 @@
 import os
 import pickle
 import argparse
+import numpy as np
 import networkx as nx
 
 from tqdm import tqdm
 import warnings
 from pymatgen.io.cif import CifParser
 from pymatgen.analysis.local_env import CrystalNN
+from pymatgen.core.periodic_table import Element
+from pymatgen.core.composition import Composition
 from concurrent.futures import ProcessPoolExecutor
 
 from utils import CRYSTAL_SYSTEMS, get_num_cpus, open_write_file
@@ -29,7 +32,8 @@ CRYSTALNN = None
 
 def _parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--abs', action='store_true', help='Only focusees separately on data/abs')
+    parser.add_argument('--abs', action='store_true', help='Only focuses separately on data/abs')
+    parser.add_argument('--plqy', action='store_true', help='Only focuses separately on data/plqys')
     return parser.parse_args()
 
 
@@ -59,28 +63,63 @@ def get_structures_from_cif(filepath: str) -> list:
     return structures
 
 
+def get_structures_from_cif_plqy(filepath: str) -> list:
+    # ! parse_structures() returns "Incorrect stoichiometry" error
+    # ! --> bypass occupancy checks
+    cif_parser = CifParser(filepath, occupancy_tolerance=np.inf)
+    structures = cif_parser.parse_structures(check_occu=False)
+    if len(structures) > 1:
+        print(f"[PLQY Structures] File {filepath} generates multiple structures")
+    
+    for site in structures[0]:
+        total_occ = sum(site.species.values())
+        if total_occ > 1.0:
+            new_species_dict = {sp: occ / total_occ for sp, occ in site.species.items()}
+            new_species = Composition.from_weight_dict(new_species_dict)
+            site.species = new_species
+    return structures
+
+
 def process_one_cif(args):
     # accept one tuple for multiprocessing
-    system, filename = args
+    system, filename, plqy = args
 
     structure_filename = f"{CIF_DIRECTORY}/{system}/{filename}"
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        structures = get_structures_from_cif(structure_filename)
+        if plqy:
+            structures = get_structures_from_cif_plqy(structure_filename)
+        else:
+            structures = get_structures_from_cif(structure_filename)
     
     # transform into multi-digraph
-    bonded_structure = CRYSTALNN.get_bonded_structure(structures[0])
+    # structure = structures[0]
+    structure = structures[0].get_reduced_structure()
+    bonded_structure = CRYSTALNN.get_bonded_structure(
+        structure,
+        on_disorder='take_max_species', 
+    )
     nx_multigraph = bonded_structure.graph
 
     # set bond distances as weight for each edge
     for u, v, key, data in nx_multigraph.edges(keys=True, data=True):
         to_jimage = data['to_jimage']
-        dist = structures[0].get_distance(u, v, jimage=to_jimage)
+        dist = structure.get_distance(u, v, jimage=to_jimage)
         nx_multigraph.edges[u, v, key]['weight'] = dist
 
     # change species identifier to species object, not label
     for node in nx_multigraph.nodes:
-        nx_multigraph.nodes[node]['specie'] = structures[0][node].specie
+        if structure[node].is_ordered:
+            nx_multigraph.nodes[node]['species'] = structure[node].specie.number
+        else:
+            el_amt_dict = structure[node].species.get_el_amt_dict()
+            max_element = max(el_amt_dict, key=el_amt_dict.get)
+            max_element_num = Element(max_element).number
+            nx_multigraph.nodes[node]['species'] = max_element_num
+        # try:
+        #     nx_multigraph.nodes[node]['species'] = structure[node].specie
+        # except Exception as e:
+        #     print("ERROR", structure[node])
 
     # collapse multigraph into graph
     nx_graph = nx.DiGraph(nx_multigraph)
@@ -100,7 +139,7 @@ def process_one_cif(args):
     nx.set_edge_attributes(nx_graph, values=edge_mult_dict, name='multiplicity')
 
     # re-implement edge weights as min. distances of all relevant bonds
-    distance_matrix = structures[0].distance_matrix
+    distance_matrix = structure.distance_matrix
     distances_dict = dict()
     for edge in nx_graph.edges:
         distances_dict[edge] = distance_matrix[edge[0], edge[1]]
@@ -120,7 +159,7 @@ def init_crystalnn(crystalnn):
     CRYSTALNN = crystalnn
 
 
-def construct_crystalnn_graph() -> None:
+def construct_crystalnn_graph(plqy=False) -> None:
     workers = get_num_cpus()
     print(f"Using {workers} worker processes")
 
@@ -129,7 +168,7 @@ def construct_crystalnn_graph() -> None:
         distance_cutoffs=None, 
         x_diff_weight=0, 
         porous_adjustment=False,
-        search_cutoff=11  # default 7, but ERROR: No Voronoi neighbors found for site
+        search_cutoff=11,  # default 7, but ERROR: No Voronoi neighbors found for site
     )
 
     for system in CRYSTAL_SYSTEMS:
@@ -138,7 +177,7 @@ def construct_crystalnn_graph() -> None:
         system_graphs = dict()
 
         cif_files = fetch_cif_filenames(system)
-        tasks = [(system, filename) for filename in cif_files]
+        tasks = [(system, filename, plqy) for filename in cif_files]
                     
         print(f"Creating graphs of {system} system...")
         with ProcessPoolExecutor(
@@ -178,11 +217,17 @@ def check_structures() -> None:
 
 if __name__ == "__main__":
     args = _parse_args()
+    assert not args.abs or not args.plqy, "Can only choose one of abs/plqy"
 
-    DATA_DIRECTORY = "data/abs" if args.abs else "data/pretrain"
+    DATA_DIRECTORY = "data/pretrain"
+    if args.abs:
+        DATA_DIRECTORY = "data/abs"
+    if args.plqy:
+        DATA_DIRECTORY = "data/plqy"
+
     CIF_DIRECTORY = f"{DATA_DIRECTORY}/cif"
     MULTIGRAPH_DIRECTORY = f"{DATA_DIRECTORY}/graphs-multi"
     GRAPH_DIRECTORY = f"{DATA_DIRECTORY}/graphs"
 
-    construct_crystalnn_graph()
+    construct_crystalnn_graph(plqy=args.plqy)
     # check_structures()
