@@ -159,7 +159,6 @@ def main():
     )
     collate_fn = collate_pool
 
-    # ! multiprocess attempt
     if args.debug:
         print("Constructing train/val/test loaders")
     train_loader, val_loader, test_loader = get_train_val_test_loader(
@@ -179,23 +178,7 @@ def main():
         # persistent_workers=True
     )
     
-    # ! CHANGE (for multitask)
-    # # obtain target value normalizer
-    # if args.task == 'classification':
-    #     normalizer = Normalizer(torch.zeros(2))
-    #     normalizer.load_state_dict({'mean': 0., 'std': 1.})
-    # else:
-    #     if len(dataset) < 500:
-    #         warnings.warn('Dataset has less than 500 data points. '
-    #                       'Lower accuracy is expected. ')
-    #         sample_data_list = [dataset[i] for i in range(len(dataset))]
-    #     else:
-    #         sample_data_list = [dataset[i] for i in
-    #                             sample(range(len(dataset)), 500)]
-    #     _, sample_target, _ = collate_pool(sample_data_list)
-    #     normalizer = Normalizer(sample_target)
-
-    # ? do i need to collect ALL training data, or does a representative sample suffice?
+    # ! multitask normalizers
     if args.debug:
         print("Computing normalizers from train sample size 2000")
     # sampler_indices = list(train_loader.sampler)
@@ -263,10 +246,6 @@ def main():
     if args.debug:
         print("Instantiating custom loss function")
     criterion = MultiTaskLoss(device)
-    # if args.task == 'classification':
-    #     criterion = nn.NLLLoss()
-    # else:
-    #     criterion = nn.MSELoss()
             
     if args.optim == 'SGD':
         optimizer = optim.SGD(model.parameters(), args.lr,
@@ -312,28 +291,20 @@ def main():
             print("Validating")
         val_errors = validate(val_loader, model, criterion, normalizers)
 
-        # ! change to account for all prop errors
         if val_errors != val_errors:
             print('Exit due to NaN')
             sys.exit(1)
 
         scheduler.step()
 
-        # remember the best mae_eror and save checkpoint
+        # remember the best error and save checkpoint
         is_best = val_errors < best_errors
         best_errors = min(val_errors, best_errors)
-        # if args.task == 'regression':
-        #     is_best = val_errors < best_errors
-        #     best_errors = min(val_errors, best_errors)
-        # else:
-        #     is_best = val_errors > best_errors
-        #     best_errors = max(val_errors, best_errors)
         save_checkpoint({
             'epoch': epoch + 1,
             'state_dict': model.state_dict(),
             'best_errors': best_errors,
             'optimizer': optimizer.state_dict(),
-            # 'normalizer': normalizer.state_dict(),
             'normalizer': {prop: normalizers[prop].state_dict()
                            for prop in normalizers.keys()},
             'args': vars(args)
@@ -350,7 +321,7 @@ def main():
 def train(train_loader, model, criterion, optimizer, epoch, normalizers):
     batch_time = AverageMeter()
     data_time = AverageMeter()
-    # ! everything below should be for each property
+    # ! stat trackers for each metric per head
     losses = AverageMeter()     # total batch loss (from loss function)
     stats = dict()
     for prop, value in TASK_SPECS.items():
@@ -366,14 +337,6 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers):
             stats[prop]['nrmse_errors'] = AverageMeter()
         else:
             raise ValueError(f"[TRAIN STATS] Unknown task {value['head']}")
-    # if args.task == 'regression':
-    #     mae_errors = AverageMeter()
-    # else:
-    #     accuracies = AverageMeter()
-    #     precisions = AverageMeter()
-    #     recalls = AverageMeter()
-    #     fscores = AverageMeter()
-    #     auc_scores = AverageMeter()
 
     # switch to train mode
     model.train()
@@ -409,37 +372,13 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers):
             vectorizations, 
             diagrams
         )
-
-        # if args.cuda:
-        #     input_var = (Variable(input[0].cuda(non_blocking=True)),
-        #                  Variable(input[1].cuda(non_blocking=True)),
-        #                  input[2].cuda(non_blocking=True),
-        #                  [crys_idx.cuda(non_blocking=True) for crys_idx in input[3]])
-        # else:
-        #     input_var = (Variable(input[0]),
-        #                  Variable(input[1]),
-        #                  input[2],
-        #                  input[3])
     
         # normalize target
-        # ! FIX target normalization (apply to each property)
+        # ! target normalization applied to each property
         targets_normed = {
             prop: (normalizers[prop].norm(targets[prop])).to(device, non_blocking=True)
             for prop in targets.keys()
         }
-
-        # if args.debug:
-        #     print("targets:", targets['absorption_onset_energy'])
-        #     print("targets_normed:", targets_normed['absorption_onset_energy'])
-
-        # if args.task == 'regression':
-        #     target_normed = normalizer.norm(target)
-        # else:
-        #     target_normed = target.view(-1).long()
-        # if args.cuda:
-        #     target_var = Variable(target_normed.cuda(non_blocking=True))
-        # else:
-        #     target_var = Variable(target_normed)
 
         # compute output
         output = model(*input_var)  # dictionary[prop]
@@ -472,21 +411,6 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers):
                 stats[prop]['nrmse_errors'].update(nrmse_error, int(mask[prop].sum().item()))
             else:
                 raise ValueError(f"[STAT SAVE] Unknown task {value['head']}")
-            
-        # # measure accuracy and record loss
-        # if args.task == 'regression':
-        #     mae_error = mae(normalizer.denorm(output.data.cpu()), targets)
-        #     losses.update(loss.data.cpu(), targets.size(0))
-        #     mae_errors.update(mae_error, targets.size(0))
-        # else:
-        #     accuracy, precision, recall, fscore, auc_score = \
-        #         class_eval(output.data.cpu(), targets)
-        #     losses.update(loss.data.cpu().item(), targets.size(0))
-        #     accuracies.update(accuracy, targets.size(0))
-        #     precisions.update(precision, targets.size(0))
-        #     recalls.update(recall, targets.size(0))
-        #     fscores.update(fscore, targets.size(0))
-        #     auc_scores.update(auc_score, targets.size(0))
 
         # compute gradient and do SGD step
         optimizer.zero_grad()
@@ -497,7 +421,7 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers):
         batch_time.update(time.time() - end)
         end = time.time()
 
-        # ! adjust to print stats for every property
+        # ! print stats for each property
         if i % args.print_freq == 0:
             print('\nEpoch: [{0}][{1}/{2}]\tLoss {loss.val:.4f} ({loss.avg:.4f})'.format(
                 epoch, i, len(train_loader), loss=losses))
@@ -531,35 +455,10 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers):
                 else:
                     raise ValueError(f"[STAT PRINT] Unrecognized task {TASK_SPECS[prop]['head']}")
             
-            # if args.task == 'regression':
-            #     print('Epoch: [{0}][{1}/{2}]\t'
-            #           'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-            #           'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
-            #           'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-            #           'MAE {mae_errors.val:.3f} ({mae_errors.avg:.3f})'.format(
-            #         epoch, i, len(train_loader), batch_time=batch_time,
-            #         data_time=data_time, loss=losses, mae_errors=mae_errors)
-            #     )
-            # else:
-            #     print('Epoch: [{0}][{1}/{2}]\t'
-            #           'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-            #           'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
-            #           'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-            #           'Accu {accu.val:.3f} ({accu.avg:.3f})\t'
-            #           'Precision {prec.val:.3f} ({prec.avg:.3f})\t'
-            #           'Recall {recall.val:.3f} ({recall.avg:.3f})\t'
-            #           'F1 {f1.val:.3f} ({f1.avg:.3f})\t'
-            #           'AUC {auc.val:.3f} ({auc.avg:.3f})'.format(
-            #         epoch, i, len(train_loader), batch_time=batch_time,
-            #         data_time=data_time, loss=losses, accu=accuracies,
-            #         prec=precisions, recall=recalls, f1=fscores,
-            #         auc=auc_scores)
-            #     )
-
 
 def validate(val_loader, model, criterion, normalizers, test=False):
     batch_time = AverageMeter()
-    # ! everything below should be for each property
+    # ! stat trackers for each metric per head
     losses = AverageMeter()
     stats = dict()
     for prop, value in TASK_SPECS.items():
@@ -576,15 +475,6 @@ def validate(val_loader, model, criterion, normalizers, test=False):
         else:
             raise ValueError(f"[TRAIN STATS] Unknown task {value['head']}")
     
-    # losses = AverageMeter()
-    # if args.task == 'regression':
-    #     mae_errors = AverageMeter()
-    # else:
-    #     accuracies = AverageMeter()
-    #     precisions = AverageMeter()
-    #     recalls = AverageMeter()
-    #     fscores = AverageMeter()
-    #     auc_scores = AverageMeter()
     if test:
         test_stats = dict()
         for prop, value in TASK_SPECS.items():
@@ -606,11 +496,6 @@ def validate(val_loader, model, criterion, normalizers, test=False):
             else:
                 raise ValueError(f"[TRAIN STATS] Unknown task {value['head']}")
             test_stats[prop] = prop_stats
-            
-        # test_targets = []
-        # test_preds = []
-        # test_probs = []
-        # test_cif_ids = []
 
     # switch to evaluate mode
     model.eval()
@@ -644,35 +529,12 @@ def validate(val_loader, model, criterion, normalizers, test=False):
             vectorizations, 
             diagrams
         )
-        # if args.cuda:
-        #     with torch.no_grad():
-        #         input_var = (Variable(input[0].cuda(non_blocking=True)),
-        #                      Variable(input[1].cuda(non_blocking=True)),
-        #                      input[2].cuda(non_blocking=True),
-        #                      [crys_idx.cuda(non_blocking=True) for crys_idx in input[3]])
-        # else:
-        #     with torch.no_grad():
-        #         input_var = (Variable(input[0]),
-        #                      Variable(input[1]),
-        #                      input[2],
-        #                      input[3])
 
-        # ! FIX target normalization (apply to each property)
+        # ! target normalization applied to each property
         targets_normed = {
             key: (normalizers[key].norm(targets[key])).to(device, non_blocking=True)
             for key in targets.keys()
         }
-
-        # if args.task == 'regression':
-        #     target_normed = normalizer.norm(target)
-        # else:
-        #     target_normed = target.view(-1).long()
-        # if args.cuda:
-        #     with torch.no_grad():
-        #         target_var = Variable(target_normed.cuda(non_blocking=True))
-        # else:
-        #     with torch.no_grad():
-        #         target_var = Variable(target_normed)
 
         # compute output
         output = model(*input_var)
@@ -733,49 +595,12 @@ def validate(val_loader, model, criterion, normalizers, test=False):
 
             else:
                 raise ValueError(f"[STAT SAVE] Unknown task {value['head']}")
-            
-
-        # # measure accuracy and record loss
-        # if args.task == 'regression':
-        #     mae_error = mae(normalizer.denorm(output.data.cpu()), target)
-        #     losses.update(loss.data.cpu().item(), target.size(0))
-        #     mae_errors.update(mae_error, target.size(0))
-        #     if test:
-        #         test_pred = normalizer.denorm(output.data.cpu())
-        #         test_target = target
-        #         test_preds += test_pred.view(-1).tolist()
-        #         test_targets += test_target.view(-1).tolist()
-        #         test_cif_ids += batch_cif_ids
-        # else:
-        #     accuracy, precision, recall, fscore, auc_score = \
-        #         class_eval(output.data.cpu(), target)
-        #     losses.update(loss.data.cpu().item(), target.size(0))
-        #     accuracies.update(accuracy, target.size(0))
-        #     precisions.update(precision, target.size(0))
-        #     recalls.update(recall, target.size(0))
-        #     fscores.update(fscore, target.size(0))
-        #     auc_scores.update(auc_score, target.size(0))
-        #     if test:
-        #         test_pred = torch.exp(output.data.cpu())
-        #         test_target = target
-                
-        #         # ! MODIFIED to account for multiclass
-        #         # assert test_pred.shape[1] == 2
-        #         assert test_pred.shape[1] == args.num_classes
-                
-        #         # test_preds += test_pred[:, 1].tolist()
-        #         pred_label = torch.argmax(test_pred, dim = 1)
-        #         test_preds += pred_label.tolist()
-        #         test_probs += test_pred.tolist()
-                
-        #         test_targets += test_target.view(-1).tolist()
-        #         test_cif_ids += batch_cif_ids
 
         # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
 
-        # ! adjust to print stats for every property
+        # ! print stats for each property
         if i % args.print_freq == 0:
             print('Test: [{0}/{1}]\tLoss {loss.val:.4f} ({loss.avg:.4f})'.format(
                 i, len(val_loader), loss=losses))
@@ -806,26 +631,6 @@ def validate(val_loader, model, criterion, normalizers, test=False):
                     )
                 else:
                     raise ValueError(f"[STAT PRINT] Unrecognized task {TASK_SPECS[prop]['head']}")
-            
-            # if args.task == 'regression':
-            #     print('Test: [{0}/{1}]\t'
-            #           'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-            #           'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-            #           'MAE {mae_errors.val:.3f} ({mae_errors.avg:.3f})'.format(
-            #         i, len(val_loader), batch_time=batch_time, loss=losses,
-            #         mae_errors=mae_errors))
-            # else:
-            #     print('Test: [{0}/{1}]\t'
-            #           'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-            #           'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-            #           'Accu {accu.val:.3f} ({accu.avg:.3f})\t'
-            #           'Precision {prec.val:.3f} ({prec.avg:.3f})\t'
-            #           'Recall {recall.val:.3f} ({recall.avg:.3f})\t'
-            #           'F1 {f1.val:.3f} ({f1.avg:.3f})\t'
-            #           'AUC {auc.val:.3f} ({auc.avg:.3f})'.format(
-            #         i, len(val_loader), batch_time=batch_time, loss=losses,
-            #         accu=accuracies, prec=precisions, recall=recalls,
-            #         f1=fscores, auc=auc_scores))
     
     print('Final C Test\tLoss {loss.val:.4f} ({loss.avg:.4f})'.format(loss=losses))
     for prop, values in stats.items():
@@ -854,20 +659,6 @@ def validate(val_loader, model, criterion, normalizers, test=False):
             )
         else:
             raise ValueError(f"[STAT PRINT] Unrecognized task {TASK_SPECS[prop]['head']}")
-
-    # print('Final C Test\t'
-    #         'Loss ({loss.avg:.4f})\t'
-    #         'Accu ({accu.avg:.3f})\t'
-    #         'Precision ({prec.avg:.3f})\t'
-    #         'Recall ({recall.avg:.3f})\t'
-    #         'F1 ({f1.avg:.3f})\t'
-    #         'AUC ({auc.avg:.3f})'.format(
-    #     i, len(val_loader), batch_time=batch_time, loss=losses,
-    #     accu=accuracies, prec=precisions, recall=recalls,
-    #     f1=fscores, auc=auc_scores))
-
-    # print(f"{args.vector} red\t{args.atom_fea_len}\t{args.n_conv}\t{args.h_fea_len}\t{args.n_h}")    
-    # print(f"{losses.avg:.4f}	{accuracies.avg:.3f}	{precisions.avg:.3f}	{recalls.avg:.3f}	{fscores.avg:.3f}	{auc_scores.avg:.3f}")
 
     w_cls = 0.5
     w_reg = 0.5
@@ -967,39 +758,6 @@ def validate(val_loader, model, criterion, normalizers, test=False):
     
     print(' {star} ERROR {error:.3f}'.format(star=star_label, error=overall_error))
     return overall_error
-
-    # if args.task == 'regression':
-    #     print(' {star} MAE {mae_errors.avg:.3f}'.format(star=star_label,
-    #                                                     mae_errors=mae_errors))
-    #     return mae_errors.avg
-    # else:
-    #     print(' {star} AUC {auc.avg:.3f}'.format(star=star_label,
-    #                                              auc=auc_scores))
-    #     return auc_scores.avg
-
-
-# # ! DEPRECATED
-# class Normalizer(object):
-#     """Normalize a Tensor and restore it later. """
-
-#     def __init__(self, tensor):
-#         """tensor is taken as a sample to calculate the mean and std"""
-#         self.mean = torch.mean(tensor)
-#         self.std = torch.std(tensor)
-
-#     def norm(self, tensor):
-#         return (tensor - self.mean) / self.std
-
-#     def denorm(self, normed_tensor):
-#         return normed_tensor * self.std + self.mean
-
-#     def state_dict(self):
-#         return {'mean': self.mean,
-#                 'std': self.std}
-
-#     def load_state_dict(self, state_dict):
-#         self.mean = state_dict['mean']
-#         self.std = state_dict['std']
     
 
 class NormalizerProp(object):
@@ -1040,19 +798,6 @@ class NormalizerProp(object):
         self.mean = state_dict['mean']
         self.std = state_dict['std']
 
-
-# ! DEPRECATED --> CGCNN+ uses MSE instead
-# def mae(prediction, target):
-#     """
-#     Computes the mean absolute error between prediction and target
-
-#     Parameters
-#     ----------
-
-#     prediction: torch.Tensor (N, 1)
-#     target: torch.Tensor (N, 1)
-#     """
-#     return torch.mean(torch.abs(target - prediction))
         
 
 def nrmse(prediction, target, normalizer):
@@ -1068,25 +813,6 @@ def nrmse(prediction, target, normalizer):
     mse = ((prediction - target) ** 2).mean()
     bound = normalizer.get_bound()
     return torch.sqrt(mse) / bound
-
-
-
-# # ! Only for binary classification
-# def class_eval_DEPRECIATED(prediction, target):
-#     prediction = np.exp(prediction.numpy())
-#     target = target.numpy()
-#     pred_label = np.argmax(prediction, axis=1)
-#     target_label = np.squeeze(target)
-#     if not target_label.shape:
-#         target_label = np.asarray([target_label])
-#     if prediction.shape[1] == 2:
-#         precision, recall, fscore, _ = metrics.precision_recall_fscore_support(
-#             target_label, pred_label, average='binary')
-#         auc_score = metrics.roc_auc_score(target_label, prediction[:, 1])
-#         accuracy = metrics.accuracy_score(target_label, pred_label)
-#     else:
-#         raise NotImplementedError
-#     return accuracy, precision, recall, fscore, auc_score
 
 
 # ! Updated for multiclass classification
