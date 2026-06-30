@@ -457,10 +457,24 @@ class GraphData(Dataset):
         ########################
 
         # atom features (node features)
-        feature_list = [
+        if type(graph.nodes[0]['species']) == int:
+            feature_list = [
                 self.ari.get_atom_fea(graph.nodes[node]['species']) # species number
                 for node in graph.nodes
-        ]
+            ]
+        # fractional atom site --> add relative amounts of each atom in list
+        elif type(graph.nodes[0]['species']) == dict:
+            feature_list = [
+                np.sum((
+                    sp_w * self.ari_get_atom_fea(sp_n) 
+                    for sp_n, sp_w in graph.nodes[node]['species'].items()
+                ), axis=0)
+                    # self.ari.get_atom_fea(graph.nodes[node]['species']) # species number
+                    # for node in graph.nodes
+                for node in graph.nodes
+            ]
+        else:
+            raise TypeError(f"[DATA Atom Feature] Incorrect node species data type")
 
         # add fractional coordinates as periodic coordinates
         periodic_coords = [

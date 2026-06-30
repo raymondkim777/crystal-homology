@@ -358,13 +358,30 @@ class CrystalGraphConvNet(nn.Module):
             out[task] = predict
         return out
 
-        if self.classification:
-            crys_fea = self.dropout(crys_fea)       # add dropout for each classification head instead
-        if hasattr(self, 'fcs') and hasattr(self, 'softpluses'):
-            for fc, softplus in zip(self.fcs, self.softpluses):
-                crys_fea = softplus(fc(crys_fea))
-        out = self.fc_out(crys_fea)
-        # ! custom loss uses crossentropyloss --> don't use softmax, let loss handle logits directly
-        if self.classification:
-            out = self.logsoftmax(out)
-        return out
+
+def freeze_lower_encoder(model: CrystalGraphConvNet, freeze_vectors=False):
+    encoder = model.encoder
+
+    # freeze atom embedding layer
+    encoder.embedding.requires_grad_(False)
+    encoder.embedding.eval()
+
+    # freeze convolutional layers
+    encoder.convs.requires_grad_(False)
+    encoder.convs.eval()
+
+    # (optional) freeze vector processing layers
+    if not freeze_vectors:
+        return
+    
+    encoder.vec_embedding.requires_grad_(False)
+    encoder.vec_fcs.requires_grad_(False)
+    encoder.vec_pooling.requires_grad_(False)
+
+    if encoder.vector == 'perslay':
+        encoder.weights.requires_grad_(False)
+        encoder.weights.eval()
+        encoder.phis.requires_grad_(False)
+        encoder.phis.eval()
+        encoder.perslays.requires_grad_(False)
+        encoder.perslays.eval()

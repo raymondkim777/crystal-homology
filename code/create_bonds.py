@@ -110,12 +110,19 @@ def process_one_cif(args):
     # change species identifier to species object, not label
     for node in nx_multigraph.nodes:
         if structure[node].is_ordered:
-            nx_multigraph.nodes[node]['species'] = structure[node].specie.number
+            nx_multigraph.nodes[node]['species'] = {structure[node].specie.number: 1.0}
         else:
             el_amt_dict = structure[node].species.get_el_amt_dict()
-            max_element = max(el_amt_dict, key=el_amt_dict.get)
-            max_element_num = Element(max_element).number
-            nx_multigraph.nodes[node]['species'] = max_element_num
+            total_amt = sum(el_amt_dict.values())
+            if total_amt > 1.0:
+                raise ValueError(f"[Graph Creation] total amount in site {node} > 1.0")
+            nx_multigraph.nodes[node]['species'] = {
+                Element(element).number: el_amt_dict[element]
+                for element in el_amt_dict.keys()
+            }
+            # max_element = max(el_amt_dict, key=el_amt_dict.get)
+            # max_element_num = Element(max_element).number
+            # nx_multigraph.nodes[node]['species'] = max_element_num
 
     # collapse multigraph into graph
     nx_graph = nx.DiGraph(nx_multigraph)

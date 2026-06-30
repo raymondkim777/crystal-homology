@@ -20,7 +20,7 @@ from torch.optim.lr_scheduler import MultiStepLR
 from cgcnn.loss import MultiTaskLoss
 from cgcnn.data import GraphData
 from cgcnn.data import collate_pool, get_train_val_test_loader
-from cgcnn.model import CrystalGraphConvNet
+from cgcnn.model import CrystalGraphConvNet, freeze_lower_encoder
 
 parser = argparse.ArgumentParser(description='Crystal Graph Convolutional Neural Networks')
 parser.add_argument('data_options', metavar='OPTIONS', nargs='+',
@@ -100,12 +100,18 @@ parser.add_argument('--id', default=0, type=int, metavar='N',
                     help='identifier for multiple checkpoint/models')
 parser.add_argument('--dims', default=3, type=int,
                     help='number of persistence homology dimensions')
+parser.add_argument('--norm-sample', default=2000, type=int,
+                    help='number of max samples to use to define normalizers')
 parser.add_argument('--vector', default='none', type=str,
                     help='choose a vectorization: none, image, landscape, perslay')
 parser.add_argument('--weight', default='none', type=str,
                     help='choose a weight function: none, power, grid, gaussian')
 parser.add_argument('--phi', default='none', type=str,
                     help='choose a transformation function: none, image, landscape, betti')
+parser.add_argument('--train', default='pretrain', type=str, 
+                    help='choose training type: pretrain, abs, plqy')
+parser.add_argument('--freeze-vectors', action='store_true', 
+                    help='freezes vectorization MLP for abs/plqy fine-tuning')
 
 
 args = parser.parse_args(sys.argv[1:])
@@ -146,7 +152,9 @@ def main():
         for result_path in result_paths:
             if os.path.exists(result_path):
                 os.remove(result_path)
-
+    
+    assert args.train in ['pretrain', 'abs', 'plqy'],\
+        "Wrong train argument! Should be one of 'pretrain', 'abs', 'plqy'"
 
     # load data
     if args.debug:
@@ -187,7 +195,8 @@ def main():
     # _, _, _, sample_target, sample_mask, _ = collate_pool(train_data_list)
     
     train_indices = list(train_loader.sampler)
-    sample_indices = sample(train_indices, 2000)
+    sample_cnt = min(len(train_indices), args.norm_sample)
+    sample_indices = sample(train_indices, k=sample_cnt)
     sample_data_list = [dataset[i] for i in tqdm(sample_indices)]
     _, _, _, sample_target, sample_mask, _ = collate_pool(sample_data_list)
 
@@ -228,11 +237,14 @@ def main():
         root_dir=args.data_options,
         task_specs=TASK_SPECS,
     )
+
+    # ! if fine-tune, freeze lower encoder layers
+    if args.train in ['abs', 'plqy']:
+        freeze_lower_encoder(model=model, freeze_vectors=args.freeze_vectors)
+
     # ! updated tensor cuda code
     if args.debug:
         print(f"Moving model to {device}")
-    # if args.cuda:
-    #     model.cuda()
     model = model.to(device)
 
     # ! moving torchPerslay inner params to cuda
