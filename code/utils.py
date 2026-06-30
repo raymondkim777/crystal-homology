@@ -58,6 +58,10 @@ ABS_PREDICT = [
     'absorption_onset_energy',
 ]
 
+PLQY_PREDICT = [
+    'plqy'
+]
+
 TASK_SPECS = {
     'system': {
         'head': 'multiclass', 
@@ -159,6 +163,14 @@ ABS_TASK_SPECS = {
         'out_dim': 1,
         'weight': 1, 
     }, 
+}
+
+PLQY_TASK_SPECS = {
+    'plqy': {
+        'head': 'regression', 
+        'out_dim': 1, 
+        'weight': 1,
+    }
 }
 
 DIMENSION_CNT = 3

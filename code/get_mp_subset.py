@@ -426,6 +426,14 @@ class CrystalSubset:
 
 
     def create_plqy_docs(self):
+        # read PLQY CSV, store all PLQY values
+        plqy_values = dict()
+        print(f"Reading PLQY CSV...")
+        with open(f"data/plqy.csv", mode='r', encoding='utf-8') as f:
+            csv_reader = csv.reader(f)
+            for row in csv_reader:
+                plqy_values[row[0]] = float(row[1])
+
         # read CIF filenames, create dictionary with pymatgen Structures
         print(f"Fetching PLQY CIF files...")
         cif_files = []
@@ -435,6 +443,7 @@ class CrystalSubset:
                 if not entry.is_file():
                     continue
                 cif_files.append(entry.name) 
+        print(len(cif_files))
         
         print(f"Retrieving PLQY structures from CIF files...")
         plqy_doc_systems = dict()
@@ -442,14 +451,15 @@ class CrystalSubset:
             plqy_doc_systems[system] = dict()
             open_write_file(f"{DATA_PLQY_CIF_PATH}/{system}", '')
         
-        for filename in cif_files:
+        for crystal_id in plqy_values.keys():
+        # for filename in cif_files:
+            filename = f"{crystal_id}.cif"
             # ! ignore problematic CIF files
             if filename in PROBLEM_CIFS:
                 print(f"Skipping {filename}")
                 continue
 
             print("CIF:", filename)
-            crystal_id = filename[:-4]
             file_path = f"{DATA_PLQY_CIF_PATH_RAW}/{filename}"
 
             # ! get structure (bypass warnings)
@@ -462,6 +472,7 @@ class CrystalSubset:
             # save structure doc & CIF file
             plqy_doc_systems[system][crystal_id] = {
                 'structure': structure,
+                'plqy': plqy_values[crystal_id],
             }
             shutil.copy(file_path, f"{DATA_PLQY_CIF_PATH}/{system}")
         

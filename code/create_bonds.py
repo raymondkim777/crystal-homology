@@ -116,10 +116,6 @@ def process_one_cif(args):
             max_element = max(el_amt_dict, key=el_amt_dict.get)
             max_element_num = Element(max_element).number
             nx_multigraph.nodes[node]['species'] = max_element_num
-        # try:
-        #     nx_multigraph.nodes[node]['species'] = structure[node].specie
-        # except Exception as e:
-        #     print("ERROR", structure[node])
 
     # collapse multigraph into graph
     nx_graph = nx.DiGraph(nx_multigraph)
