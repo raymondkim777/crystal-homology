@@ -26,6 +26,7 @@ def _parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--abs', action='store_true', help='constructs diagrams for absorption data')
     parser.add_argument('--plqy', action='store_true', help='constructs diagrams for plqy data')
+    parser.add_argument('--plqy-full', action='store_true', help='constructs diagrams for plqy-full data')
     return parser.parse_args()
 
 
@@ -124,9 +125,11 @@ if __name__ == "__main__":
         DATA_DIRECTORY = "data/abs"
     if args.plqy:
         DATA_DIRECTORY = "data/plqy"
+    if args.plqy_full:
+        DATA_DIRECTORY = "data/plqy-full"
         
     GRAPH_DIRECTORY = f"{DATA_DIRECTORY}/graphs"
-    DIAGRAM_DIRECTORY = f"{DATA_DIRECTORY}/diagrams"
+    DIAGRAM_DIRECTORY = f"{DATA_DIRECTORY}/diagrams_g"
     MAX_DIST = get_max_dist(DATA_DIRECTORY)
 
     compute_persistence_diagrams()

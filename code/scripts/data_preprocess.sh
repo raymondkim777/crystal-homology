@@ -9,3 +9,4 @@ if [ ! -d "data/plqy/cif-plqy" ]; then
     unzip data/cif-plqy.zip -d data/plqy
 fi
 python get_mp_subset.py --seed --subset --size 5500 --large --size-large 7000 --abs --cif --plqy
+python find_hch.py

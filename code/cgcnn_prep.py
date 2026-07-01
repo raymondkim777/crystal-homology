@@ -103,7 +103,7 @@ def collect_all_diagrams(data_dir):
     all_diagrams_list = []
 
     for system in CRYSTAL_SYSTEMS:
-        with open(f'{data_dir}/diagrams/{system}.pkl', 'rb') as file:
+        with open(f'{data_dir}/diagrams_g/{system}.pkl', 'rb') as file:
             diagrams = pickle.load(file)
         all_diagrams_dict = all_diagrams_dict | diagrams
         all_diagrams_list += list(diagrams.values())
@@ -497,42 +497,42 @@ def graph_process(abs=False, merge=False, plqy=False, vector=False):
             diagram_dict = retrieve_diagrams(vec_dirs[i])
             image_dict, landscape_dict = dict(), dict()
             for system in CRYSTAL_SYSTEMS:
-                with open(f'{vec_dirs[i]}/images/{system}.pkl', 'rb') as file:
+                with open(f'{vec_dirs[i]}/images_g/{system}.pkl', 'rb') as file:
                     images = pickle.load(file)
                 image_dict = image_dict | images  # [mat_id][dim]
                 
-                with open(f'{vec_dirs[i]}/landscapes/{system}.pkl', 'rb') as file:
+                with open(f'{vec_dirs[i]}/landscapes_g/{system}.pkl', 'rb') as file:
                     landscapes = pickle.load(file)
                 landscape_dict = landscape_dict | landscapes  # [mat_id][dim]
 
-            cgcnn_diagram_datapath = open_write_file(f"{des_dirs[i]}/vecs", f'diagrams.pkl')
+            cgcnn_diagram_datapath = open_write_file(f"{des_dirs[i]}/vecs", f'diagrams_g.pkl')
             with open(cgcnn_diagram_datapath, 'wb') as f:
                 pickle.dump(diagram_dict, f)
 
-            cgcnn_image_datapath = open_write_file(f"{des_dirs[i]}/vecs", f'images.pkl')
+            cgcnn_image_datapath = open_write_file(f"{des_dirs[i]}/vecs", f'images_g.pkl')
             with open(cgcnn_image_datapath, 'wb') as f:
                 pickle.dump(image_dict, f)
 
-            cgcnn_landscape_datapath = open_write_file(f"{des_dirs[i]}/vecs", f'landscapes.pkl')
+            cgcnn_landscape_datapath = open_write_file(f"{des_dirs[i]}/vecs", f'landscapes_g.pkl')
             with open(cgcnn_landscape_datapath, 'wb') as f:
                 pickle.dump(landscape_dict, f)
 
 
 def save_bounds(abs=False, merge=False, plqy=False):
     print(f"\n Saving PRETRAIN image transformer bounds...")
-    source_file = f'{DATA_PRE_DIRECTORY}/image_bounds.pkl'
+    source_file = f'{DATA_PRE_DIRECTORY}/image_bounds_g.pkl'
     destination = open_write_file(f'{CGCNN_PRE_DATAPATH}/tasks', '')
     shutil.copy(source_file, destination)
 
     if abs and not merge:
         print(f"\n Saving ABS image transformer bounds...")
-        source_file = f'{DATA_ABS_DIRECTORY}/image_bounds.pkl'
+        source_file = f'{DATA_ABS_DIRECTORY}/image_bounds_g.pkl'
         destination = open_write_file(f'{CGCNN_ABS_DATAPATH}/tasks', '')
         shutil.copy(source_file, destination)
     
     if plqy:
         print(f"\n Saving PLQY image transformer bounds...")
-        source_file = f'{DATA_PLQY_DIRECTORY}/image_bounds.pkl'
+        source_file = f'{DATA_PLQY_DIRECTORY}/image_bounds_g.pkl'
         destination = open_write_file(f'{CGCNN_PLQY_DATAPATH}/tasks', '')
         shutil.copy(source_file, destination)
             

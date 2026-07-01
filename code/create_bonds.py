@@ -33,7 +33,8 @@ CRYSTALNN = None
 def _parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--abs', action='store_true', help='Only focuses separately on data/abs')
-    parser.add_argument('--plqy', action='store_true', help='Only focuses separately on data/plqys')
+    parser.add_argument('--plqy', action='store_true', help='Only focuses separately on data/plqy')
+    parser.add_argument('--plqy-full', action='store_true', help='Only focuses separately on data/plqy-full')
     return parser.parse_args()
 
 
@@ -80,15 +81,26 @@ def get_structures_from_cif_plqy(filepath: str) -> list:
     return structures
 
 
+def get_structures_from_cif_plqy_full(filepath: str) -> list:
+    cif_parser = CifParser(filepath, occupancy_tolerance=1.1)
+    structures = cif_parser.parse_structures()
+    
+    if len(structures) > 1:
+        print(f"[PLQY Structures] File {filepath} generates multiple structures")
+    return structures
+
+
 def process_one_cif(args):
     # accept one tuple for multiprocessing
-    system, filename, plqy = args
+    system, filename, plqy, plqy_full = args
 
     structure_filename = f"{CIF_DIRECTORY}/{system}/{filename}"
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         if plqy:
             structures = get_structures_from_cif_plqy(structure_filename)
+        elif plqy_full:
+            structures = get_structures_from_cif_plqy_full(structure_filename)
         else:
             structures = get_structures_from_cif(structure_filename)
     
@@ -162,7 +174,7 @@ def init_crystalnn(crystalnn):
     CRYSTALNN = crystalnn
 
 
-def construct_crystalnn_graph(plqy=False) -> None:
+def construct_crystalnn_graph(plqy=False, plqy_full=False) -> None:
     workers = get_num_cpus()
     print(f"Using {workers} worker processes")
 
@@ -180,7 +192,7 @@ def construct_crystalnn_graph(plqy=False) -> None:
         system_graphs = dict()
 
         cif_files = fetch_cif_filenames(system)
-        tasks = [(system, filename, plqy) for filename in cif_files]
+        tasks = [(system, filename, plqy, plqy_full) for filename in cif_files]
                     
         print(f"Creating graphs of {system} system...")
         with ProcessPoolExecutor(
@@ -220,17 +232,19 @@ def check_structures() -> None:
 
 if __name__ == "__main__":
     args = _parse_args()
-    assert not args.abs or not args.plqy, "Can only choose one of abs/plqy"
+    assert sum([args.abs, args.plqy, args.plqy_full]) <= 1, "Can only choose one of abs/plqy/plqy-full"
 
     DATA_DIRECTORY = "data/pretrain"
     if args.abs:
         DATA_DIRECTORY = "data/abs"
     if args.plqy:
         DATA_DIRECTORY = "data/plqy"
+    if args.plqy_full:
+        DATA_DIRECTORY = "data/plqy-full"
 
     CIF_DIRECTORY = f"{DATA_DIRECTORY}/cif"
     MULTIGRAPH_DIRECTORY = f"{DATA_DIRECTORY}/graphs-multi"
     GRAPH_DIRECTORY = f"{DATA_DIRECTORY}/graphs"
 
-    construct_crystalnn_graph(plqy=args.plqy)
+    construct_crystalnn_graph(plqy=args.plqy, plqy_full=args.plqy_full)
     # check_structures()

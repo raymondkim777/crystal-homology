@@ -404,9 +404,9 @@ if __name__ == "__main__":
     if args.plqy:
         DATA_DIRECTORY = "data/plqy"
 
-    DIAGRAM_DIRECTORY = f"{DATA_DIRECTORY}/diagrams"
-    LANDSCAPE_DIRECTORY = f"{DATA_DIRECTORY}/landscapes"
-    IMAGE_DIRECTORY = f"{DATA_DIRECTORY}/images"
+    DIAGRAM_DIRECTORY = f"{DATA_DIRECTORY}/diagrams_g"
+    LANDSCAPE_DIRECTORY = f"{DATA_DIRECTORY}/landscapes_g"
+    IMAGE_DIRECTORY = f"{DATA_DIRECTORY}/images_g"
     MAX_DIST = get_max_dist(DATA_DIRECTORY) 
 
     if args.landscape:

@@ -698,8 +698,9 @@ def validate(val_loader, model, criterion, normalizers, test=False):
         star_label = '**'
 
         with open(f'test_params_{args.id}.txt', 'w') as f:
-            f.write(f'Vector: {args.vector}\t\tAtom Len: {args.atom_fea_len}\tConv Num: {args.n_conv}\tHidden Len: {args.h_fea_len}\tHidden Num: {args.n_h}')
-            f.write(f'\nHead Layer Num: {args.n_o}\tVec Len: {args.vec_fea_len}\tVec Layer Num: {args.n_vec}')
+            f.write(f'Vector: {args.vector}\t\tAtom Len: {args.atom_fea_len}\tConv Num: {args.n_conv}')
+            f.write(f'\nHidden Len: {args.h_fea_len}\t\tHidden Num: {args.n_h}')
+            f.write(f'\nHead Layer Num: {args.n_o}\tVec Len: {args.vec_fea_len}\t\tVec Layer Num: {args.n_vec}')
         
         import csv
         # ! saving stats for each prop

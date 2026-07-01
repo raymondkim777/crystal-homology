@@ -8,8 +8,10 @@ import pandas as pd
 import numpy as np
 import networkx as nx
 from tqdm import tqdm
+from copy import deepcopy
 import warnings
 
+from pymatgen.core import Structure
 from pymatgen.io.cif import CifParser
 from pymatgen.analysis.local_env import CrystalNN
 from pymatgen.core.periodic_table import Element
@@ -100,6 +102,61 @@ def get_structures_from_cif(filepath: str) -> list:
     return structures
 
 
+def choose_sp_for_site(site, tie_tol=1e-3):
+    """
+    returns one Element from possibly disordered pymatgen site. 
+    prioritizes cu, halides, c, h if tied. 
+    """
+    if site.is_ordered:
+        return site.specie
+    
+    priority = ('Cu', 'F', 'Cl', 'Br', 'I', 'C', 'H')
+    priority_rank = {sym: i for i, sym in enumerate(priority)}
+
+    species_occ = site.species
+    max_occ = max(float(occ) for occ in species_occ.values())
+    tied_species = [
+        sp for sp, occ in species_occ.items()
+        if abs(occ - max_occ) <= tie_tol
+    ]
+
+    best_species = min(
+        tied_species, 
+        key=lambda sp: (
+            priority_rank.get(sp, len(priority_rank)),
+            getattr(sp, "symbol", str(sp)),
+        )
+    )
+    return best_species
+
+
+def make_structure_ordered(structure, tie_tol=1e-3):    
+    '''don't change original structure'''
+    chosen_species = [
+        choose_sp_for_site(site, tie_tol=tie_tol)
+        for site in structure
+    ]
+    site_properties = {
+        key: list(vals)
+        for key, vals in structure.site_properties.items()
+    }
+    ordered_structure = Structure(
+        lattice=structure.lattice,
+        species=chosen_species,
+        coords=structure.frac_coords,
+        coords_are_cartesian=False,
+        site_properties=site_properties,
+        labels=structure.labels,
+        charge=structure.charge,
+        properties=getattr(structure, "properties", None),
+    )
+
+    if not ordered_structure.is_ordered:
+        raise ValueError("[Structure Ordering] Ordering failed")
+
+    return ordered_structure
+
+
 def define_node_species(structure, nx_multigraph):
     # nx_multigraph is mutable
     for node in nx_multigraph.nodes:
@@ -183,42 +240,32 @@ def collect_hybrid_cu_halides(debug=False):
     for system in CRYSTAL_SYSTEMS:
         open_write_file(f"{PLQY_FULL_CIF_PATH}/{system}", '')
 
+    unordered_id_list = []
     for filename in tqdm(cif_filenames, desc='Parsing CIFs; '):
-        if debug:
-            print(f"CIF: {filename}")
-            print("Retrieving Pymatgen Structure from CIF")
         
         # retrieve pymatgen structure
         structure_filename = f"{PLQY_FULL_CIF_RAW_PATH}/{filename}"
         structures = get_structures_from_cif(structure_filename)
         
-        if debug:
-            print("Getting graph")
-        
         # get graph from structure
         structure = structures[0].get_reduced_structure()
+        ordered_structure = structure
+        if not structure.is_ordered:
+            unordered_id_list.append(filename[4:-4])
+            ordered_structure = make_structure_ordered(structure)
+        
         bonded_structure = crystalnn.get_bonded_structure(
-            structure,
+            ordered_structure,
             # on_disorder='take_majority_strict', 
-            on_disorder='take_max_species', 
+            # on_disorder='take_max_species', 
         )
         nx_multigraph = bonded_structure.graph
-
-        if debug:
-            print("Getting node species")
         
         # fix node species information
         define_node_species(structure, nx_multigraph)
-
-        if debug:
-            print("Getting inorganic subgraph")
         
         # get inorganic subgraph
         cu_hal_subgraph, subgraph_nodes = extract_inorganic_subgraph(nx_multigraph)
-        
-        if debug:
-            print("Test node attr from inorganic subgraph:")
-            print(cu_hal_subgraph.nodes[subgraph_nodes[0]]['species'])
         
         # check if edge exists b/w cu & halide
         inorganic_exist = False
@@ -230,26 +277,11 @@ def collect_hybrid_cu_halides(debug=False):
                 break
         
         if not inorganic_exist:
-            if debug:
-                print("No Cu-halide edge in inorganic")
             continue
-            
-        if debug:
-            print("YES Cu-halide edge in inorganic")
-        
-        if debug:
-            print("Geting remaining organic? subgraph")
 
         # get remaining graph (potential organic portion)
         remaining_nodes = [n for n in nx_multigraph.nodes() if n not in subgraph_nodes]
         remaining_subgraph = nx_multigraph.subgraph(remaining_nodes)
-
-        if debug:
-            print("Test node attr from organic? subgraph:")
-            if len(remaining_nodes) > 0:
-                print(remaining_subgraph.nodes[remaining_nodes[0]]['species'])
-            else:
-                print("No organic portion")
 
         # check if C-C or C-H edge exists
         organic_exist = False
@@ -261,8 +293,6 @@ def collect_hybrid_cu_halides(debug=False):
                 break
 
         if organic_exist:
-            if debug:
-                print("YES organic edge found")
             # save docs and CIF
             crystal_id = filename[4:-4]
             plqy_docs_dict[crystal_id] = {
@@ -270,6 +300,11 @@ def collect_hybrid_cu_halides(debug=False):
             }
             shutil.copy(structure_filename, f"{PLQY_FULL_CIF_PATH}/{CRYSTAL_SYSTEMS[0]}")
     
+    print(f"Unordered structures: {len(unordered_id_list)}/{len(cif_filenames)}")
+    with open(f'{PLQY_FULL_PATH}/unordered.txt') as f:
+        f.write("COD IDs of unordered parsed CIF structures:\n")
+        for cod_id in unordered_id_list:
+            f.write(f"{cod_id}\n")
     print(f"Found {len(plqy_docs_dict.keys())} hybrid Cu halides")
 
     # save all under cubic system; meaningless, only done for compatibility
