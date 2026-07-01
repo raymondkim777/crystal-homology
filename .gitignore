@@ -27,6 +27,7 @@ code/data/pretrain/bounds.json
 code/data/pretrain/bid_true.txt
 code/data/pretrain/stats
 code/data/pretrain/struct-issues
+code/data/pretrain/unordered.txt
 code/data/pretrain/diagrams*
 code/data/pretrain/images*
 code/data/pretrain/landscapes*
@@ -36,6 +37,7 @@ code/data/abs/bounds.json
 code/data/abs/bid_true.txt
 code/data/abs/stats
 code/data/abs/struct-issues
+code/data/abs/unordered.txt
 code/data/abs/diagrams*
 code/data/abs/images*
 code/data/abs/landscapes*
@@ -45,6 +47,7 @@ code/data/plqy/bounds.json
 code/data/plqy/bid_true.txt
 code/data/plqy/stats
 code/data/plqy/struct-issues
+code/data/plqy/unordered.txt
 code/data/plqy/diagrams*
 code/data/plqy/images*
 code/data/plqy/landscapes*
@@ -54,6 +57,7 @@ code/data/plqy-full/bounds.json
 code/data/plqy-full/bid_true.txt
 code/data/plqy-full/stats
 code/data/plqy-full/struct-issues
+code/data/plqy-full/unordered.txt
 code/data/plqy-full/diagrams*
 code/data/plqy-full/images*
 code/data/plqy-full/landscapes*
