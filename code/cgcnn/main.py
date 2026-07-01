@@ -141,8 +141,8 @@ def main():
         check_path = f"./checkpoint_{args.id}.pth.tar"
         model_path = f"./model_best_{args.id}.pth.tar"
         stat_path = f"./test_stats_{args.id}.csv"
-        result_paths = [f"./test_results_{args.id}_{prop}.csv" for prop in TASK_SPECS.keys()]
         param_paths = f"./test_params_{args.id}.txt"
+        result_paths = [f"./test_results_{args.id}_{prop}.csv" for prop in TASK_SPECS.keys()]
         
         if os.path.exists(check_path):
             os.remove(check_path)
@@ -150,6 +150,8 @@ def main():
             os.remove(model_path)
         if os.path.exists(stat_path):
             os.remove(stat_path)
+        if os.path.exists(param_paths):
+            os.remove(param_paths)
         for result_path in result_paths:
             if os.path.exists(result_path):
                 os.remove(result_path)
