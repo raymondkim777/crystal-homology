@@ -42,7 +42,8 @@ IM_RESOLUTION = [20, 20]
 def _parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--abs', action='store_true', help='vectorizes absorption PDs')
-    parser.add_argument('--plqy', action='store_true', help='Only focuses separately on data/plqys')
+    parser.add_argument('--plqy', action='store_true', help='Only focuses separately on data/plqy')
+    parser.add_argument('--plqy-full', action='store_true', help='Only focuses separately on data/plqy-full')
     parser.add_argument('--landscape', action='store_true', help='generates persistence landscapes')
     parser.add_argument('--image', action='store_true', help='generates persistence images')
     parser.add_argument('--example', action='store_true', help='display some examples')
@@ -396,13 +397,15 @@ def plot_landscape_gtda(
 
 if __name__ == "__main__":
     args = _parse_args()
-    assert not args.abs or not args.plqy, "Can only choose one of abs/plqy"
+    assert sum([args.abs, args.plqy, args.plqy_full]) <= 1, "Can only choose one of abs/plqy/plqy-full"
 
     DATA_DIRECTORY = "data/pretrain"
     if args.abs:
         DATA_DIRECTORY = "data/abs"
     if args.plqy:
         DATA_DIRECTORY = "data/plqy"
+    if args.plqy_full:
+        DATA_DIRECTORY = "data/plqy-full"
 
     DIAGRAM_DIRECTORY = f"{DATA_DIRECTORY}/diagrams_g"
     LANDSCAPE_DIRECTORY = f"{DATA_DIRECTORY}/landscapes_g"

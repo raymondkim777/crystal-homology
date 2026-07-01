@@ -23,6 +23,7 @@ def _parse_args():
     parser.add_argument('--abs', action='store_true', help='Only focuses separately on data/abs')
     parser.add_argument('--merge', action='store_true', help='Pretrain data contains absorption data')
     parser.add_argument('--plqy', action='store_true', help='Only focuses separately on data/plqy')
+    parser.add_argument('--plqy-full', action='store_true', help='Only focuses separately on data/plqy-full')
     parser.add_argument('--bounds', action='store_true', help='Computes maximum bond distance and neighbor cnt aross all graphs')
     parser.add_argument('--avail', action='store_true', help='Computes availability for each property in dataset')
     parser.add_argument('--dist', action='store_true', help='Computes label distribution for each property in dataset')
@@ -208,8 +209,6 @@ def find_data_dist(abs, merge):
             raise ValueError(f"[Find Dist] Unrecognized task {tasks[prop]}")
         pass
 
-     
-
 
 def bid_test():
     '''
@@ -242,9 +241,9 @@ def bid_test():
 
 if __name__ == "__main__":
     args = _parse_args()
-
-    assert not (args.abs and args.merge), "--abs changes directory to data/abs --> can't also do --merge"
-    assert not args.abs or not args.plqy, "Can only choose one of abs/plqy"
+    
+    assert sum([args.abs, args.plqy, args.plqy_full]) <= 1, "Can only choose one of abs/plqy/plqy-full"
+    assert not (args.abs and args.merge), "--abs changes directory to data/abs --> can't also do --merge"    
 
     if args.abs:
         DATA_DIRECTORY = "data/abs"
@@ -252,6 +251,8 @@ if __name__ == "__main__":
     elif args.plqy:
         DATA_DIRECTORY = "data/plqy"
         DATA_SUBSET_PATH = f"{DATA_DIRECTORY}/mp-plqy"
+    elif args.plqy_full:
+        DATA_DIRECTORY = "data/plqy-full"
     else:
         DATA_DIRECTORY = "data/pretrain"
         DATA_SUBSET_PATH = f"{DATA_DIRECTORY}/mp-subset"    

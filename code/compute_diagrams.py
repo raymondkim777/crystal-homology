@@ -118,7 +118,7 @@ def compute_persistence_diagrams(dims: tuple=tuple(range(DIMENSION_CNT))) -> Non
 
 if __name__ == "__main__":
     args = _parse_args()
-    assert not args.abs or not args.plqy, "Can only choose one of abs/plqy"
+    assert sum([args.abs, args.plqy, args.plqy_full]) <= 1, "Can only choose one of abs/plqy/plqy-full"
 
     DATA_DIRECTORY = "data/pretrain"
     if args.abs:

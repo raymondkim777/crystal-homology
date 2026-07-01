@@ -11,3 +11,6 @@ python vectorizers.py --abs --landscape --image
 
 python compute_diagrams.py --plqy
 python vectorizers.py --plqy --landscape --image
+
+python compute_diagrams.py --plqy-full
+python vectorizers.py --plqy-full --landscape --image

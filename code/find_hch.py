@@ -301,10 +301,12 @@ def collect_hybrid_cu_halides(debug=False):
             shutil.copy(structure_filename, f"{PLQY_FULL_CIF_PATH}/{CRYSTAL_SYSTEMS[0]}")
     
     print(f"Unordered structures: {len(unordered_id_list)}/{len(cif_filenames)}")
-    with open(f'{PLQY_FULL_PATH}/unordered.txt') as f:
+    with open(f'{PLQY_FULL_PATH}/unordered.txt', 'w') as f:
         f.write("COD IDs of unordered parsed CIF structures:\n")
         for cod_id in unordered_id_list:
             f.write(f"{cod_id}\n")
+        f.write("ENDLINST")
+    
     print(f"Found {len(plqy_docs_dict.keys())} hybrid Cu halides")
 
     # save all under cubic system; meaningless, only done for compatibility

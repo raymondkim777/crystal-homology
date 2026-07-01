@@ -12,6 +12,7 @@ from pymatgen.core.periodic_table import Element
 from pymatgen.core.composition import Composition
 from concurrent.futures import ProcessPoolExecutor
 
+from find_hch import make_structure_ordered
 from utils import CRYSTAL_SYSTEMS, get_num_cpus, open_write_file
 
 
@@ -106,10 +107,17 @@ def process_one_cif(args):
     
     # transform into multi-digraph
     # structure = structures[0]
+    unordered = False
+
     structure = structures[0].get_reduced_structure()
+    ordered_structure = structure
+    if not structure.is_ordered:
+        unordered = True
+        ordered_structure = make_structure_ordered(structure)
+    
     bonded_structure = CRYSTALNN.get_bonded_structure(
-        structure,
-        on_disorder='take_max_species', 
+        ordered_structure,
+        # on_disorder='take_max_species', 
     )
     nx_multigraph = bonded_structure.graph
 
@@ -166,7 +174,7 @@ def process_one_cif(args):
     
     crystal_id = filename[:-4]
 
-    return crystal_id, nx_multigraph, nx_graph
+    return crystal_id, nx_multigraph, nx_graph, unordered
 
 
 def init_crystalnn(crystalnn):
@@ -186,6 +194,7 @@ def construct_crystalnn_graph(plqy=False, plqy_full=False) -> None:
         search_cutoff=11,  # default 7, but ERROR: No Voronoi neighbors found for site
     )
 
+    unordered_id_list = []
     for system in CRYSTAL_SYSTEMS:
 
         system_multigraphs = dict()
@@ -202,9 +211,11 @@ def construct_crystalnn_graph(plqy=False, plqy_full=False) -> None:
         ) as executor:
             results = executor.map(process_one_cif, tasks, chunksize=8)
 
-            for crystal_id, nx_multigraph, nx_graph in tqdm(results, total=len(tasks)):
+            for crystal_id, nx_multigraph, nx_graph, unordered in tqdm(results, total=len(tasks)):
                 system_multigraphs[crystal_id] = nx_multigraph
                 system_graphs[crystal_id] = nx_graph
+                if unordered:
+                    unordered_id_list.append(crystal_id)
         
         # save graphs as pickles
         multigraph_filepath = open_write_file(MULTIGRAPH_DIRECTORY, f'{system}.pkl')
@@ -214,6 +225,13 @@ def construct_crystalnn_graph(plqy=False, plqy_full=False) -> None:
         graph_filepath = open_write_file(GRAPH_DIRECTORY, f'{system}.pkl')
         with open(graph_filepath, 'wb') as f:
             pickle.dump(system_graphs, f)
+        
+    print(f"Unordered structures: {len(unordered_id_list)}")
+    with open(f'{DATA_DIRECTORY}/unordered.txt', 'w') as f:
+        f.write("MP/COD IDs of unordered parsed CIF structures:\n")
+        for cod_id in unordered_id_list:
+            f.write(f"{cod_id}\n")
+        f.write("END_LIST")
 
 
 def check_structures() -> None:
