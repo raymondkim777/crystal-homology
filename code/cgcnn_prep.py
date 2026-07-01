@@ -166,7 +166,7 @@ def reorganize_list_of_dicts(list_of_dicts: list) -> dict:
     Input: [{id1: h0_diagram1, id2: h0_diagram2, ...}, {id1: h1_diagram1, ...}, ...] 
             where each Hn diagram is [[b, d], ...]
     Output: {id1: [h0_diagram1, h1_diagram1, h2_diagram1], ...}
-            Twhere each Hn diagram is [[b, d], ...]
+            where each Hn diagram is [[b, d], ...]
     '''
     diagram_dict = dict()
     for dim in range(DIMENSION_CNT):

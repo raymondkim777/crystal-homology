@@ -5,10 +5,15 @@ import numpy as np
 import networkx as nx
 from tqdm import tqdm
 import pickle
-from utils import CRYSTAL_SYSTEMS, DIMENSION_CNT, get_num_cpus, open_write_file, get_max_dist
+
+from gudhi.sklearn import RipsComplex
 from gtda.homology import FlagserPersistence
 from gtda.plotting import plot_diagram
-    
+
+from concurrent.futures import ProcessPoolExecutor
+from create_bonds import fetch_cif_filenames, get_structures_from_cif
+from utils import CRYSTAL_SYSTEMS, DIMENSION_CNT, get_num_cpus, open_write_file, get_max_dist
+
 
 # DATA_DIRECTORY = "data/pretrain"
 # DATA_DIRECTORY = "data/abs"
@@ -17,17 +22,23 @@ from gtda.plotting import plot_diagram
 # MAX_DIST = get_max_dist(DATA_DIRECTORY)
 
 DATA_DIRECTORY = None
+CIF_DIRECTORY = None
 GRAPH_DIRECTORY = None
-DIAGRAM_DIRECTORY = None
+DIAGRAM_GRAPH_DIRECTORY = None
+DIAGRAM_POINT_DIRECTORY = None
 MAX_DIST = None
 
 
 def _parse_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--source', type=str, default='graph', help="how to create complex [graph, point]")
     parser.add_argument('--abs', action='store_true', help='constructs diagrams for absorption data')
     parser.add_argument('--plqy', action='store_true', help='constructs diagrams for plqy data')
     parser.add_argument('--plqy-full', action='store_true', help='constructs diagrams for plqy-full data')
     return parser.parse_args()
+
+
+############### DIRECTED GRAPH PERSISTENCE ###############
 
 
 def unpack_all_graphs() -> dict:
@@ -49,18 +60,19 @@ def convert_graph_to_adj_mat(graph: nx.DiGraph) -> np.ndarray:
 def plot_persistence_diagram(mp_id, diagram) -> None:
     fig = plot_diagram(diagram)
     # fig.show()
-    fig.save(f"{DIAGRAM_DIRECTORY}/diagram_{mp_id}.png")
+    fig.save(f"{DIAGRAM_GRAPH_DIRECTORY}/diagram_{mp_id}.png")
 
 
-def compute_persistence_diagrams(dims: tuple=tuple(range(DIMENSION_CNT))) -> None:
+def compute_persistence_diagrams_graph() -> None:
+    print(f"------ GRAPH PERSISTENCE ------")
     n_jobs = get_num_cpus()
     print(f"Using {n_jobs} job processes")
-
+    
     print(f"Unpacking all graphs...")
     graph_dict = unpack_all_graphs()
 
     flagser = FlagserPersistence(
-        homology_dimensions=dims,
+        homology_dimensions=tuple(range(DIMENSION_CNT)),
         directed=True,
         filtration='max', 
         coeff=2, 
@@ -90,7 +102,7 @@ def compute_persistence_diagrams(dims: tuple=tuple(range(DIMENSION_CNT))) -> Non
         if len(adj_mat_list) == 0:
             print(f"No graphs for {system} system!")
             diagrams_with_id = dict()
-            diag_filepath = open_write_file(DIAGRAM_DIRECTORY, f'{system}.pkl')
+            diag_filepath = open_write_file(DIAGRAM_GRAPH_DIRECTORY, f'{system}.pkl')
             with open(diag_filepath, 'wb') as f:
                 pickle.dump(diagrams_with_id, f)
             continue
@@ -111,13 +123,69 @@ def compute_persistence_diagrams(dims: tuple=tuple(range(DIMENSION_CNT))) -> Non
         print("Points (Birth, Death, Homology Dimension):\n", graph_diagram)
     
         # save diagrams dict as pickle
-        diag_filepath = open_write_file(DIAGRAM_DIRECTORY, f'{system}.pkl')
+        diag_filepath = open_write_file(DIAGRAM_GRAPH_DIRECTORY, f'{system}.pkl')
         with open(diag_filepath, 'wb') as f:
             pickle.dump(diagrams_with_id, f)
+    print(f"------ END PERSISTENCE ------")
+
+
+############### POINT CLOUD PERSISTENCE ###############
+    
+
+def compute_pd_for_cif(args):
+    # accept one tuple for multiprocessing
+    system, filename = args
+
+    # extract structure from CIF
+    structure_filename = f"{CIF_DIRECTORY}/{system}/{filename}"
+    structures = get_structures_from_cif(structure_filename)
+    structure = structures[0].get_reduced_structure()
+
+    # get fractional coordinates for each site (point cloud)
+    cart_coords = structure.cart_coords
+
+
+
+def compute_persistence_diagrams_point():
+    print(f"------ POINT CLOUD PERSISTENCE ------")
+    n_workers = get_num_cpus()
+    print(f"Using {n_workers} job processes")
+
+    for system in CRYSTAL_SYSTEMS:
+        print(f"Computing PD for {system}")
+
+        cif_files = fetch_cif_filenames(system)
+        tasks = [(system, filename) for filename in cif_files]
+
+        with ProcessPoolExecutor(
+            max_workers=n_workers, 
+        ) as executor:
+            results = executor.map(compute_pd_for_cif, tasks, chunksize=8)
+
+            
+        # with ProcessPoolExecutor(
+        #     max_workers=n_workers,
+        #     initializer=init_landscape_transformers,
+        #     initargs=(landscape_transformers,),
+        # ) as executor:
+        #     results = executor.map(compute_landscapes_for_system, CRYSTAL_SYSTEMS)
+
+        #     for system, system_landscapes in tqdm(results, total=len(CRYSTAL_SYSTEMS)):
+        #         # save system images
+        #         landscape_path = open_write_file(LANDSCAPE_DIRECTORY, f"{system}.pkl")
+        #         with open(landscape_path, 'wb') as f:
+        #             pickle.dump(system_landscapes, f)
+    
+    print(f"------ END PERSISTENCE ------")
+
+
+############### PERSISTENCE END ###############
 
 
 if __name__ == "__main__":
     args = _parse_args()
+
+    assert args.source in ['graph', 'point']
     assert sum([args.abs, args.plqy, args.plqy_full]) <= 1, "Can only choose one of abs/plqy/plqy-full"
 
     DATA_DIRECTORY = "data/pretrain"
@@ -127,9 +195,14 @@ if __name__ == "__main__":
         DATA_DIRECTORY = "data/plqy"
     if args.plqy_full:
         DATA_DIRECTORY = "data/plqy-full"
-        
+    
+    CIF_DIRECTORY = f"{DATA_DIRECTORY}/cif"
     GRAPH_DIRECTORY = f"{DATA_DIRECTORY}/graphs"
-    DIAGRAM_DIRECTORY = f"{DATA_DIRECTORY}/diagrams_g"
+    DIAGRAM_GRAPH_DIRECTORY = f"{DATA_DIRECTORY}/diagrams_g"
+    DIAGRAM_POINT_DIRECTORY = f"{DATA_DIRECTORY}/diagrams_p"
     MAX_DIST = get_max_dist(DATA_DIRECTORY)
 
-    compute_persistence_diagrams()
+    if args.source == 'graph':
+        compute_persistence_diagrams_graph()
+    else:
+        compute_persistence_diagrams_point()

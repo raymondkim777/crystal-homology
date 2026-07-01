@@ -179,7 +179,10 @@ DIMENSION_CNT = 3
 def get_num_cpus(default=1):
     if "SLURM_CPUS_PER_TASK" in os.environ:
         return int(os.environ["SLURM_CPUS_PER_TASK"])
-    return default
+    try:
+        return len(os.sched_getaffinity(0))
+    except Exception as e:
+        return default
 
 
 def open_write_file(dir_path, file_name):
