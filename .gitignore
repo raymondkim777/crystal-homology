@@ -19,6 +19,10 @@ code/data/plqy/cif-plqy
 !code/data/plqy/cif-plqy.zip
 code/data/plqy/mp-plqy
 
+code/data/plqy-full/cif
+code/data/plqy-full/cif-raw
+code/data/plqy-full/cod-plqy
+
 code/data/pretrain/bounds.json
 code/data/pretrain/bid_true.txt
 code/data/pretrain/stats
@@ -46,6 +50,15 @@ code/data/plqy/images*
 code/data/plqy/landscapes*
 code/data/plqy/image_bounds.pkl
 
+code/data/plqy-full/bounds.json
+code/data/plqy-full/bid_true.txt
+code/data/plqy-full/stats
+code/data/plqy-full/struct-issues
+code/data/plqy-full/diagrams*
+code/data/plqy-full/images*
+code/data/plqy-full/landscapes*
+code/data/plqy-full/image_bounds.pkl
+
 code/error.log
 logs
 
@@ -57,3 +70,4 @@ code/cgcnn/data/plqy
 code/cgcnn/*.pth.tar
 code/cgcnn/test_results*.csv
 code/cgcnn/test_stats*.csv
+code/cgcnn/test_params*.txt

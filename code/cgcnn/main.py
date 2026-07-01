@@ -142,6 +142,7 @@ def main():
         model_path = f"./model_best_{args.id}.pth.tar"
         stat_path = f"./test_stats_{args.id}.csv"
         result_paths = [f"./test_results_{args.id}_{prop}.csv" for prop in TASK_SPECS.keys()]
+        param_paths = f"./test_params_{args.id}.txt"
         
         if os.path.exists(check_path):
             os.remove(check_path)
@@ -693,6 +694,11 @@ def validate(val_loader, model, criterion, normalizers, test=False):
             print("Saving test stats/results")
         
         star_label = '**'
+
+        with open(f'test_params_{args.id}.txt', 'w') as f:
+            f.write(f'Vector: {args.vector}\t\tAtom Len: {args.atom_fea_len}\tConv Num: {args.n_conv}\tHidden Len: {args.h_fea_len}\tHidden Num: {args.n_h}')
+            f.write(f'\nHead Layer Num: {args.n_o}\tVec Len: {args.vec_fea_len}\tVec Layer Num: {args.n_vec}')
+        
         import csv
         # ! saving stats for each prop
         with open(f'test_stats_{args.id}.csv', 'w', newline='', encoding='utf-8') as file_stats:
