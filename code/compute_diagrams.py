@@ -5,13 +5,17 @@ import numpy as np
 import networkx as nx
 from tqdm import tqdm
 import pickle
+import warnings
 
-from gudhi.sklearn import RipsComplex
+from gudhi.sklearn import RipsPersistence
 from gtda.homology import FlagserPersistence
 from gtda.plotting import plot_diagram
 
+from pymatgen.io.cif import CifParser
+from pymatgen.core.periodic_table import Element
+from pymatgen.core.composition import Composition
+
 from concurrent.futures import ProcessPoolExecutor
-from create_bonds import fetch_cif_filenames, get_structures_from_cif
 from utils import CRYSTAL_SYSTEMS, DIMENSION_CNT, get_num_cpus, open_write_file, get_max_dist
 
 
@@ -132,50 +136,162 @@ def compute_persistence_diagrams_graph() -> None:
 ############### POINT CLOUD PERSISTENCE ###############
     
 
-def compute_pd_for_cif(args):
+def fetch_cif_filenames(system: str) -> list:
+    print(f"Fetching CIF files of {system} system...")
+    cif_files = []
+
+    # os.scandir() returns an iterator of DirEntry objects
+    with os.scandir(f"{CIF_DIRECTORY}/{system}") as entries:
+        for entry in entries:
+            if not entry.is_file():
+                continue
+            cif_files.append(entry.name)
+    return cif_files
+
+
+def get_structures_from_cif(filepath: str) -> list:
+    cif_parser = CifParser(filepath)
+    structures = cif_parser.parse_structures()
+
+    for struct in structures:
+        check_result = cif_parser.check(struct)
+        if check_result is not None:
+            print(f"CIF Error: {filepath}")
+            print(f"Error Message: {check_result}")
+            raise ValueError(f"Struct contained in {filepath} is invalid")
+    return structures
+
+
+def get_structures_from_cif_plqy(filepath: str) -> list:
+    # ! parse_structures() returns "Incorrect stoichiometry" error
+    # ! --> bypass occupancy checks
+    cif_parser = CifParser(filepath, occupancy_tolerance=np.inf)
+    structures = cif_parser.parse_structures(check_occu=False)
+    if len(structures) > 1:
+        print(f"[PLQY Structures] File {filepath} generates multiple structures")
+    
+    for site in structures[0]:
+        total_occ = sum(site.species.values())
+        if total_occ > 1.0:
+            new_species_dict = {sp: occ / total_occ for sp, occ in site.species.items()}
+            new_species = Composition.from_weight_dict(new_species_dict)
+            site.species = new_species
+    return structures
+
+
+def get_structures_from_cif_plqy_full(filepath: str) -> list:
+    cif_parser = CifParser(filepath, occupancy_tolerance=1.1)
+    structures = cif_parser.parse_structures()
+    
+    if len(structures) > 1:
+        print(f"[PLQY Structures] File {filepath} generates multiple structures")
+    return structures
+
+
+def compute_dist_mat_for_cif(args):
     # accept one tuple for multiprocessing
-    system, filename = args
+    system, filename, plqy, plqy_full = args
 
     # extract structure from CIF
     structure_filename = f"{CIF_DIRECTORY}/{system}/{filename}"
-    structures = get_structures_from_cif(structure_filename)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        if plqy:
+            structures = get_structures_from_cif_plqy(structure_filename)
+        elif plqy_full:
+            structures = get_structures_from_cif_plqy_full(structure_filename)
+        else:
+            structures = get_structures_from_cif(structure_filename)
     structure = structures[0].get_reduced_structure()
 
-    # get fractional coordinates for each site (point cloud)
-    cart_coords = structure.cart_coords
+    # get distance matrix for each pair of frac. coordinates
+    n = len(structure)
+    dist_mat = np.zeros((n, n))
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            dist, jimage = structure.lattice.get_distance_and_image(
+                structure.frac_coords[i], 
+                structure.frac_coords[j],
+            )
+            dist_mat[i, j] = dist
+            dist_mat[j, i] = dist
+
+    return filename[:-4], dist_mat
 
 
-
-def compute_persistence_diagrams_point():
-    print(f"------ POINT CLOUD PERSISTENCE ------")
+def cif_to_dist_mat(plqy=False, plqy_full=False):
     n_workers = get_num_cpus()
-    print(f"Using {n_workers} job processes")
+    dist_dict = dict()
 
+    print(f"Unpacking system structures into cartesian coordinates...")
     for system in CRYSTAL_SYSTEMS:
-        print(f"Computing PD for {system}")
+        system_dist_mats = dict()
 
         cif_files = fetch_cif_filenames(system)
-        tasks = [(system, filename) for filename in cif_files]
+        tasks = [(system, filename, plqy, plqy_full) for filename in cif_files]
 
         with ProcessPoolExecutor(
             max_workers=n_workers, 
         ) as executor:
-            results = executor.map(compute_pd_for_cif, tasks, chunksize=8)
+            results = executor.map(compute_dist_mat_for_cif, tasks, chunksize=8)
 
-            
-        # with ProcessPoolExecutor(
-        #     max_workers=n_workers,
-        #     initializer=init_landscape_transformers,
-        #     initargs=(landscape_transformers,),
-        # ) as executor:
-        #     results = executor.map(compute_landscapes_for_system, CRYSTAL_SYSTEMS)
+            for crystal_id, dist_mat in tqdm(results, total=len(tasks), desc=f"PC for {system}: "):
+                system_dist_mats[crystal_id] = dist_mat
+        
+        dist_dict[system] = system_dist_mats
+    return dist_dict
 
-        #     for system, system_landscapes in tqdm(results, total=len(CRYSTAL_SYSTEMS)):
-        #         # save system images
-        #         landscape_path = open_write_file(LANDSCAPE_DIRECTORY, f"{system}.pkl")
-        #         with open(landscape_path, 'wb') as f:
-        #             pickle.dump(system_landscapes, f)
+
+def compute_persistence_diagrams_point(plqy=False, plqy_full=False):
+    print(f"------ POINT CLOUD PERSISTENCE ------")
+    n_workers = get_num_cpus()
+    print(f"Using {n_workers} job processes")
+
+    # compute distance matrices for each crystal for each system
+    dist_dict = cif_to_dist_mat(plqy=plqy, plqy_full=plqy_full)
+
+    rips = RipsPersistence(
+        homology_dimensions=tuple(range(DIMENSION_CNT)),
+        threshold=MAX_DIST, 
+        input_type='full distance matrix', 
+        n_jobs=n_workers,
+    )
+
+    # compute diagrams for each system
+    for system in CRYSTAL_SYSTEMS:
+        print(f"Computing PD for {system}")
+
+        dist_mat_system = list(dist_dict[system].values())
+        if len(dist_mat_system) == 0:
+            print(f"No crystals for {system} system!")
+            diagrams_with_id = dict()
+            diag_filepath = open_write_file(DIAGRAM_POINT_DIRECTORY, f'{system}.pkl')
+            with open(diag_filepath, 'wb') as f:
+                pickle.dump(diagrams_with_id, f)
+            continue
+        
+        # fit & transform rips to each crystal (point cloud)
+        diagrams = rips.fit_transform(dist_mat_system)
+
+        # match diagrams to crystal id (format with multiple dimensions)
+        keys = list(dist_dict[system].keys())
+        diagrams_with_id = {
+            keys[i]: diagrams[i]
+            for i in range(len(diagrams))
+        }
+
+        # print diagram info
+        print(f"diagram cnt: {len(diagrams)}")
+        point_diagram_list = diagrams[0]
+        print("Persistence Diagram Shape for H0:", point_diagram_list[0].shape)
+        print("Points (Birth, Death) for H0:\n", point_diagram_list[0])
     
+        # save diagrams dict as pickle
+        diag_filepath = open_write_file(DIAGRAM_POINT_DIRECTORY, f'{system}.pkl')
+        with open(diag_filepath, 'wb') as f:
+            pickle.dump(diagrams_with_id, f)
+
     print(f"------ END PERSISTENCE ------")
 
 
@@ -205,4 +321,7 @@ if __name__ == "__main__":
     if args.source == 'graph':
         compute_persistence_diagrams_graph()
     else:
-        compute_persistence_diagrams_point()
+        compute_persistence_diagrams_point(
+            plqy=args.plqy, 
+            plqy_full=args.plqy_full,
+        )

@@ -41,6 +41,7 @@ IM_RESOLUTION = [20, 20]
 
 def _parse_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--source', type=str, default='graph', help='persistence diagram source [graph, point]')
     parser.add_argument('--abs', action='store_true', help='vectorizes absorption PDs')
     parser.add_argument('--plqy', action='store_true', help='Only focuses separately on data/plqy')
     parser.add_argument('--plqy-full', action='store_true', help='Only focuses separately on data/plqy-full')
@@ -78,7 +79,7 @@ def remove_diagram_padding(diagram, eps=1e-12):
     return final_diagram
 
 
-def process_one_diagram(diagram: np.ndarray):
+def process_one_gtda_diagram(diagram: np.ndarray):
     '''
     Removes all diagram giotto-tda padding (b == d), organizes triplets into
     separate dimensions, and removes dimension field.
@@ -95,11 +96,11 @@ def process_one_diagram(diagram: np.ndarray):
     return diagram_dim
 
 
-def process_all_diagrams(diagrams: list):
+def process_all_gtda_diagrams(diagrams: list):
     '''
     Removes all diagram giotto-tda padding (b == d), organizes triplets into
     separate dimensions, and removes dimension field. Applied to list of diagrams.
-    Input: [diagram1, diagram2, ...] where diagram = [[b, d, dim], ...]
+    Input:  [diagram1, diagram2, ...] where diagram = [[b, d, dim], ...]
     Output: [[h0_diagram1, h0_diagram2, ...], [h1_diagram1, ...], ...] 
             where each Hn diagram is [[b, d], ...]
     '''
@@ -115,17 +116,26 @@ def process_all_diagrams(diagrams: list):
     return dimension_array
 
 
-def fit_landscape_transformers(num_landscapes, resolution):
+def process_all_gudhi_diagrams(diagrams: list):
+    '''
+    Input:  [[h0_diagram1, h1_diagram1, h2_diagram1], [], ...]
+    Output: [[h0_diagram1, h0_diagram2, ...], [h1_diagram1, ...], ...] 
+            where each Hn diagram is [[b, d], ...]
+    '''
+    dimension_array = []
+    for dim in range(DIMENSION_CNT):
+        dim_diagrams = []
+        for crystal in diagrams:
+            dim_diagrams.append(crystal[dim])
+        dimension_array.append(dim_diagrams)
+    return dimension_array
+
+
+def fit_landscape_transformers(source, num_landscapes, resolution):
     '''
     For each dimension, fits landscape transformers to all system persistence diagrams. 
     '''
-    # ! sample_range is already provided, so no need to fit
-    # # persistence diagrams for all systems (giotto-tda format)
-    # all_diagrams = collect_all_diagrams()
-    
-    # # convert all diagrams into gudhi format, separate into dimensions
-    # processed_diagrams = process_all_diagrams(all_diagrams)
-
+    # ! sample_range is already provided, so no need to fit to actual diagrams
     # define and fit landscape classes
     print("fitting landscape transformers...")
 
@@ -144,15 +154,18 @@ def fit_landscape_transformers(num_landscapes, resolution):
     return transformers
 
 
-def fit_image_transformers(bandwidth, resolution):
+def fit_image_transformers(source, bandwidth, resolution):
     '''
     For each dimension, fits image transformers to all system persistence diagrams. 
     '''
     # persistence diagrams for all systems (giotto-tda format)
     all_diagrams = collect_all_diagrams()
     
-    # convert all diagrams into gudhi format, separate into dimensions
-    processed_diagrams = process_all_diagrams(all_diagrams)
+    if source == 'graph':
+        # convert all diagrams into gudhi format, separate into dimensions
+        processed_diagrams = process_all_gtda_diagrams(all_diagrams)
+    else:
+        processed_diagrams = process_all_gudhi_diagrams(all_diagrams)
 
     # define and fit image classes
     print("fitting image transformers...")
@@ -179,7 +192,7 @@ def compute_landscapes_for_system(args):
     '''
     Generates persistence landscapes for one system for each dimension.
     '''
-    system = args
+    system, source = args
 
     # print(f"computing landscapes for {system} system...")
     # process all diagrams in system
@@ -187,7 +200,11 @@ def compute_landscapes_for_system(args):
     keys_list = list(system_diagrams.keys())
     if len(keys_list) == 0:
         return system, dict()
-    diagrams_by_dims = process_all_diagrams(list(system_diagrams.values()))
+    
+    if source == 'graph':
+        diagrams_by_dims = process_all_gtda_diagrams(list(system_diagrams.values()))
+    else:
+        diagrams_by_dims = process_all_gudhi_diagrams(list(system_diagrams.values()))
 
     # generate persistence landscapes for all diagrams for each dimension
     landscapes_by_dim = []  # [[h0_land1, h0_land2, ...], [h1_land1, ...], ...]
@@ -207,6 +224,7 @@ def compute_landscapes_for_system(args):
 
 
 def persistence_landscape(
+        source='graph',
         num_landscapes=LA_LAYER, 
         resolution=LA_RESOLUTION,
     ):
@@ -215,15 +233,16 @@ def persistence_landscape(
     Uses multiprocessing. 
     '''
     n_workers = get_num_cpus()
-    landscape_transformers = fit_landscape_transformers(num_landscapes, resolution)
-    
+    landscape_transformers = fit_landscape_transformers(source, num_landscapes, resolution)
+    tasks = [(system, source) for system in CRYSTAL_SYSTEMS]
+
     print(f"Computing landscapes with {n_workers} workers...")
     with ProcessPoolExecutor(
         max_workers=n_workers,
         initializer=init_landscape_transformers,
         initargs=(landscape_transformers,),
     ) as executor:
-        results = executor.map(compute_landscapes_for_system, CRYSTAL_SYSTEMS)
+        results = executor.map(compute_landscapes_for_system, tasks)
 
         for system, system_landscapes in tqdm(results, total=len(CRYSTAL_SYSTEMS)):
             # save system images
@@ -239,7 +258,7 @@ def pad_bounds(bound_x, bound_y, eps=0.001):
     return (bound_x, bound_y)
 
 
-def save_image_transformer_bounds(image_transformers):
+def save_image_transformer_bounds(source, image_transformers):
     image_bnds_list = []
     for dim in range(DIMENSION_CNT):
         bounds = image_transformers[dim].im_range_fixed_
@@ -247,7 +266,7 @@ def save_image_transformer_bounds(image_transformers):
         image_bnds_list.append(bounds_tuple)
     
     # save JSON
-    file_path = open_write_file(f'{DATA_DIRECTORY}', 'image_bounds.pkl')
+    file_path = open_write_file(f'{DATA_DIRECTORY}', f"image_bounds_{'g' if source == 'graph' else 'p'}.pkl")
     with open(file_path, "wb") as f:
         pickle.dump(image_bnds_list, f)
 
@@ -256,7 +275,7 @@ def compute_images_for_system(args):
     '''
     Generates persistence images for one system for each dimension. 
     '''
-    system = args
+    system, source = args
 
     # print(f"computing images for {system} system...")
     # process all diagrams in system
@@ -264,7 +283,11 @@ def compute_images_for_system(args):
     keys_list = list(system_diagrams.keys())
     if len(keys_list) == 0:
         return system, dict()
-    diagrams_by_dims = process_all_diagrams(list(system_diagrams.values()))
+    
+    if source == 'graph':
+        diagrams_by_dims = process_all_gtda_diagrams(list(system_diagrams.values()))
+    else:
+        diagrams_by_dims = process_all_gudhi_diagrams(list(system_diagrams.values()))
 
     # generate persistence images for all diagrams for each dimension
     images_by_dim = []  # [[h0_image1, h0_image2, ...], [h1_image1, ...], ...]
@@ -288,6 +311,7 @@ def compute_images_for_system(args):
 
 
 def persistence_image(
+        source='graph',
         bandwidth=IM_BANDWIDTH, 
         resolution=IM_RESOLUTION, 
     ):
@@ -296,10 +320,11 @@ def persistence_image(
     Uses multiprocessing. 
     '''
     n_workers = get_num_cpus()
-    image_transformers = fit_image_transformers(bandwidth, resolution)
+    image_transformers = fit_image_transformers(source, bandwidth, resolution)
 
     # save image bounds
-    save_image_transformer_bounds(image_transformers)
+    save_image_transformer_bounds(source, image_transformers)
+    tasks = [(system, source) for system in CRYSTAL_SYSTEMS]
 
     print(f"Computing images with {n_workers} workers...")
     with ProcessPoolExecutor(
@@ -307,7 +332,7 @@ def persistence_image(
         initializer=init_image_transformers,
         initargs=(image_transformers,),
     ) as executor:
-        results = executor.map(compute_images_for_system, CRYSTAL_SYSTEMS)
+        results = executor.map(compute_images_for_system, tasks)
 
         for system, system_images in tqdm(results, total=len(CRYSTAL_SYSTEMS)):
             # save system images
@@ -397,6 +422,8 @@ def plot_landscape_gtda(
 
 if __name__ == "__main__":
     args = _parse_args()
+
+    assert args.source in ['graph', 'point']
     assert sum([args.abs, args.plqy, args.plqy_full]) <= 1, "Can only choose one of abs/plqy/plqy-full"
 
     DATA_DIRECTORY = "data/pretrain"
@@ -407,17 +434,18 @@ if __name__ == "__main__":
     if args.plqy_full:
         DATA_DIRECTORY = "data/plqy-full"
 
-    DIAGRAM_DIRECTORY = f"{DATA_DIRECTORY}/diagrams_g"
-    LANDSCAPE_DIRECTORY = f"{DATA_DIRECTORY}/landscapes_g"
-    IMAGE_DIRECTORY = f"{DATA_DIRECTORY}/images_g"
+    suffix = 'g' if args.source == 'graph' else 'p'
+    DIAGRAM_DIRECTORY = f"{DATA_DIRECTORY}/diagrams_{suffix}"
+    LANDSCAPE_DIRECTORY = f"{DATA_DIRECTORY}/landscapes_{suffix}"
+    IMAGE_DIRECTORY = f"{DATA_DIRECTORY}/images_{suffix}"
     MAX_DIST = get_max_dist(DATA_DIRECTORY) 
 
     if args.landscape:
-        persistence_landscape()
+        persistence_landscape(source=args.source)
         if args.example:
             plot_landscape_gtda('triclinic', 'mp-2981')
             plot_landscape('triclinic', 'mp-2981', dim=0)
     if args.image:
-        persistence_image()
+        persistence_image(source=args.source)
         if args.example:
             plot_image('triclinic', 'mp-2981', dim=1)
