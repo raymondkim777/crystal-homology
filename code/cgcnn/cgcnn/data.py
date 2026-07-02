@@ -354,6 +354,7 @@ class GraphData(Dataset):
             dmax=17,  # 16.719527690689166
             step=0.2,
             random_seed=42,
+            vec_source='graph', 
             vector='none',  # 'none', 'image', 'landscape', 'perslay
             dims=3,
             task_specs=None,
@@ -391,18 +392,20 @@ class GraphData(Dataset):
         self.gdf = GaussianDistance(dmin=dmin, dmax=dmax, step=step)
 
         # ! vectorization support
+        assert vec_source in ['graph', 'point'], 'incorrect vectorization source input!'
         assert vector in ['none', 'image', 'landscape', 'perslay'], 'incorrect vectorization input!'
         self.dim_cnt = dims
         self.vector = vector
         self.vector_dict = dict()
+        ch = vec_source[0]
         if self.vector == 'image':
-            with open(os.path.join(self.root_dir, 'vecs', 'images.pkl'), 'rb') as file:
+            with open(os.path.join(self.root_dir, 'vecs', f'images_{ch}.pkl'), 'rb') as file:
                 self.vector_dict = pickle.load(file)
         elif self.vector == 'landscape':
-            with open(os.path.join(self.root_dir, 'vecs', 'landscapes.pkl'), 'rb') as file:
+            with open(os.path.join(self.root_dir, 'vecs', f'landscapes_{ch}.pkl'), 'rb') as file:
                 self.vector_dict = pickle.load(file)
         elif self.vector == 'perslay':
-            with open(os.path.join(self.root_dir, 'vecs', 'diagrams.pkl'), 'rb') as file:
+            with open(os.path.join(self.root_dir, 'vecs', f'diagrams_{ch}.pkl'), 'rb') as file:
                 self.vector_dict = pickle.load(file)  # technically diagrams, not vector
         
 
@@ -466,7 +469,7 @@ class GraphData(Dataset):
         elif type(graph.nodes[0]['species']) == dict:
             feature_list = [
                 np.sum((
-                    sp_w * self.ari_get_atom_fea(sp_n) 
+                    sp_w * self.ari.get_atom_fea(sp_n) 
                     for sp_n, sp_w in graph.nodes[node]['species'].items()
                 ), axis=0)
                     # self.ari.get_atom_fea(graph.nodes[node]['species']) # species number

@@ -24,11 +24,13 @@ from utils import CRYSTAL_SYSTEMS, get_num_cpus, open_write_file
 
 DATA_DIRECTORY = None
 CIF_DIRECTORY = None
+STRUCTURE_DIRECTORY = None
 MULTIGRAPH_DIRECTORY = None
 GRAPH_DIRECTORY = None
 
 
 CRYSTALNN = None
+CRYSTALNN_LARGE = None
 
 
 def _parse_args():
@@ -93,32 +95,33 @@ def get_structures_from_cif_plqy_full(filepath: str) -> list:
 
 def process_one_cif(args):
     # accept one tuple for multiprocessing
-    system, filename, plqy, plqy_full = args
+    system, filename, structure, plqy, plqy_full = args
 
-    structure_filename = f"{CIF_DIRECTORY}/{system}/{filename}"
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        if plqy:
-            structures = get_structures_from_cif_plqy(structure_filename)
-        elif plqy_full:
-            structures = get_structures_from_cif_plqy_full(structure_filename)
-        else:
-            structures = get_structures_from_cif(structure_filename)
-    
-    # transform into multi-digraph
-    # structure = structures[0]
-    unordered = False
+    if structure is None:
+        structure_filename = f"{CIF_DIRECTORY}/{system}/{filename}"
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            if plqy:
+                structures = get_structures_from_cif_plqy(structure_filename)
+            elif plqy_full:
+                structures = get_structures_from_cif_plqy_full(structure_filename)
+            else:
+                structures = get_structures_from_cif(structure_filename)
+        structure = structures[0].get_reduced_structure()
 
-    structure = structures[0].get_reduced_structure()
     ordered_structure = structure
     if not structure.is_ordered:
-        unordered = True
         ordered_structure = make_structure_ordered(structure)
     
-    bonded_structure = CRYSTALNN.get_bonded_structure(
-        ordered_structure,
-        # on_disorder='take_max_species', 
-    )
+    # ! need to adjust search_cutoff if necessary
+    try:
+        bonded_structure = CRYSTALNN.get_bonded_structure(
+            ordered_structure, 
+        )
+    except ValueError as e:
+        bonded_structure = CRYSTALNN_LARGE.get_bonded_structure(
+            ordered_structure, 
+        )
     nx_multigraph = bonded_structure.graph
 
     # set bond distances as weight for each edge
@@ -174,12 +177,13 @@ def process_one_cif(args):
     
     crystal_id = filename[:-4]
 
-    return crystal_id, nx_multigraph, nx_graph, unordered
+    return crystal_id, structure, nx_multigraph, nx_graph
 
 
-def init_crystalnn(crystalnn):
-    global CRYSTALNN
+def init_crystalnn(crystalnn, crystalnn_large):
+    global CRYSTALNN, CRYSTALNN_LARGE
     CRYSTALNN = crystalnn
+    CRYSTALNN_LARGE = crystalnn_large
 
 
 def construct_crystalnn_graph(plqy=False, plqy_full=False) -> None:
@@ -194,30 +198,54 @@ def construct_crystalnn_graph(plqy=False, plqy_full=False) -> None:
         search_cutoff=11,  # default 7, but ERROR: No Voronoi neighbors found for site
     )
 
+    crystalnn_large = CrystalNN(
+        distance_cutoffs=None, 
+        x_diff_weight=0, 
+        porous_adjustment=False,
+        search_cutoff=16,  # default 7, but ERROR: No Voronoi neighbors found for site
+    )
+
     unordered_id_list = []
     for system in CRYSTAL_SYSTEMS:
 
+        system_structures = dict()
         system_multigraphs = dict()
         system_graphs = dict()
 
         cif_files = fetch_cif_filenames(system)
-        tasks = [(system, filename, plqy, plqy_full) for filename in cif_files]
+
+        struct_exist = False
+        if os.path.isfile(f"{STRUCTURE_DIRECTORY}/{system}.pkl"):
+            print(f"Structure directory exists!")
+            struct_exist = True
+            with open(f'{STRUCTURE_DIRECTORY}/{system}.pkl', 'rb') as file:
+                system_structs = pickle.load(file)
+            tasks = [(system, filename, system_structs[filename[:-4]], plqy, plqy_full) for filename in cif_files]
+        else:
+            print(f"Structure directory doesn't exist, need to parse CIFs")
+            tasks = [(system, filename, None, plqy, plqy_full) for filename in cif_files]
                     
-        print(f"Creating graphs of {system} system...")
+        print(f"Creating {'structs and ' if not struct_exist else ''}graphs of {system} system...")
         with ProcessPoolExecutor(
             max_workers=workers,
             initializer=init_crystalnn, 
-            initargs=(crystalnn,),
+            initargs=(crystalnn, crystalnn_large),
         ) as executor:
             results = executor.map(process_one_cif, tasks, chunksize=8)
 
-            for crystal_id, nx_multigraph, nx_graph, unordered in tqdm(results, total=len(tasks)):
+            for crystal_id, structure, nx_multigraph, nx_graph in tqdm(results, total=len(tasks)):
+                system_structures[crystal_id] = structure
                 system_multigraphs[crystal_id] = nx_multigraph
                 system_graphs[crystal_id] = nx_graph
-                if unordered:
+                if not structure.is_ordered:
                     unordered_id_list.append(crystal_id)
         
-        # save graphs as pickles
+        # save structures/graphs as pickles
+        if not struct_exist:
+            structure_filepapth = open_write_file(STRUCTURE_DIRECTORY, f'{system}.pkl')
+            with open(structure_filepapth, 'wb') as f:
+                pickle.dump(system_structures, f)
+
         multigraph_filepath = open_write_file(MULTIGRAPH_DIRECTORY, f'{system}.pkl')
         with open(multigraph_filepath, 'wb') as f:
             pickle.dump(system_multigraphs, f)
@@ -261,8 +289,12 @@ if __name__ == "__main__":
         DATA_DIRECTORY = "data/plqy-full"
 
     CIF_DIRECTORY = f"{DATA_DIRECTORY}/cif"
+    STRUCTURE_DIRECTORY = f"{DATA_DIRECTORY}/structs"
     MULTIGRAPH_DIRECTORY = f"{DATA_DIRECTORY}/graphs-multi"
     GRAPH_DIRECTORY = f"{DATA_DIRECTORY}/graphs"
 
+    label = 'ABS' if args.abs else 'PLQY' if args.plqy else 'PLQY FULL' if args.plqy_full else 'PRETRAIN'
+    print(f"----------- {label} -----------")
     construct_crystalnn_graph(plqy=args.plqy, plqy_full=args.plqy_full)
+    print(f"----------- {label} END -----------")
     # check_structures()

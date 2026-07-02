@@ -82,7 +82,7 @@ class CrystalGraphEncoder(nn.Module):
             atom_fea_len=64, n_conv=3, h_fea_len=128, n_h=1,
             vec_fea_len=64, n_vec=1,
             # classification=False, num_classes=2,
-            vector='none', weight='none', phi='none',
+            vec_source='graph', vector='none', weight='none', phi='none',
             dims=3, root_dir='data/graph_data'
     ):
         super().__init__()
@@ -154,7 +154,8 @@ class CrystalGraphEncoder(nn.Module):
                 for _ in range(dims)
             ])
             # input (read from pickle)
-            with open(f'{root_dir}/tasks/bounds.pkl', 'rb') as file:
+            ch = vec_source[0]
+            with open(f'{root_dir}/tasks/image_bounds_{ch}.pkl', 'rb') as file:
                 self.image_bnds = pickle.load(file)
             self.phis = nn.ModuleList([
                 tp.GaussianPerslayPhi(
@@ -263,7 +264,7 @@ class CrystalGraphConvNet(nn.Module):
             atom_fea_len=64, n_conv=3, h_fea_len=128, n_h=1,
             vec_fea_len=64, n_vec=1, n_o=1,
             # classification=False, num_classes=2,
-            vector='none', weight='none', phi='none',
+            vec_source='graph', vector='none', weight='none', phi='none',
             dims=3, root_dir='data/graph_data', task_specs=None,
     ):
         """
@@ -292,7 +293,7 @@ class CrystalGraphConvNet(nn.Module):
             atom_fea_len, n_conv, h_fea_len, n_h,
             vec_fea_len, n_vec,
             # classification, num_classes,
-            vector, weight, phi,
+            vec_source, vector, weight, phi,
             dims, root_dir
         )
         # load head information
@@ -341,14 +342,12 @@ class CrystalGraphConvNet(nn.Module):
           Atom hidden features after convolution
 
         """
-        ################## START OF ENCODER ##################
         crys_fea = self.encoder(
             atom_fea, nbr_fea, nbr_fea_idx, 
             crystal_atom_idx,
             vectorizations, 
             diagrams, 
         )
-        ################## END OF ENCODER ##################
 
         out = dict()
         for task, head in self.heads.items():
@@ -360,6 +359,7 @@ class CrystalGraphConvNet(nn.Module):
 
 
 def freeze_lower_encoder(model: CrystalGraphConvNet, freeze_vectors=False):
+    # ! make sure to turn layers into eval AGAIN after model.train() is called
     encoder = model.encoder
 
     # freeze atom embedding layer
@@ -385,3 +385,8 @@ def freeze_lower_encoder(model: CrystalGraphConvNet, freeze_vectors=False):
         encoder.phis.eval()
         encoder.perslays.requires_grad_(False)
         encoder.perslays.eval()
+
+
+def set_frozen_encoder_parts_to_eval(model: CrystalGraphConvNet):
+    model.encoder.embedding.eval()
+    model.encoder.convs.eval()

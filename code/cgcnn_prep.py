@@ -493,48 +493,51 @@ def graph_process(abs=False, merge=False, plqy=False, vector=False):
             idxes.append(2)
         
         for i in idxes:
-            print(f"Saving {'PRETRAIN' if i == 0 else 'ABS' if i == 1 else 'PLQY'} vectorizations...")
-            diagram_dict = retrieve_diagrams(vec_dirs[i])
-            image_dict, landscape_dict = dict(), dict()
-            for system in CRYSTAL_SYSTEMS:
-                with open(f'{vec_dirs[i]}/images_g/{system}.pkl', 'rb') as file:
-                    images = pickle.load(file)
-                image_dict = image_dict | images  # [mat_id][dim]
-                
-                with open(f'{vec_dirs[i]}/landscapes_g/{system}.pkl', 'rb') as file:
-                    landscapes = pickle.load(file)
-                landscape_dict = landscape_dict | landscapes  # [mat_id][dim]
+            print(f"Saving {'PRETRAIN' if i == 0 else 'ABS' if i == 1 else 'PLQY'} graph/point vectorizations...")
+            for ch in ['g', 'p']:
+                diagram_dict = retrieve_diagrams(vec_dirs[i])
+                image_dict, landscape_dict = dict(), dict()
+                for system in CRYSTAL_SYSTEMS:
+                    with open(f'{vec_dirs[i]}/images_{ch}/{system}.pkl', 'rb') as file:
+                        images = pickle.load(file)
+                    image_dict = image_dict | images  # [mat_id][dim]
+                    
+                    with open(f'{vec_dirs[i]}/landscapes_{ch}/{system}.pkl', 'rb') as file:
+                        landscapes = pickle.load(file)
+                    landscape_dict = landscape_dict | landscapes  # [mat_id][dim]
 
-            cgcnn_diagram_datapath = open_write_file(f"{des_dirs[i]}/vecs", f'diagrams_g.pkl')
-            with open(cgcnn_diagram_datapath, 'wb') as f:
-                pickle.dump(diagram_dict, f)
+                cgcnn_diagram_datapath = open_write_file(f"{des_dirs[i]}/vecs", f'diagrams_{ch}.pkl')
+                with open(cgcnn_diagram_datapath, 'wb') as f:
+                    pickle.dump(diagram_dict, f)
 
-            cgcnn_image_datapath = open_write_file(f"{des_dirs[i]}/vecs", f'images_g.pkl')
-            with open(cgcnn_image_datapath, 'wb') as f:
-                pickle.dump(image_dict, f)
+                cgcnn_image_datapath = open_write_file(f"{des_dirs[i]}/vecs", f'images_{ch}.pkl')
+                with open(cgcnn_image_datapath, 'wb') as f:
+                    pickle.dump(image_dict, f)
 
-            cgcnn_landscape_datapath = open_write_file(f"{des_dirs[i]}/vecs", f'landscapes_g.pkl')
-            with open(cgcnn_landscape_datapath, 'wb') as f:
-                pickle.dump(landscape_dict, f)
+                cgcnn_landscape_datapath = open_write_file(f"{des_dirs[i]}/vecs", f'landscapes_{ch}.pkl')
+                with open(cgcnn_landscape_datapath, 'wb') as f:
+                    pickle.dump(landscape_dict, f)
 
 
 def save_bounds(abs=False, merge=False, plqy=False):
     print(f"\n Saving PRETRAIN image transformer bounds...")
-    source_file = f'{DATA_PRE_DIRECTORY}/image_bounds_g.pkl'
-    destination = open_write_file(f'{CGCNN_PRE_DATAPATH}/tasks', '')
-    shutil.copy(source_file, destination)
 
-    if abs and not merge:
-        print(f"\n Saving ABS image transformer bounds...")
-        source_file = f'{DATA_ABS_DIRECTORY}/image_bounds_g.pkl'
-        destination = open_write_file(f'{CGCNN_ABS_DATAPATH}/tasks', '')
+    for ch in ['g', 'p']:
+        source_file = f'{DATA_PRE_DIRECTORY}/image_bounds_{ch}.pkl'
+        destination = open_write_file(f'{CGCNN_PRE_DATAPATH}/tasks', '')
         shutil.copy(source_file, destination)
-    
-    if plqy:
-        print(f"\n Saving PLQY image transformer bounds...")
-        source_file = f'{DATA_PLQY_DIRECTORY}/image_bounds_g.pkl'
-        destination = open_write_file(f'{CGCNN_PLQY_DATAPATH}/tasks', '')
-        shutil.copy(source_file, destination)
+
+        if abs and not merge:
+            print(f"\n Saving ABS image transformer bounds...")
+            source_file = f'{DATA_ABS_DIRECTORY}/image_bounds_{ch}.pkl'
+            destination = open_write_file(f'{CGCNN_ABS_DATAPATH}/tasks', '')
+            shutil.copy(source_file, destination)
+        
+        if plqy:
+            print(f"\n Saving PLQY image transformer bounds...")
+            source_file = f'{DATA_PLQY_DIRECTORY}/image_bounds_{ch}.pkl'
+            destination = open_write_file(f'{CGCNN_PLQY_DATAPATH}/tasks', '')
+            shutil.copy(source_file, destination)
             
 
 if __name__ == "__main__":

@@ -20,7 +20,7 @@ from torch.optim.lr_scheduler import MultiStepLR
 from cgcnn.loss import MultiTaskLoss
 from cgcnn.data import GraphData
 from cgcnn.data import collate_pool, get_train_val_test_loader
-from cgcnn.model import CrystalGraphConvNet, freeze_lower_encoder
+from cgcnn.model import CrystalGraphConvNet, freeze_lower_encoder, set_frozen_encoder_parts_to_eval
 
 parser = argparse.ArgumentParser(description='Crystal Graph Convolutional Neural Networks')
 parser.add_argument('data_options', metavar='OPTIONS', nargs='+',
@@ -102,6 +102,10 @@ parser.add_argument('--dims', default=3, type=int,
                     help='number of persistence homology dimensions')
 parser.add_argument('--norm-sample', default=2000, type=int,
                     help='number of max samples to use to define normalizers')
+
+
+parser.add_argument('--vec-source', default='graph', type=str,
+                    help='choose a vectorization source: graph, point')
 parser.add_argument('--vector', default='none', type=str,
                     help='choose a vectorization: none, image, landscape, perslay')
 parser.add_argument('--weight', default='none', type=str,
@@ -112,6 +116,12 @@ parser.add_argument('--train', default='pretrain', type=str,
                     help='choose training type: pretrain, abs, plqy')
 parser.add_argument('--freeze-vectors', action='store_true', 
                     help='freezes vectorization MLP for abs/plqy fine-tuning')
+
+
+parser.add_argument('--finetune', default='', type=str, metavar='PATH',
+                    help='path to pretrain checkpoint')
+parser.add_argument('--val-metric', default='error', type=str, metavar='PATH',
+                    help="validation metric: ['error', 'loss']")
 
 
 args = parser.parse_args(sys.argv[1:])
@@ -158,12 +168,18 @@ def main():
     
     assert args.train in ['pretrain', 'abs', 'plqy'],\
         "Wrong train argument! Should be one of 'pretrain', 'abs', 'plqy'"
+    assert (args.train == 'pretrain' and args.finetune == '')or (args.train != 'pretrain' and args.finetune != ''), \
+        "No finetune arg if train=pretrain, and need finetune arg if train=abs/plqy"
+    assert args.resume == '' or args.finetune == '', "Choose one of resume or finetune!"
+    assert args.val_metric in ['error', 'loss']
+    assert args.vec_source in ['graph', 'point']
 
     # load data
     if args.debug:
         print("Constructing GraphData")
     dataset = GraphData(
         *args.data_options, 
+        vec_source=args.vec_source,
         vector=args.vector,
         dims=args.dims,
         task_specs=TASK_SPECS
@@ -233,6 +249,7 @@ def main():
         n_vec=args.n_vec,
         n_o=args.n_o,
         # ! vectorization arguments
+        vec_source=args.vec_source,
         vector=args.vector,
         weight=args.weight,
         phi=args.phi,
@@ -243,6 +260,34 @@ def main():
 
     # ! if fine-tune, freeze lower encoder layers
     if args.train in ['abs', 'plqy']:
+        assert args.finetune != ''
+
+        # load checkpoint encoder weights
+        if not os.path.isfile(args.finetune):
+            raise ValueError(f"=> no pretrained checkpoint found at '{args.finetune}'")
+        print(f"=> Loading pretrained checkpoint '{args.finetune}'")
+
+        # load checkpoint from file
+        checkpoint = torch.load(args.finetune, weights_only=True)     # may set weights to Falseff
+
+        # isolate encoder state dict
+        if not any(k.startswith("encoder.") for k in checkpoint['state_dict']):
+            raise ValueError(f"Pretrained checkpoint model contains no encoder state_dict")
+        encoder_state_dict = {
+            k[len("encoder."):]: v
+            for k, v in checkpoint['state_dict'].items()
+            if k.startswith("encoder.")
+        }
+        if args.debug:
+            print("Encoder state dict KEYS:")
+            print(encoder_state_dict.keys())
+
+        # load encoder with checkpoint weights
+        model.encoder.load_state_dict(
+            encoder_state_dict, 
+            strict=True
+        )
+        print(f"=> loaded checkpoint '{args.finetune}' encoder")
         freeze_lower_encoder(model=model, freeze_vectors=args.freeze_vectors)
 
     # ! updated tensor cuda code
@@ -295,7 +340,7 @@ def main():
 
     if args.debug:
         print("Starting training epochs")
-    for epoch in range(args.start_epoch, args.epochs):
+    for epoch in tqdm(range(args.start_epoch, args.epochs), desc='Epochs: ', disable=args.debug):
         # train for one epoch
         if args.debug:
             print(f"Training epoch {epoch}")
@@ -304,17 +349,22 @@ def main():
         # evaluate on validation set
         if args.debug:
             print("Validating")
-        val_errors = validate(val_loader, model, criterion, normalizers)
+        val_error, val_loss = validate(val_loader, model, criterion, normalizers)
 
-        if val_errors != val_errors:
+        if args.val_metric == 'error':
+            cur_errors = val_error
+        else:
+            cur_errors = val_loss
+
+        if cur_errors != cur_errors:
             print('Exit due to NaN')
             sys.exit(1)
 
         scheduler.step()
 
         # remember the best error and save checkpoint
-        is_best = val_errors < best_errors
-        best_errors = min(val_errors, best_errors)
+        is_best = cur_errors < best_errors and epoch > 10
+        best_errors = min(cur_errors, best_errors) if epoch > 10 else best_errors
         save_checkpoint({
             'epoch': epoch + 1,
             'state_dict': model.state_dict(),
@@ -326,11 +376,12 @@ def main():
         }, is_best)
 
     # test best model
-    print('---------------Evaluate Model on Test Set---------------')
+    if args.debug:
+        print('---------------Evaluate Model on Test Set---------------')
     # ! PyTorch 2.6 safety measure: only load model weights -> extra argument
     best_checkpoint = torch.load(f'model_best_{args.id}.pth.tar', weights_only=False)
     model.load_state_dict(best_checkpoint['state_dict'])
-    validate(test_loader, model, criterion, normalizers, test=True)
+    validate(test_loader, model, criterion, normalizers, epoch=best_checkpoint['epoch'], test=True)
 
 
 def train(train_loader, model, criterion, optimizer, epoch, normalizers):
@@ -355,6 +406,10 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers):
 
     # switch to train mode
     model.train()
+
+    # ! set frozen layers to eval (undo model.train() for those layers)
+    if args.train in ['abs', 'plqy']:
+        set_frozen_encoder_parts_to_eval(model)
 
     end = time.time()
     # for i, (input, target, _) in enumerate(train_loader):
@@ -437,7 +492,7 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers):
         end = time.time()
 
         # ! print stats for each property
-        if i % args.print_freq == 0:
+        if args.debug and i % args.print_freq == 0:
             print('\nEpoch: [{0}][{1}/{2}]\tLoss {loss.val:.4f} ({loss.avg:.4f})'.format(
                 epoch, i, len(train_loader), loss=losses))
             for prop, values in stats.items():
@@ -471,7 +526,7 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers):
                     raise ValueError(f"[STAT PRINT] Unrecognized task {TASK_SPECS[prop]['head']}")
             
 
-def validate(val_loader, model, criterion, normalizers, test=False):
+def validate(val_loader, model, criterion, normalizers, epoch=0, test=False):
     batch_time = AverageMeter()
     # ! stat trackers for each metric per head
     losses = AverageMeter()
@@ -616,7 +671,7 @@ def validate(val_loader, model, criterion, normalizers, test=False):
         end = time.time()
 
         # ! print stats for each property
-        if i % args.print_freq == 0:
+        if args.debug and i % args.print_freq == 0:
             print('Test: [{0}/{1}]\tLoss {loss.val:.4f} ({loss.avg:.4f})'.format(
                 i, len(val_loader), loss=losses))
             for prop, values in stats.items():
@@ -647,33 +702,34 @@ def validate(val_loader, model, criterion, normalizers, test=False):
                 else:
                     raise ValueError(f"[STAT PRINT] Unrecognized task {TASK_SPECS[prop]['head']}")
     
-    print('Final C Test\tLoss {loss.val:.4f} ({loss.avg:.4f})'.format(loss=losses))
-    for prop, values in stats.items():
-        if TASK_SPECS[prop]['head'] in ['binary', 'multiclass']:
-            print('Test: [{0}/{1}]\t'
-                'PROP {prop}\t'
-                'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                'Accu {accu.val:.3f} ({accu.avg:.3f})\t'
-                'Prec {prec.val:.3f} ({prec.avg:.3f})\t'
-                'Recall {recall.val:.3f} ({recall.avg:.3f})\t'
-                'F1 {f1.val:.3f} ({f1.avg:.3f})\t'
-                'AUC {auc.val:.3f} ({auc.avg:.3f})'.format(
-                i, len(val_loader), batch_time=batch_time, prop=prop,
-                loss=values['loss'], accu=values['accuracies'],
-                prec=values['precisions'], recall=values['recalls'], 
-                f1=values['fscores'],auc=values['auc_scores'])
-            )
-        elif TASK_SPECS[prop]['head'] == 'regression':
-            print('Test: [{0}/{1}]\t'
-                'PROP {prop}\t'
-                'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                'NRMSE {nrmse_errors.val:.3f} ({nrmse_errors.avg:.3f})'.format(
-                i, len(val_loader), batch_time=batch_time, prop=prop,
-                loss=values['loss'], nrmse_errors=values['nrmse_errors'])
-            )
-        else:
-            raise ValueError(f"[STAT PRINT] Unrecognized task {TASK_SPECS[prop]['head']}")
+    if args.debug:
+        print('Final Test\tLoss {loss.val:.4f} ({loss.avg:.4f})'.format(loss=losses))
+        for prop, values in stats.items():
+            if TASK_SPECS[prop]['head'] in ['binary', 'multiclass']:
+                print('Test: [{0}/{1}]\t'
+                    'PROP {prop}\t'
+                    'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                    'Accu {accu.val:.3f} ({accu.avg:.3f})\t'
+                    'Prec {prec.val:.3f} ({prec.avg:.3f})\t'
+                    'Recall {recall.val:.3f} ({recall.avg:.3f})\t'
+                    'F1 {f1.val:.3f} ({f1.avg:.3f})\t'
+                    'AUC {auc.val:.3f} ({auc.avg:.3f})'.format(
+                    i, len(val_loader), batch_time=batch_time, prop=prop,
+                    loss=values['loss'], accu=values['accuracies'],
+                    prec=values['precisions'], recall=values['recalls'], 
+                    f1=values['fscores'],auc=values['auc_scores'])
+                )
+            elif TASK_SPECS[prop]['head'] == 'regression':
+                print('Test: [{0}/{1}]\t'
+                    'PROP {prop}\t'
+                    'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                    'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                    'NRMSE {nrmse_errors.val:.3f} ({nrmse_errors.avg:.3f})'.format(
+                    i, len(val_loader), batch_time=batch_time, prop=prop,
+                    loss=values['loss'], nrmse_errors=values['nrmse_errors'])
+                )
+            else:
+                raise ValueError(f"[STAT PRINT] Unrecognized task {TASK_SPECS[prop]['head']}")
 
     w_cls = 0.5
     w_reg = 0.5
@@ -701,6 +757,7 @@ def validate(val_loader, model, criterion, normalizers, test=False):
             f.write(f'Vector: {args.vector}\t\tAtom Len: {args.atom_fea_len}\tConv Num: {args.n_conv}')
             f.write(f'\nHidden Len: {args.h_fea_len}\t\tHidden Num: {args.n_h}')
             f.write(f'\nHead Layer Num: {args.n_o}\tVec Len: {args.vec_fea_len}\t\tVec Layer Num: {args.n_vec}')
+            f.write(f'\nBest Epoch: {epoch}')
         
         import csv
         # ! saving stats for each prop
@@ -774,11 +831,12 @@ def validate(val_loader, model, criterion, normalizers, test=False):
     else:
         star_label = '*'
 
-    print(f'\n Model -- \tVector: {args.vector}\tAtom Len: {args.atom_fea_len}\tConv Num: {args.n_conv}\tHidden Len: {args.h_fea_len}\tHidden Num: {args.n_h}')
-    print(f'\t\tHead Layer Num: {args.n_o}\tVec Len: {args.vec_fea_len}\tVec Layer Num: {args.n_vec}')
-    
-    print(' {star} ERROR {error:.3f}'.format(star=star_label, error=overall_error))
-    return overall_error
+    if args.debug:
+        print(f'\n Model -- \tVector: {args.vector}\tAtom Len: {args.atom_fea_len}\tConv Num: {args.n_conv}\tHidden Len: {args.h_fea_len}\tHidden Num: {args.n_h}')
+        print(f'\t\tHead Layer Num: {args.n_o}\tVec Len: {args.vec_fea_len}\tVec Layer Num: {args.n_vec}')
+        
+        print(' {star} ERROR {error:.3f}'.format(star=star_label, error=overall_error))
+    return overall_error, losses.avg
     
 
 class NormalizerProp(object):
@@ -909,7 +967,7 @@ class AverageMeter(object):
 def save_checkpoint(state, is_best, filename=f'checkpoint_{args.id}.pth.tar'):
     torch.save(state, filename)
     if is_best:
-        shutil.copyfile(filename, f'model_best_{args.id}.pth.tar')
+        shutil.copyfile(filename, f"model_best_{args.id}.pth.tar")
 
 
 def adjust_learning_rate(optimizer, epoch, k):

@@ -8,6 +8,7 @@ import pickle
 import warnings
 
 from gudhi.sklearn import RipsPersistence
+from gudhi.representations import DiagramSelector
 from gtda.homology import FlagserPersistence
 from gtda.plotting import plot_diagram
 
@@ -15,7 +16,7 @@ from pymatgen.io.cif import CifParser
 from pymatgen.core.periodic_table import Element
 from pymatgen.core.composition import Composition
 
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from utils import CRYSTAL_SYSTEMS, DIMENSION_CNT, get_num_cpus, open_write_file, get_max_dist
 
 
@@ -28,6 +29,7 @@ from utils import CRYSTAL_SYSTEMS, DIMENSION_CNT, get_num_cpus, open_write_file,
 DATA_DIRECTORY = None
 CIF_DIRECTORY = None
 GRAPH_DIRECTORY = None
+STRUCTURE_DIRECTORY = None
 DIAGRAM_GRAPH_DIRECTORY = None
 DIAGRAM_POINT_DIRECTORY = None
 MAX_DIST = None
@@ -190,19 +192,21 @@ def get_structures_from_cif_plqy_full(filepath: str) -> list:
 
 def compute_dist_mat_for_cif(args):
     # accept one tuple for multiprocessing
-    system, filename, plqy, plqy_full = args
+    system, filename, structure, plqy, plqy_full = args
 
-    # extract structure from CIF
-    structure_filename = f"{CIF_DIRECTORY}/{system}/{filename}"
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        if plqy:
-            structures = get_structures_from_cif_plqy(structure_filename)
-        elif plqy_full:
-            structures = get_structures_from_cif_plqy_full(structure_filename)
-        else:
-            structures = get_structures_from_cif(structure_filename)
-    structure = structures[0].get_reduced_structure()
+    if structure is None:
+        print(f"extracting structure for {filename}")
+        # extract structure from CIF
+        structure_filename = f"{CIF_DIRECTORY}/{system}/{filename}"
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            if plqy:
+                structures = get_structures_from_cif_plqy(structure_filename)
+            elif plqy_full:
+                structures = get_structures_from_cif_plqy_full(structure_filename)
+            else:
+                structures = get_structures_from_cif(structure_filename)
+        structure = structures[0].get_reduced_structure()
 
     # get distance matrix for each pair of frac. coordinates
     n = len(structure)
@@ -226,15 +230,42 @@ def cif_to_dist_mat(plqy=False, plqy_full=False):
 
     print(f"Unpacking system structures into cartesian coordinates...")
     for system in CRYSTAL_SYSTEMS:
+        struct_exist = False
+        if os.path.isfile(f"{STRUCTURE_DIRECTORY}/{system}.pkl"):
+            print(f"Struct directory exists!")
+            struct_exist = True
+            with open(f'{STRUCTURE_DIRECTORY}/{system}.pkl', 'rb') as file:
+                system_structs = pickle.load(file)
+        else:
+            print(f"Structure directory doesn't exist, need to parse CIFs")
+        
         system_dist_mats = dict()
 
         cif_files = fetch_cif_filenames(system)
-        tasks = [(system, filename, plqy, plqy_full) for filename in cif_files]
+        if struct_exist:
+            tasks = [(system, filename, system_structs[filename[:-4]], plqy, plqy_full) for filename in cif_files]
+        else:
+            tasks = [(system, filename, None, plqy, plqy_full) for filename in cif_files]
+
+        # with ProcessPoolExecutor(
+        #     max_workers=n_workers,
+        # ) as executor:
+        #     futures = [
+        #         executor.submit(compute_dist_mat_for_cif, task)
+        #         for task in tasks
+        #     ]
+        #     for future in tqdm(
+        #         as_completed(futures),
+        #         total=len(futures),
+        #         desc=f"PC for {system}: ",
+        #     ):
+        #         crystal_id, dist_mat = future.result()
+        #         system_dist_mats[crystal_id] = dist_mat
 
         with ProcessPoolExecutor(
             max_workers=n_workers, 
         ) as executor:
-            results = executor.map(compute_dist_mat_for_cif, tasks, chunksize=8)
+            results = executor.map(compute_dist_mat_for_cif, tasks)
 
             for crystal_id, dist_mat in tqdm(results, total=len(tasks), desc=f"PC for {system}: "):
                 system_dist_mats[crystal_id] = dist_mat
@@ -273,12 +304,22 @@ def compute_persistence_diagrams_point(plqy=False, plqy_full=False):
         
         # fit & transform rips to each crystal (point cloud)
         diagrams = rips.fit_transform(dist_mat_system)
+        # [crystal1, crystal2, ...] where crystaln = [h0_diag, h1_diag, h2_diag]
+
+        diagrams_filtered = []
+        diag_select = DiagramSelector(
+            use=True, 
+            point_type='finite', 
+            limit=MAX_DIST,     # + 1??
+        )
+        for diag_crystal in diagrams:
+            diagrams_filtered.append(diag_select.fit_transform(diag_crystal))
 
         # match diagrams to crystal id (format with multiple dimensions)
         keys = list(dist_dict[system].keys())
         diagrams_with_id = {
-            keys[i]: diagrams[i]
-            for i in range(len(diagrams))
+            keys[i]: diagrams_filtered[i]
+            for i in range(len(diagrams_filtered))
         }
 
         # print diagram info
@@ -314,6 +355,7 @@ if __name__ == "__main__":
     
     CIF_DIRECTORY = f"{DATA_DIRECTORY}/cif"
     GRAPH_DIRECTORY = f"{DATA_DIRECTORY}/graphs"
+    STRUCTURE_DIRECTORY = f"{DATA_DIRECTORY}/structs"
     DIAGRAM_GRAPH_DIRECTORY = f"{DATA_DIRECTORY}/diagrams_g"
     DIAGRAM_POINT_DIRECTORY = f"{DATA_DIRECTORY}/diagrams_p"
     MAX_DIST = get_max_dist(DATA_DIRECTORY)
