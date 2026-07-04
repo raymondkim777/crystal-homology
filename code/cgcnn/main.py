@@ -94,6 +94,8 @@ parser.add_argument('--n-vec', default=1, type=int, metavar='N',
 
 parser.add_argument('--debug', action='store_true',
                     help='prints debug messages')
+parser.add_argument('--result', action='store_true',
+                    help='stores model test prediction results as csv')
 parser.add_argument('--seed', action='store_true',
                     help='sets torch seed to 42')
 # parser.add_argument('--num-classes', default=2, type=int)
@@ -255,7 +257,7 @@ def main():
         else:
             raise ValueError(f"[TRAIN STATS] Unknown task {value['head']}")
 
-    # k-fold cross validation
+    # ! K-FOLD CROSS VALIDATION
     fold_num = args.fold if CROSS_VAL else 1
     for fold_it in range(fold_num):
 
@@ -847,37 +849,38 @@ def validate(val_loader, model, criterion, normalizers, best_epoch=0, test=False
         )
         
         # ! saving results for each prop
-        for prop, values in test_stats.items():
-            with open(f'test_results_{args.id}_{prop}.csv', 'w', newline='', encoding='utf-8') as file_results:
-                writer = csv.writer(file_results)
+        if args.result:
+            for prop, values in test_stats.items():
+                with open(f'test_results_{args.id}_{prop}.csv', 'w', newline='', encoding='utf-8') as file_results:
+                    writer = csv.writer(file_results)
 
-                if TASK_SPECS[prop]['head'] in ['binary', 'multiclass']:
-                    header = ['mp-id', 'mask', 'target', 'predicted_class']
-                    header += [f'prob_class_{i}' for i in range(len(values['test_probs'][0]))]
-                    writer.writerow(header)
+                    if TASK_SPECS[prop]['head'] in ['binary', 'multiclass']:
+                        header = ['mp-id', 'mask', 'target', 'predicted_class']
+                        header += [f'prob_class_{i}' for i in range(len(values['test_probs'][0]))]
+                        writer.writerow(header)
 
-                    for cif_id, mask, target, pred, probs in zip(
-                        values['test_cif_ids'], 
-                        values['test_masks'],
-                        values['test_targets'], 
-                        values['test_preds'], 
-                        values['test_probs'],
-                    ):
-                        writer.writerow([cif_id, mask, target, pred] + probs)
+                        for cif_id, mask, target, pred, probs in zip(
+                            values['test_cif_ids'], 
+                            values['test_masks'],
+                            values['test_targets'], 
+                            values['test_preds'], 
+                            values['test_probs'],
+                        ):
+                            writer.writerow([cif_id, mask, target, pred] + probs)
 
-                elif TASK_SPECS[prop]['head'] == 'regression':
-                    header = ['mp-id', 'mask', 'target', 'predicted_value']
-                    writer.writerow(header)
+                    elif TASK_SPECS[prop]['head'] == 'regression':
+                        header = ['mp-id', 'mask', 'target', 'predicted_value']
+                        writer.writerow(header)
 
-                    for cif_id, mask, target, pred in zip(
-                        values['test_cif_ids'], 
-                        values['test_masks'],
-                        values['test_targets'], 
-                        values['test_preds'], 
-                    ):
-                        writer.writerow([cif_id, mask, target, pred])
-                else:
-                    raise ValueError(f"[TEST CSV] Unrecognized task {TASK_SPECS[prop]['head']}")
+                        for cif_id, mask, target, pred in zip(
+                            values['test_cif_ids'], 
+                            values['test_masks'],
+                            values['test_targets'], 
+                            values['test_preds'], 
+                        ):
+                            writer.writerow([cif_id, mask, target, pred])
+                    else:
+                        raise ValueError(f"[TEST CSV] Unrecognized task {TASK_SPECS[prop]['head']}")
 
     if args.debug:
         print(f'\n Model -- \tVector: {args.vector}\tAtom Len: {args.atom_fea_len}\tConv Num: {args.n_conv}\tHidden Len: {args.h_fea_len}\tHidden Num: {args.n_h}')
