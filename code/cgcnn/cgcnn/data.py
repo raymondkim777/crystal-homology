@@ -400,7 +400,7 @@ class GraphData(Dataset):
             root_dir, 
             max_num_nbr=36, 
             dmin=0, 
-            dmax=17,  # 16.719527690689166
+            dmax=16,  # 15.42974841
             step=0.2,
             random_seed=42,
             vec_source='graph', 

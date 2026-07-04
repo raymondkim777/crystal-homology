@@ -5,6 +5,7 @@ import shutil
 import sys
 import time
 import csv
+import json
 import warnings
 from random import sample
 from tqdm import tqdm
@@ -196,11 +197,18 @@ def main():
     assert not CROSS_VAL or args.train != 'pretrain',\
         "[STOP] Should not run k-fold cross validation on pretrain dataset!"
 
+    # load graph data bounds
+    assert os.path.exists(f"{args.data_options}/tasks/bounds.json"), "[GraphData Args] Graph bounds.json doesn't exist!"
+    with open(f"{args.data_options}/tasks/bounds.json") as f:
+        g_bounds = json.load(f)
+
     # load data
     if args.debug:
         print("Constructing GraphData")
     dataset = GraphData(
         *args.data_options, 
+        max_num_nbr=g_bounds["max_num_nbr"], 
+        dmax=g_bounds["max_bond_dist"], 
         vec_source=args.vec_source,
         vector=args.vector,
         dims=args.dims,
@@ -455,7 +463,7 @@ def main():
         best_epochs.append(best_checkpoint['epoch'])
         model.load_state_dict(best_checkpoint['state_dict'])
 
-        test_loss, test_error, stat_dict = validate(
+        test_error, test_loss, stat_dict = validate(
             test_loader, model, criterion, normalizers, 
             best_epoch=best_checkpoint['epoch'], 
             test=True
@@ -887,7 +895,7 @@ def validate(val_loader, model, criterion, normalizers, best_epoch=0, test=False
         print(f'\t\tHead Layer Num: {args.n_o}\tVec Len: {args.vec_fea_len}\tVec Layer Num: {args.n_vec}')
         
         print(' ** ERROR {error:.3f}'.format(error=overall_error))
-    return overall_error, losses.avg, stats
+    return overall_error.item(), losses.avg, stats
 
 
 def save_stats_as_csv(

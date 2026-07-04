@@ -414,7 +414,7 @@ def graph_process(abs=False, merge=False, plqy=False, vector=False):
     if plqy:
         print(f"\nUnpacking PLQY graphs...")
         graph_dict = unpack_plqy_graphs()
-        print(f"Saving ABS graph files to {CGCNN_PLQY_DATAPATH}")
+        print(f"Saving PLQY graph files to {CGCNN_PLQY_DATAPATH}")
         # save graphs to CGCNN data folder
         for mp_id, value in tqdm(graph_dict.items()):
             # ! NOTE: not actually Materials Project IDs, but need to be same string format
@@ -436,6 +436,11 @@ def graph_process(abs=False, merge=False, plqy=False, vector=False):
     with open(task_filepath, 'wb') as f:
         pickle.dump(TASK_SPECS, f)
 
+    # save max nbrs and bond dist info to CGCNN data path
+    source_file = f'{DATA_PRE_DIRECTORY}/bounds.json'
+    destination = open_write_file(f'{CGCNN_PRE_DATAPATH}/tasks', '')
+    shutil.copy(source_file, destination)
+
     # copy atom_init.json to CGCNN data path
     source_file = f'{CGCNN_DATAPATH}/atom_init.json'
     destination = open_write_file(f'{CGCNN_PRE_DATAPATH}', '')
@@ -456,6 +461,11 @@ def graph_process(abs=False, merge=False, plqy=False, vector=False):
         with open(task_filepath, 'wb') as f:
             pickle.dump(ABS_TASK_SPECS, f)
 
+        # save max nbrs and bond dist info to CGCNN data path
+        source_file = f'{DATA_ABS_DIRECTORY}/bounds.json'
+        destination = open_write_file(f'{CGCNN_ABS_DATAPATH}/tasks', '')
+        shutil.copy(source_file, destination)
+
         # copy atom_init.json to CGCNN data path
         source_file = f'{CGCNN_DATAPATH}/atom_init.json'
         destination = open_write_file(f'{CGCNN_ABS_DATAPATH}', '')
@@ -475,6 +485,11 @@ def graph_process(abs=False, merge=False, plqy=False, vector=False):
         task_filepath = open_write_file(f"{CGCNN_PLQY_DATAPATH}/tasks", f'tasks.pkl')
         with open(task_filepath, 'wb') as f:
             pickle.dump(PLQY_TASK_SPECS, f)
+
+         # save max nbrs and bond dist info to CGCNN data path
+        source_file = f'{DATA_PLQY_DIRECTORY}/bounds.json'
+        destination = open_write_file(f'{CGCNN_PLQY_DATAPATH}/tasks', '')
+        shutil.copy(source_file, destination)
 
         # copy atom_init.json to CGCNN data path
         source_file = f'{CGCNN_DATAPATH}/atom_init.json'
