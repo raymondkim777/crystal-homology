@@ -18,6 +18,55 @@ from torch.utils.data.dataloader import default_collate
 from torch.utils.data.sampler import SubsetRandomSampler
 
 
+def get_fold_indices(dataset, k=5):
+    assert k >= 5, f"[Fold Idx] k-value of {k} is too small"
+    total_size = len(dataset)
+    indices = list(range(total_size))
+    k_size, remainder = divmod(total_size, k)
+    
+    fold_indices = [
+        indices[i * k_size + min(i, remainder) : (i + 1) * k_size + min(i + 1, remainder)]
+        for i in range(k)
+    ]
+    return fold_indices
+
+
+def get_train_val_test_loader_from_folds(
+        dataset, folds, test_fold_idx, collate_fn=default_collate,
+        batch_size=64, num_workers=1, pin_memory=False, 
+        persistent_workers=False,
+):
+    assert test_fold_idx < len(folds)
+    val_fold_idx = (test_fold_idx - 1) % len(folds)
+    # concatenate remaining folds to form train indices
+    train_indices = [
+        idx
+        for fold_idx, fold in enumerate(folds)
+        if fold_idx not in [val_fold_idx, test_fold_idx]
+        for idx in fold
+    ]
+    train_sampler = SubsetRandomSampler(train_indices)
+    val_sampler = SubsetRandomSampler(folds[val_fold_idx])
+    test_sampler = SubsetRandomSampler(folds[test_fold_idx])
+
+    train_loader = DataLoader(dataset, batch_size=batch_size,
+                              sampler=train_sampler,
+                              num_workers=num_workers,
+                              collate_fn=collate_fn, pin_memory=pin_memory, 
+                              persistent_workers=persistent_workers)
+    val_loader = DataLoader(dataset, batch_size=batch_size,
+                            sampler=val_sampler,
+                            num_workers=num_workers,
+                            collate_fn=collate_fn, pin_memory=pin_memory,
+                            persistent_workers=persistent_workers)
+    test_loader = DataLoader(dataset, batch_size=batch_size,
+                                 sampler=test_sampler,
+                                 num_workers=num_workers,
+                                 collate_fn=collate_fn, pin_memory=pin_memory,
+                                 persistent_workers=persistent_workers)
+    return train_loader, val_loader, test_loader
+
+
 def get_train_val_test_loader(dataset, collate_fn=default_collate,
                               batch_size=64, train_ratio=None,
                               val_ratio=0.1, test_ratio=0.1, return_test=False,

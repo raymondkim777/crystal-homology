@@ -4,6 +4,7 @@ import pickle
 import shutil
 import sys
 import time
+import csv
 import warnings
 from random import sample
 from tqdm import tqdm
@@ -19,8 +20,10 @@ from torch.optim.lr_scheduler import MultiStepLR
 
 from cgcnn.loss import MultiTaskLoss
 from cgcnn.data import GraphData
-from cgcnn.data import collate_pool, get_train_val_test_loader
-from cgcnn.model import CrystalGraphConvNet, freeze_lower_encoder, set_frozen_encoder_parts_to_eval
+from cgcnn.data import collate_pool, get_train_val_test_loader, \
+    get_fold_indices, get_train_val_test_loader_from_folds
+from cgcnn.model import CrystalGraphConvNet, \
+    freeze_lower_encoder, set_frozen_encoder_parts_to_eval
 
 parser = argparse.ArgumentParser(description='Crystal Graph Convolutional Neural Networks')
 parser.add_argument('data_options', metavar='OPTIONS', nargs='+',
@@ -104,6 +107,8 @@ parser.add_argument('--norm-sample', default=2000, type=int,
                     help='number of max samples to use to define normalizers')
 
 
+parser.add_argument('--fold', default=0, type=int, 
+                    help='use k-fold cross validation for val/test')
 parser.add_argument('--vec-source', default='graph', type=str,
                     help='choose a vectorization source: graph, point')
 parser.add_argument('--vector', default='none', type=str,
@@ -136,28 +141,42 @@ assert os.path.exists(task_filepath), 'Tasks file (tasks.pkl) does not exist!'
 with open(task_filepath, 'rb') as f:
     TASK_SPECS = pickle.load(f)
 
+CROSS_VAL = args.fold != 0
 best_errors = float('inf')
 
 
 def main():
     global args, best_errors
 
-    # ! CUSTOM
     if args.seed:
         torch.manual_seed(42)
     print("GPU Available", args.cuda)
 
     if args.delete and args.resume == '':
+        file_names = [f for f in os.listdir('.') if os.path.isfile(os.path.join('.', f))]
+
         check_path = f"./checkpoint_{args.id}.pth.tar"
-        model_path = f"./model_best_{args.id}.pth.tar"
+        # model_path = f"./model_best_{args.id}.pth.tar"
+        model_paths = [
+            f"./{f}" for f in file_names 
+            if f.startswith(f"./model_best_{args.id}")
+            and f.endswith(".pth.tar")
+        ]
+        # f"model_best_{args.id}_fold_{fold_it}.pth.tar"
         stat_path = f"./test_stats_{args.id}.csv"
         param_paths = f"./test_params_{args.id}.txt"
-        result_paths = [f"./test_results_{args.id}_{prop}.csv" for prop in TASK_SPECS.keys()]
+        result_paths = [
+            f"./{f}" for f in file_names
+            if f.startswith(f"./test_results_{args.id}")
+            and f.endswith(".csv")
+        ]
+        # result_paths = [f"./test_results_{args.id}_{prop}.csv" for prop in TASK_SPECS.keys()]
         
         if os.path.exists(check_path):
             os.remove(check_path)
-        if os.path.exists(model_path):
-            os.remove(model_path)
+        for model_path in model_paths:
+            if os.path.exists(model_path):
+                os.remove(model_path)
         if os.path.exists(stat_path):
             os.remove(stat_path)
         if os.path.exists(param_paths):
@@ -173,6 +192,8 @@ def main():
     assert args.resume == '' or args.finetune == '', "Choose one of resume or finetune!"
     assert args.val_metric in ['error', 'loss']
     assert args.vec_source in ['graph', 'point']
+    assert not CROSS_VAL or args.train != 'pretrain',\
+        "[STOP] Should not run k-fold cross validation on pretrain dataset!"
 
     # load data
     if args.debug:
@@ -186,202 +207,268 @@ def main():
     )
     collate_fn = collate_pool
 
-    if args.debug:
-        print("Constructing train/val/test loaders")
-    train_loader, val_loader, test_loader = get_train_val_test_loader(
-        dataset=dataset,
-        collate_fn=collate_fn,
-        batch_size=args.batch_size,
-        train_ratio=args.train_ratio,
-        num_workers=args.workers,
-        val_ratio=args.val_ratio,
-        test_ratio=args.test_ratio,
-        pin_memory=args.cuda,
-        train_size=args.train_size,
-        val_size=args.val_size,
-        test_size=args.test_size,
-        return_test=True,
-        # ! below causes constantly increasing memory
-        # persistent_workers=True
-    )
-    
-    # ! multitask normalizers
-    if args.debug:
-        print("Normalizer train sample size 2000")
-    # sampler_indices = list(train_loader.sampler)
-    # train_dataset = Subset(dataset, sampler_indices)
-    # train_data_list = [train_dataset[i] for i in tqdm(range(len(train_dataset)))]
-    # _, _, _, sample_target, sample_mask, _ = collate_pool(train_data_list)
-    
-    train_indices = list(train_loader.sampler)
-    sample_cnt = min(len(train_indices), args.norm_sample)
-    sample_indices = sample(train_indices, k=sample_cnt)
-    sample_data_list = [dataset[i] for i in tqdm(sample_indices, desc="Normalizers: ")]
-    _, _, _, sample_target, sample_mask, _ = collate_pool(sample_data_list)
-
-    normalizers = dict()
-    for prop, value in TASK_SPECS.items():
-        if value['head'] in ['binary', 'multiclass']:
-            normalizer = NormalizerProp(torch.zeros(2))
-            normalizer.load_state_dict({'mean': 0., 'std': 1.})
-        elif value['head'] in ['regression']:
-            normalizer = NormalizerProp(sample_target[prop], mask=sample_mask[prop])
-        else:
-            raise ValueError(f"[Normalizer] Unknown task {value['head']}")
-        normalizers[prop] = normalizer
-
-    # build model
-    if args.debug:
-        print("Instantiating model")
-    structures, _, _, _, _, _ = dataset[0]
-    orig_atom_fea_len = structures[0].shape[-1]
-    nbr_fea_len = structures[1].shape[-1]
-    model = CrystalGraphConvNet(
-        orig_atom_fea_len, nbr_fea_len,
-        atom_fea_len=args.atom_fea_len,
-        n_conv=args.n_conv,
-        h_fea_len=args.h_fea_len,
-        n_h=args.n_h,
-        # classification=True if args.task == 'classification' else False, 
-        # num_classes=args.num_classes, 
-        # ! vector layer arguments
-        vec_fea_len=args.vec_fea_len, 
-        n_vec=args.n_vec,
-        n_o=args.n_o,
-        # ! vectorization arguments
-        vec_source=args.vec_source,
-        vector=args.vector,
-        weight=args.weight,
-        phi=args.phi,
-        dims=args.dims,
-        root_dir=args.data_options,
-        task_specs=TASK_SPECS,
-    )
-
-    # ! if fine-tune, freeze lower encoder layers
-    if args.train in ['abs', 'plqy']:
-        assert args.finetune != ''
-
-        # load checkpoint encoder weights
-        if not os.path.isfile(args.finetune):
-            raise ValueError(f"=> no pretrained checkpoint found at '{args.finetune}'")
-        print(f"=> Loading pretrained checkpoint '{args.finetune}'")
-
-        # load checkpoint from file
-        checkpoint = torch.load(args.finetune, weights_only=True)     # may set weights to Falseff
-
-        # isolate encoder state dict
-        if not any(k.startswith("encoder.") for k in checkpoint['state_dict']):
-            raise ValueError(f"Pretrained checkpoint model contains no encoder state_dict")
-        encoder_state_dict = {
-            k[len("encoder."):]: v
-            for k, v in checkpoint['state_dict'].items()
-            if k.startswith("encoder.")
-        }
+    if args.fold == 0:
+        # regular training
         if args.debug:
-            print("Encoder state dict KEYS:")
-            print(encoder_state_dict.keys())
-
-        # load encoder with checkpoint weights
-        model.encoder.load_state_dict(
-            encoder_state_dict, 
-            strict=True
+            print("Constructing train/val/test loaders")
+        train_loader, val_loader, test_loader = get_train_val_test_loader(
+            dataset=dataset,
+            collate_fn=collate_fn,
+            batch_size=args.batch_size,
+            train_ratio=args.train_ratio,
+            num_workers=args.workers,
+            val_ratio=args.val_ratio,
+            test_ratio=args.test_ratio,
+            pin_memory=args.cuda,
+            train_size=args.train_size,
+            val_size=args.val_size,
+            test_size=args.test_size,
+            return_test=True,
+            # ! below causes constantly increasing memory
+            # persistent_workers=True
         )
-        print(f"=> loaded checkpoint '{args.finetune}' encoder")
-        freeze_lower_encoder(model=model, freeze_vectors=args.freeze_vectors)
-
-    # ! updated tensor cuda code
-    if args.debug:
-        print(f"Moving model to {device}")
-    model = model.to(device)
-
-    # ! moving torchPerslay inner params to cuda
-    if args.vector == 'perslay':
-        for perslay in model.perslays:
-            perslay.phi.mu = perslay.phi.mu.to(device)
-            perslay.phi.M = tuple(m.to(device) for m in perslay.phi.M)
-
-    # define loss func and optimizer
-    # ! CUSTOM LOSS FUNCTION
-    if args.debug:
-        print("Instantiating custom loss function")
-    criterion = MultiTaskLoss(device)
-            
-    if args.optim == 'SGD':
-        optimizer = optim.SGD(model.parameters(), args.lr,
-                              momentum=args.momentum,
-                              weight_decay=args.weight_decay)
-    elif args.optim == 'Adam':
-        optimizer = optim.Adam(model.parameters(), args.lr,
-                               weight_decay=args.weight_decay)
     else:
-        raise NameError('Only SGD or Adam is allowed as --optim')
-
-    # optionally resume from a checkpoint
-    if args.resume:
-        if os.path.isfile(args.resume):
-            print("=> loading checkpoint '{}'".format(args.resume))
-            # ! TRUSTED SOURCE
-            checkpoint = torch.load(args.resume, weights_only=False)
-            args.start_epoch = checkpoint['epoch']
-            best_errors = checkpoint['best_errors']
-            model.load_state_dict(checkpoint['state_dict'])
-            optimizer.load_state_dict(checkpoint['optimizer'])
-            # normalizer.load_state_dict(checkpoint['normalizer'])
-            for prop in normalizers.keys():
-                normalizers[prop].load_state_dict(checkpoint['normalizer'][prop])
-            print("=> loaded checkpoint '{}' (epoch {})"
-                  .format(args.resume, checkpoint['epoch']))
-        else:
-            print("=> no checkpoint found at '{}'".format(args.resume))
-
-    scheduler = MultiStepLR(optimizer, milestones=args.lr_milestones,
-                            gamma=0.1)
-
-    if args.debug:
-        print("Starting training epochs")
-    for epoch in tqdm(range(args.start_epoch, args.epochs), desc='Epochs: ', disable=args.debug):
-        # train for one epoch
         if args.debug:
-            print(f"Training epoch {epoch}")
-        train(train_loader, model, criterion, optimizer, epoch, normalizers)
-
-        # evaluate on validation set
-        if args.debug:
-            print("Validating")
-        val_error, val_loss = validate(val_loader, model, criterion, normalizers)
-
-        if args.val_metric == 'error':
-            cur_errors = val_error
+            print(f"Constructing {args.fold} folds")
+        # train/val/test loaders are constructed within fold loop
+        folds = get_fold_indices(
+            dataset=dataset, 
+            k=args.fold,
+        )
+    
+    # ! ADJUST FOR FOLD ITERATIONS (should be one pass if fold = 0)
+    # average results for all folds (or same as val results for fold = 0)
+    best_epochs = []
+    total_losses = AverageMeter()
+    total_errors = AverageMeter()
+    total_stats = dict()
+    for prop, value in TASK_SPECS.items():
+        total_stats[prop] = dict()
+        total_stats[prop]['loss'] = AverageMeter()
+        if value['head'] in ['binary', 'multiclass']:
+            total_stats[prop]['accuracies'] = AverageMeter()
+            total_stats[prop]['precisions'] = AverageMeter()
+            total_stats[prop]['recalls'] = AverageMeter()
+            total_stats[prop]['fscores'] = AverageMeter()
+            total_stats[prop]['auc_scores'] = AverageMeter()
+        elif value['head'] == 'regression':
+            total_stats[prop]['nrmse_errors'] = AverageMeter()
         else:
-            cur_errors = val_loss
+            raise ValueError(f"[TRAIN STATS] Unknown task {value['head']}")
 
-        if cur_errors != cur_errors:
-            print('Exit due to NaN')
-            sys.exit(1)
+    fold_num = args.fold if CROSS_VAL else 1
+    for fold_it in range(fold_num):
+        if CROSS_VAL:
+            print(f"--------FOLD {fold_it}--------")
+            if args.debug:
+                print(f"Constructing train/val/test loaders for {fold_num} folds")
+            train_loader, val_loader, test_loader = get_train_val_test_loader_from_folds(
+                dataset=dataset,
+                folds=folds, 
+                test_fold_idx=fold_it,
+                collate_fn=collate_fn,
+                batch_size=args.batch_size,
+                num_workers=args.workers,
+                pin_memory=args.cuda,
+            )
+        
+        if args.debug:
+            print("Normalizer train sample size 2000")    
+        train_indices = list(train_loader.sampler)
+        sample_cnt = min(len(train_indices), args.norm_sample)
+        sample_indices = sample(train_indices, k=sample_cnt)
+        sample_data_list = [dataset[i] for i in tqdm(sample_indices, desc="Normalizers: ")]
+        _, _, _, sample_target, sample_mask, _ = collate_pool(sample_data_list)
 
-        scheduler.step()
+        normalizers = dict()
+        for prop, value in TASK_SPECS.items():
+            if value['head'] in ['binary', 'multiclass']:
+                normalizer = NormalizerProp(torch.zeros(2))
+                normalizer.load_state_dict({'mean': 0., 'std': 1.})
+            elif value['head'] in ['regression']:
+                normalizer = NormalizerProp(sample_target[prop], mask=sample_mask[prop])
+            else:
+                raise ValueError(f"[Normalizer] Unknown task {value['head']}")
+            normalizers[prop] = normalizer
 
-        # remember the best error and save checkpoint
-        is_best = cur_errors < best_errors and epoch > 10
-        best_errors = min(cur_errors, best_errors) if epoch > 10 else best_errors
-        save_checkpoint({
-            'epoch': epoch + 1,
-            'state_dict': model.state_dict(),
-            'best_errors': best_errors,
-            'optimizer': optimizer.state_dict(),
-            'normalizer': {prop: normalizers[prop].state_dict()
-                           for prop in normalizers.keys()},
-            'args': vars(args)
-        }, is_best)
+        # build model
+        if args.debug:
+            print("Instantiating model")
+        structures, _, _, _, _, _ = dataset[0]
+        orig_atom_fea_len = structures[0].shape[-1]
+        nbr_fea_len = structures[1].shape[-1]
+        model = CrystalGraphConvNet(
+            orig_atom_fea_len, nbr_fea_len,
+            atom_fea_len=args.atom_fea_len,
+            n_conv=args.n_conv,
+            h_fea_len=args.h_fea_len,
+            n_h=args.n_h,
+            # ! vector layer arguments
+            vec_fea_len=args.vec_fea_len, 
+            n_vec=args.n_vec,
+            n_o=args.n_o,
+            # ! vectorization arguments
+            vec_source=args.vec_source,
+            vector=args.vector,
+            weight=args.weight,
+            phi=args.phi,
+            dims=args.dims,
+            # ! miscellaneous arguments
+            root_dir=args.data_options,
+            task_specs=TASK_SPECS,
+        )
 
-    # test best model
-    if args.debug:
-        print('---------------Evaluate Model on Test Set---------------')
-    # ! PyTorch 2.6 safety measure: only load model weights -> extra argument
-    best_checkpoint = torch.load(f'model_best_{args.id}.pth.tar', weights_only=False)
-    model.load_state_dict(best_checkpoint['state_dict'])
-    validate(test_loader, model, criterion, normalizers, epoch=best_checkpoint['epoch'], test=True)
+        # ! if fine-tune, freeze lower encoder layers
+        if args.train in ['abs', 'plqy']:
+            assert args.finetune != ''
+
+            # load checkpoint encoder weights
+            if not os.path.isfile(args.finetune):
+                raise ValueError(f"=> no pretrained checkpoint found at '{args.finetune}'")
+            print(f"=> Loading pretrained checkpoint '{args.finetune}'")
+
+            # load checkpoint from file
+            checkpoint = torch.load(args.finetune, weights_only=True)     # may set weights to Falseff
+
+            # isolate encoder state dict
+            if not any(k.startswith("encoder.") for k in checkpoint['state_dict']):
+                raise ValueError(f"Pretrained checkpoint model contains no encoder state_dict")
+            encoder_state_dict = {
+                k[len("encoder."):]: v
+                for k, v in checkpoint['state_dict'].items()
+                if k.startswith("encoder.")
+            }
+            if args.debug:
+                print("Encoder state dict KEYS:")
+                print(encoder_state_dict.keys())
+
+            # load encoder with checkpoint weights
+            model.encoder.load_state_dict(
+                encoder_state_dict, 
+                strict=True
+            )
+            print(f"=> loaded checkpoint '{args.finetune}' encoder")
+            freeze_lower_encoder(model=model, freeze_vectors=args.freeze_vectors)
+
+        # ! updated tensor cuda code
+        if args.debug:
+            print(f"Moving model to {device}")
+        model = model.to(device)
+
+        # ! moving torchPerslay inner params to cuda
+        if args.vector == 'perslay':
+            for perslay in model.perslays:
+                perslay.phi.mu = perslay.phi.mu.to(device)
+                perslay.phi.M = tuple(m.to(device) for m in perslay.phi.M)
+
+        # define loss func and optimizer
+        # should move loss function outside of fold loop, but whatever
+        # ! CUSTOM LOSS FUNCTION 
+        if args.debug:
+            print("Instantiating custom loss function")
+        criterion = MultiTaskLoss(device)
+                
+        if args.optim == 'SGD':
+            optimizer = optim.SGD(model.parameters(), args.lr,
+                                momentum=args.momentum,
+                                weight_decay=args.weight_decay)
+        elif args.optim == 'Adam':
+            optimizer = optim.Adam(model.parameters(), args.lr,
+                                weight_decay=args.weight_decay)
+        else:
+            raise NameError('Only SGD or Adam is allowed as --optim')
+
+        # optionally resume from a checkpoint
+        if not CROSS_VAL and args.resume:
+            if os.path.isfile(args.resume):
+                print("=> loading checkpoint '{}'".format(args.resume))
+                # ! TRUSTED SOURCE
+                checkpoint = torch.load(args.resume, weights_only=False)
+                args.start_epoch = checkpoint['epoch']
+                best_errors = checkpoint['best_errors']
+                model.load_state_dict(checkpoint['state_dict'])
+                optimizer.load_state_dict(checkpoint['optimizer'])
+                # normalizer.load_state_dict(checkpoint['normalizer'])
+                for prop in normalizers.keys():
+                    normalizers[prop].load_state_dict(checkpoint['normalizer'][prop])
+                print("=> loaded checkpoint '{}' (epoch {})"
+                    .format(args.resume, checkpoint['epoch']))
+            else:
+                print("=> no checkpoint found at '{}'".format(args.resume))
+
+        scheduler = MultiStepLR(optimizer, milestones=args.lr_milestones,
+                                gamma=0.1)
+
+        if args.debug:
+            print("Starting training epochs")
+        for epoch in tqdm(range(args.start_epoch, args.epochs), desc='Epochs: ', disable=args.debug):
+            # train for one epoch
+            if args.debug:
+                print(f"Training epoch {epoch}")
+            train(train_loader, model, criterion, optimizer, epoch, normalizers)
+
+            # evaluate on validation set
+            if args.debug:
+                print("Validating")
+            val_error, val_loss, _ = validate(val_loader, model, criterion, normalizers)
+
+            if args.val_metric == 'error':
+                cur_errors = val_error
+            else:
+                cur_errors = val_loss
+
+            if cur_errors != cur_errors:
+                print('Exit due to NaN')
+                sys.exit(1)
+
+            scheduler.step()
+
+            # remember the best error and save checkpoint
+            is_best = cur_errors < best_errors and epoch > 10
+            best_errors = min(cur_errors, best_errors) if epoch > 10 else best_errors
+            save_checkpoint({
+                'epoch': epoch + 1,
+                'state_dict': model.state_dict(),
+                'best_errors': best_errors,
+                'optimizer': optimizer.state_dict(),
+                'normalizer': {prop: normalizers[prop].state_dict()
+                            for prop in normalizers.keys()},
+                'args': vars(args)
+            }, is_best, fold_it=fold_it)
+
+        # test best model
+        if args.debug:
+            print('---------------Evaluate Model on Test Set---------------')
+        # ! PyTorch 2.6 safety measure: only load model weights -> extra argument
+        
+        if CROSS_VAL:
+            best_checkpoint_path = f"model_best_{args.id}_fold_{fold_it}.pth.tar"
+        else:
+            best_checkpoint_path = f'model_best_{args.id}.pth.tar'
+
+        best_checkpoint = torch.load(best_checkpoint_path, weights_only=False)
+        best_epochs.append(best_checkpoint['epoch'])
+        model.load_state_dict(best_checkpoint['state_dict'])
+
+        test_loss, test_error, stat_dict = validate(
+            test_loader, model, criterion, normalizers, 
+            best_epoch=best_checkpoint['epoch'], 
+            test=True
+        )
+        # saving validation stats to total stats
+        total_losses.update(test_loss)
+        total_errors.update(test_error)
+        for prop, value in TASK_SPECS.items():
+            for stat, avg_meter in stat_dict[prop]:
+                total_stats[prop][stat].update(avg_meter.avg)
+    
+    # ! save results
+    save_results(
+        best_epochs=best_epochs, 
+        total_loss=total_losses.avg, 
+        total_error=total_errors.avg,
+        stats_dict=total_stats
+    )
 
 
 def train(train_loader, model, criterion, optimizer, epoch, normalizers):
@@ -526,7 +613,7 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers):
                     raise ValueError(f"[STAT PRINT] Unrecognized task {TASK_SPECS[prop]['head']}")
             
 
-def validate(val_loader, model, criterion, normalizers, epoch=0, test=False):
+def validate(val_loader, model, criterion, normalizers, best_epoch=0, test=False):
     batch_time = AverageMeter()
     # ! stat trackers for each metric per head
     losses = AverageMeter()
@@ -702,6 +789,7 @@ def validate(val_loader, model, criterion, normalizers, epoch=0, test=False):
                 else:
                     raise ValueError(f"[STAT PRINT] Unrecognized task {TASK_SPECS[prop]['head']}")
     
+    # finished validation testing    
     if args.debug:
         print('Final Test\tLoss {loss.val:.4f} ({loss.avg:.4f})'.format(loss=losses))
         for prop, values in stats.items():
@@ -747,55 +835,58 @@ def validate(val_loader, model, criterion, normalizers, epoch=0, test=False):
     
     overall_error = w_cls * cls_error.avg + w_reg + reg_error.avg
 
-    if test:
-        if args.debug:
-            print("Saving test stats/results")
-        
-        star_label = '**'
+    if not CROSS_VAL and test:
+        save_results(
+            best_epoch=[best_epoch], 
+            total_loss=losses.avg, 
+            total_error=overall_error.item(),
+            stats_dict=stats,
+        )
+        # if args.debug:
+        #     print("Saving test stats/results")
 
-        with open(f'test_params_{args.id}.txt', 'w') as f:
-            f.write(f'Source:\t\t\t{args.vec_source}\nVector:\t\t\t{args.vector}')
-            f.write(f'\nAtom Len:\t\t{args.atom_fea_len}\nConv Num:\t\t{args.n_conv}')
-            f.write(f'\nHidden Len:\t\t{args.h_fea_len}\nHidden Num:\t\t{args.n_h}\nHead Layer Num:\t{args.n_o}')
-            f.write(f'\nVec Len:\t\t{args.vec_fea_len}\nVec Layer Num:\t{args.n_vec}')
-            f.write(f'\nBest Epoch:\t\t{epoch}')
+        # with open(f'test_params_{args.id}.txt', 'w') as f:
+        #     f.write(f'Source:\t\t\t{args.vec_source}\nVector:\t\t\t{args.vector}')
+        #     f.write(f'\nAtom Len:\t\t{args.atom_fea_len}\nConv Num:\t\t{args.n_conv}')
+        #     f.write(f'\nHidden Len:\t\t{args.h_fea_len}\nHidden Num:\t\t{args.n_h}\nHead Layer Num:\t{args.n_o}')
+        #     f.write(f'\nVec Len:\t\t{args.vec_fea_len}\nVec Layer Num:\t{args.n_vec}')
+        #     f.write(f'\nBest Epoch:\t\t{best_epoch}')
         
-        import csv
-        # ! saving stats for each prop
-        with open(f'test_stats_{args.id}.csv', 'w', newline='', encoding='utf-8') as file_stats:
-            writer = csv.writer(file_stats)
-            header = ['head', 'task', 'loss', 'nrmse', 'accuracy', 'precision', 'recall', 'f1', 'auroc']
-            writer.writerow(header)
-            writer.writerow(['total', overall_error, losses.avg, '', '', '', '', '', ''])
+        # # ! saving stats for each prop
+        # with open(f'test_stats_{args.id}.csv', 'w', newline='', encoding='utf-8') as file_stats:
+        #     writer = csv.writer(file_stats)
+        #     header = ['head', 'task', 'loss', 'nrmse', 'accuracy', 'precision', 'recall', 'f1', 'auroc']
+        #     writer.writerow(header)
+        #     writer.writerow(['total', overall_error, losses.avg, '', '', '', '', '', ''])
                     
-            for prop, values in stats.items():
-                if TASK_SPECS[prop]['head'] in ['binary', 'multiclass']:
-                    row = [
-                        prop, 
-                        TASK_SPECS[prop]['head'], 
-                        values['loss'].avg, 
-                        '', 
-                        values['accuracies'].avg, 
-                        values['precisions'].avg, 
-                        values['recalls'].avg, 
-                        values['fscores'].avg, 
-                        values['auc_scores'].avg
-                    ]
-                elif TASK_SPECS[prop]['head'] == 'regression':
-                    row = [
-                        prop, 
-                        TASK_SPECS[prop]['head'], 
-                        values['loss'].avg, 
-                        values['nrmse_errors'].avg.item(), 
-                        '', 
-                        '', 
-                        '', 
-                        '', 
-                        ''
-                    ]
-                else:
-                    raise ValueError(f"[STAT CSV] Unrecognized task {TASK_SPECS[prop]['head']}")
-                writer.writerow(row)
+        #     for prop, values in stats.items():
+        #         if TASK_SPECS[prop]['head'] in ['binary', 'multiclass']:
+        #             row = [
+        #                 prop, 
+        #                 TASK_SPECS[prop]['head'], 
+        #                 values['loss'].avg, 
+        #                 '', 
+        #                 values['accuracies'].avg, 
+        #                 values['precisions'].avg, 
+        #                 values['recalls'].avg, 
+        #                 values['fscores'].avg, 
+        #                 values['auc_scores'].avg
+        #             ]
+        #         elif TASK_SPECS[prop]['head'] == 'regression':
+        #             row = [
+        #                 prop, 
+        #                 TASK_SPECS[prop]['head'], 
+        #                 values['loss'].avg, 
+        #                 values['nrmse_errors'].avg.item(), 
+        #                 '', 
+        #                 '', 
+        #                 '', 
+        #                 '', 
+        #                 ''
+        #             ]
+        #         else:
+        #             raise ValueError(f"[STAT CSV] Unrecognized task {TASK_SPECS[prop]['head']}")
+        #         writer.writerow(row)
         
         # ! saving results for each prop
         for prop, values in test_stats.items():
@@ -820,7 +911,7 @@ def validate(val_loader, model, criterion, normalizers, epoch=0, test=False):
                     header = ['mp-id', 'mask', 'target', 'predicted_value']
                     writer.writerow(header)
 
-                    for cif_id, mask,  target, pred in zip(
+                    for cif_id, mask, target, pred in zip(
                         values['test_cif_ids'], 
                         values['test_masks'],
                         values['test_targets'], 
@@ -829,15 +920,67 @@ def validate(val_loader, model, criterion, normalizers, epoch=0, test=False):
                         writer.writerow([cif_id, mask, target, pred])
                 else:
                     raise ValueError(f"[TEST CSV] Unrecognized task {TASK_SPECS[prop]['head']}")
-    else:
-        star_label = '*'
 
     if args.debug:
         print(f'\n Model -- \tVector: {args.vector}\tAtom Len: {args.atom_fea_len}\tConv Num: {args.n_conv}\tHidden Len: {args.h_fea_len}\tHidden Num: {args.n_h}')
         print(f'\t\tHead Layer Num: {args.n_o}\tVec Len: {args.vec_fea_len}\tVec Layer Num: {args.n_vec}')
         
-        print(' {star} ERROR {error:.3f}'.format(star=star_label, error=overall_error))
-    return overall_error, losses.avg
+        print(' ** ERROR {error:.3f}'.format(error=overall_error))
+    return overall_error, losses.avg, stats
+
+
+def save_results(
+        best_epochs: list, 
+        total_loss, 
+        total_error,
+        stats_dict
+):
+    if args.debug:
+        print("Saving test results and stats as CSV")
+
+    with open(f'test_params_{args.id}.txt', 'w') as f:
+        f.write(f'Source:\t\t\t{args.vec_source}\nVector:\t\t\t{args.vector}')
+        f.write(f'\nAtom Len:\t\t{args.atom_fea_len}\nConv Num:\t\t{args.n_conv}')
+        f.write(f'\nHidden Len:\t\t{args.h_fea_len}\nHidden Num:\t\t{args.n_h}\nHead Layer Num:\t{args.n_o}')
+        f.write(f'\nVec Len:\t\t{args.vec_fea_len}\nVec Layer Num:\t{args.n_vec}')
+        f.write(f'\nBest Epochs:\t\t{", ".join(best_epochs)}')
+    
+    import csv
+    # ! saving stats for each prop
+    with open(f'test_stats_{args.id}.csv', 'w', newline='', encoding='utf-8') as file_stats:
+        writer = csv.writer(file_stats)
+        header = ['head', 'task', 'loss', 'nrmse', 'accuracy', 'precision', 'recall', 'f1', 'auroc']
+        writer.writerow(header)
+        writer.writerow(['total', total_error, total_loss, '', '', '', '', '', ''])
+                
+        for prop, values in stats_dict.items():
+            if TASK_SPECS[prop]['head'] in ['binary', 'multiclass']:
+                row = [
+                    prop, 
+                    TASK_SPECS[prop]['head'], 
+                    values['loss'].avg, 
+                    '', 
+                    values['accuracies'].avg, 
+                    values['precisions'].avg, 
+                    values['recalls'].avg, 
+                    values['fscores'].avg, 
+                    values['auc_scores'].avg
+                ]
+            elif TASK_SPECS[prop]['head'] == 'regression':
+                row = [
+                    prop, 
+                    TASK_SPECS[prop]['head'], 
+                    values['loss'].avg, 
+                    values['nrmse_errors'].avg.item(), 
+                    '', 
+                    '', 
+                    '', 
+                    '', 
+                    ''
+                ]
+            else:
+                raise ValueError(f"[STAT CSV] Unrecognized task {TASK_SPECS[prop]['head']}")
+            writer.writerow(row)
     
 
 class NormalizerProp(object):
@@ -965,10 +1108,14 @@ class AverageMeter(object):
         self.avg = self.sum / self.count if self.count != 0 else 0
 
 
-def save_checkpoint(state, is_best, filename=f'checkpoint_{args.id}.pth.tar'):
+def save_checkpoint(state, is_best, fold_it, filename=f'checkpoint_{args.id}.pth.tar'):
     torch.save(state, filename)
     if is_best:
-        shutil.copyfile(filename, f"model_best_{args.id}.pth.tar")
+        if CROSS_VAL:
+            best_filename = f"model_best_{args.id}_fold_{fold_it}.pth.tar"
+        else:
+            best_filename = f"model_best_{args.id}.pth.tar"
+        shutil.copyfile(filename, best_filename)
 
 
 def adjust_learning_rate(optimizer, epoch, k):

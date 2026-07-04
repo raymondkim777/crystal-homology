@@ -263,7 +263,6 @@ class CrystalGraphConvNet(nn.Module):
             self, orig_atom_fea_len, nbr_fea_len,
             atom_fea_len=64, n_conv=3, h_fea_len=128, n_h=1,
             vec_fea_len=64, n_vec=1, n_o=1,
-            # classification=False, num_classes=2,
             vec_source='graph', vector='none', weight='none', phi='none',
             dims=3, root_dir='data/graph_data', task_specs=None,
     ):
