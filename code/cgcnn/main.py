@@ -142,7 +142,6 @@ with open(task_filepath, 'rb') as f:
     TASK_SPECS = pickle.load(f)
 
 CROSS_VAL = args.fold != 0
-best_errors = float('inf')
 
 
 def main():
@@ -159,7 +158,7 @@ def main():
         # model_path = f"./model_best_{args.id}.pth.tar"
         model_paths = [
             f"./{f}" for f in file_names 
-            if f.startswith(f"./model_best_{args.id}")
+            if f.startswith(f"model_best_{args.id}")
             and f.endswith(".pth.tar")
         ]
         # f"model_best_{args.id}_fold_{fold_it}.pth.tar"
@@ -167,7 +166,7 @@ def main():
         param_paths = f"./test_params_{args.id}.txt"
         result_paths = [
             f"./{f}" for f in file_names
-            if f.startswith(f"./test_results_{args.id}")
+            if f.startswith(f"test_results_{args.id}")
             and f.endswith(".csv")
         ]
         # result_paths = [f"./test_results_{args.id}_{prop}.csv" for prop in TASK_SPECS.keys()]
@@ -256,10 +255,14 @@ def main():
         else:
             raise ValueError(f"[TRAIN STATS] Unknown task {value['head']}")
 
+    # k-fold cross validation
     fold_num = args.fold if CROSS_VAL else 1
     for fold_it in range(fold_num):
+
+        best_errors = float('inf')
+
         if CROSS_VAL:
-            print(f"--------FOLD {fold_it}--------")
+            print(f"\n--------FOLD {fold_it + 1}--------")
             if args.debug:
                 print(f"Constructing train/val/test loaders for {fold_num} folds")
             train_loader, val_loader, test_loader = get_train_val_test_loader_from_folds(
@@ -459,7 +462,7 @@ def main():
         total_losses.update(test_loss)
         total_errors.update(test_error)
         for prop, value in TASK_SPECS.items():
-            for stat, avg_meter in stat_dict[prop]:
+            for stat, avg_meter in stat_dict[prop].items():
                 total_stats[prop][stat].update(avg_meter.avg)
     
     # ! save results
@@ -837,7 +840,7 @@ def validate(val_loader, model, criterion, normalizers, best_epoch=0, test=False
 
     if not CROSS_VAL and test:
         save_results(
-            best_epoch=[best_epoch], 
+            best_epochs=[best_epoch], 
             total_loss=losses.avg, 
             total_error=overall_error.item(),
             stats_dict=stats,
@@ -943,7 +946,7 @@ def save_results(
         f.write(f'\nAtom Len:\t\t{args.atom_fea_len}\nConv Num:\t\t{args.n_conv}')
         f.write(f'\nHidden Len:\t\t{args.h_fea_len}\nHidden Num:\t\t{args.n_h}\nHead Layer Num:\t{args.n_o}')
         f.write(f'\nVec Len:\t\t{args.vec_fea_len}\nVec Layer Num:\t{args.n_vec}')
-        f.write(f'\nBest Epochs:\t\t{", ".join(best_epochs)}')
+        f.write(f'\nBest Epochs:\t\t{", ".join(list(map(str, best_epochs)))}')
     
     import csv
     # ! saving stats for each prop
