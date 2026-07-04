@@ -13,6 +13,8 @@ import networkx as nx
 import torch
 import torch.nn as nn
 from pymatgen.core.structure import Structure
+from pymatgen.core.periodic_table import Element
+from pymatgen.core.composition import Composition
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.dataloader import default_collate
 from torch.utils.data.sampler import SubsetRandomSampler
@@ -400,7 +402,7 @@ class GraphData(Dataset):
             root_dir, 
             max_num_nbr=36, 
             dmin=0, 
-            dmax=17,  # 16.719527690689166
+            dmax=16,  # 15.42974841
             step=0.2,
             random_seed=42,
             vec_source='graph', 
@@ -408,7 +410,7 @@ class GraphData(Dataset):
             dims=3,
             task_specs=None,
     ):
-        self.root_dir = root_dir  # cgcnn/data/graph_data
+        self.root_dir = root_dir  # cgcnn/data/<folder>
         self.max_num_nbr = max_num_nbr
         self.task_specs = task_specs
         assert os.path.exists(root_dir), 'root_dir does not exist!'
@@ -471,8 +473,8 @@ class GraphData(Dataset):
     
 
     @functools.lru_cache(maxsize=None)  # Cache computed attributes
-    def _load_graph_dict(self, mp_id):
-        with open(os.path.join(self.root_dir, "graphs", f"mp-{mp_id}.pkl"), 'rb') as file:
+    def _load_struct_dict(self, cif_id):
+        with open(os.path.join(self.root_dir, "structs", f"mp-{cif_id}.pkl"), 'rb') as file:
             return pickle.load(file)
 
 
@@ -480,19 +482,55 @@ class GraphData(Dataset):
     def __getitem__(self, idx):
         cif_id = self.id_prop_data[idx][0][0]
 
+        # ! multitask targets
+        target_list = list(self.id_prop_data[idx][0][1:])
+        mask_list = list(self.id_prop_data[idx][1][1:])
+        # print("target list:", target_list)
+        # print("mask list:", mask_list)
 
+        targets, mask = dict(), dict()
+        for i in range(len(self.predict_list)):
+            task_type = self.task_specs[self.predict_list[i]]['head']
+            if task_type in ['binary', 'multiclass']:
+                targets[self.predict_list[i]] = torch.tensor([target_list[i]]).long()
+            elif task_type == 'regression':
+                targets[self.predict_list[i]] = torch.tensor([target_list[i]]).float()
+            else:
+                raise ValueError(f'[CIFData] unrecognized target task {task_type}')
+            mask[self.predict_list[i]] = torch.tensor([mask_list[i]]).bool()
 
+        struct_dict = self._load_struct_dict(cif_id)
+        crystal = struct_dict['structure']
 
-
-        # cif_id, target = self.id_prop_data[idx]
-        # ! disable structure warnings
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            crystal = Structure.from_file(os.path.join(self.root_dir,
-                                                   cif_id+'.cif'))
-        atom_fea = np.vstack([self.ari.get_atom_fea(crystal[i].specie.number)
+        ########################
+        # struct_dict format:
+        # {
+        #     structure: <structure>, 
+        #     system: <system>,
+        #     ... (additional properties if relevant)
+        # }
+        ########################
+        
+        if crystal.is_ordered:
+            atom_fea = np.vstack([self.ari.get_atom_fea(crystal[i].specie.number)
                               for i in range(len(crystal))])
-        atom_fea = torch.Tensor(atom_fea)
+        else:
+            atom_fea = []
+            for site in range(len(crystal)):
+                el_amt_dict = crystal[site].species.get_el_amt_dict()
+                if sum(el_amt_dict.values()) > 1.0:
+                    raise ValueError(f"[CIFData Struct Parse] total amount in site {site} > 1.0")
+                num_to_amt_dict = {
+                    Element(element).number: el_amt_dict[element]
+                    for element in el_amt_dict.keys()
+                }
+                site_embedding = np.sum((
+                    sp_w * self.ari.get_atom_fea(sp_n) 
+                    for sp_n, sp_w in num_to_amt_dict.items()
+                ), axis=0)
+                atom_fea.append(site_embedding)
+            atom_fea = np.vstack(atom_fea)
+
         all_nbrs = crystal.get_all_neighbors(self.radius, include_index=True)
         all_nbrs = [sorted(nbrs, key=lambda x: x[1]) for nbrs in all_nbrs]
         nbr_fea_idx, nbr_fea = [], []
@@ -514,39 +552,31 @@ class GraphData(Dataset):
                                         nbr[:self.max_num_nbr])))
         nbr_fea_idx, nbr_fea = np.array(nbr_fea_idx), np.array(nbr_fea)
         nbr_fea = self.gdf.expand(nbr_fea)
+
+        # ! vectorization & normalization (optional)
+        if self.vector == 'none':
+            vectorizations = np.array([])
+            diagrams = [torch.Tensor([]) for _ in range(self.dim_cnt)]
+        elif self.vector in ['image', 'landscape']:
+            vectorizations = np.hstack([self.vector_dict[f'mp-{cif_id}'][dim] for dim in range(self.dim_cnt)])
+            diagrams = [torch.Tensor([]) for _ in range(self.dim_cnt)]
+        elif self.vector == 'perslay':
+            # ! if perslay, then we pass in diagrams (each should be tensor)
+            vectorizations = np.array([])
+            diagrams = [torch.Tensor(self.vector_dict[f'mp-{cif_id}'][dim]) for dim in range(self.dim_cnt)]  # list of np.ndarrays
+
+        
+        # atom_fea = torch.Tensor(atom_fea)
+        # nbr_fea = torch.Tensor(nbr_fea)
+        # nbr_fea_idx = torch.LongTensor(nbr_fea_idx)
+        # target = torch.Tensor([float(target)])
+
         atom_fea = torch.Tensor(atom_fea)
         nbr_fea = torch.Tensor(nbr_fea)
         nbr_fea_idx = torch.LongTensor(nbr_fea_idx)
-        target = torch.Tensor([float(target)])
+        vectorizations = torch.Tensor(vectorizations)
+        return (atom_fea, nbr_fea, nbr_fea_idx), vectorizations, diagrams, targets, mask, cif_id
 
-
-
-
-
-
-
-
-
-
-        # ! multitask targets
-        target_list = list(self.id_prop_data[idx][0][1:])
-        mask_list = list(self.id_prop_data[idx][1][1:])
-        # print("target list:", target_list)
-        # print("mask list:", mask_list)
-
-        targets, mask = dict(), dict()
-        for i in range(len(self.predict_list)):
-            task_type = self.task_specs[self.predict_list[i]]['head']
-            if task_type in ['binary', 'multiclass']:
-                targets[self.predict_list[i]] = torch.tensor([target_list[i]]).long()
-            elif task_type == 'regression':
-                targets[self.predict_list[i]] = torch.tensor([target_list[i]]).float()
-            else:
-                raise ValueError(f'[GraphData] unrecognized target task {task_type}')
-            mask[self.predict_list[i]] = torch.tensor([mask_list[i]]).bool()
-
-        graph_dict = self._load_graph_dict(cif_id)
-        graph = graph_dict['graph']
 
         ########################
         # graph_dict format:

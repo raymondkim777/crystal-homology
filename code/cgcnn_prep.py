@@ -35,66 +35,60 @@ def _parse_args():
     return parser.parse_args()
 
 
-def unpack_system_graphs(data_dir, system):
+def unpack_system_structs(data_dir, system):
     # data_dir, system = args
-    with open(f'{data_dir}/graphs-multi/{system}.pkl', 'rb') as file:
-        graph_system_dict = pickle.load(file)
+    with open(f'{data_dir}/structs/{system}.pkl', 'rb') as file:
+        struct_system_dict = pickle.load(file)
 
-    for mp_id, graph in graph_system_dict.items():
-        structure_filename = f'{data_dir}/cif/{system}/{mp_id}.cif'
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            structure = get_structures_from_cif(structure_filename)[0]
-
-        graph_system_dict[mp_id] = {
-            'graph': graph.to_undirected(),     # UNDIRECTED (for message passing)
+    for cif_id, struct in struct_system_dict.items():
+        struct_system_dict[cif_id] = {
+            'structure': struct,
             'system': system, 
-            'lattice_matrix': structure.lattice.matrix,
+            'lattice_matrix': struct.lattice.matrix,
         }
     
-    return system, graph_system_dict
+    return system, struct_system_dict
 
 
-def unpack_all_graphs(data_dir) -> dict:
+def unpack_all_structs(data_dir) -> dict:
     num_workers = get_num_cpus()
-    graph_dict = dict()
+    struct_dict = dict()
 
     with ProcessPoolExecutor(max_workers=num_workers) as executor:
         futures = {
-            executor.submit(unpack_system_graphs, data_dir, system): system
+            executor.submit(unpack_system_structs, data_dir, system): system
             for system in CRYSTAL_SYSTEMS
         }
         for future in tqdm(as_completed(futures), total=len(futures), desc='Unpacking systems'):
-            system, graph_system_dict = future.result()
-            graph_dict.update(graph_system_dict)
-            print(f"\nFinished unpacking {system} system with {len(graph_system_dict)} graphs")
+            system, struct_system_dict = future.result()
+            struct_dict.update(struct_system_dict)
+            print(f"\nFinished unpacking {system} system with {len(struct_system_dict)} structures")
         # results = executor.map(unpack_system_graphs, CRYSTAL_SYSTEMS)
 
         # for system, graph_system_dict in tqdm(results, total=len(CRYSTAL_SYSTEMS)):
         #     graph_dict.update(graph_system_dict)
 
-    return graph_dict
+    return struct_dict
 
 
-def unpack_plqy_graphs():
-    graph_dict = dict()
-    for system in CRYSTAL_SYSTEMS:
+# def unpack_plqy_structs():
+#     struct_dict = dict()
+#     for system in CRYSTAL_SYSTEMS:
 
-        with open(f'{DATA_PLQY_DIRECTORY}/graphs-multi/{system}.pkl', 'rb') as file:
-            graph_system_dict = pickle.load(file)
+#         with open(f'{DATA_PLQY_DIRECTORY}/structs/{system}.pkl', 'rb') as file:
+#             struct_system_dict = pickle.load(file)
 
-        with open(f'{DATA_PLQY_DIRECTORY}/mp-plqy/{system}.pkl', 'rb') as file:
-            doc_system_dict = pickle.load(file)
+#         with open(f'{DATA_PLQY_DIRECTORY}/mp-plqy/{system}.pkl', 'rb') as file:
+#             doc_system_dict = pickle.load(file)
 
-        for mp_id, graph in graph_system_dict.items():
-            graph_system_dict[mp_id] = {
-                'graph': graph.to_undirected(),     # UNDIRECTED (for message passing)
-                'system': system, 
-                'lattice_matrix': doc_system_dict[mp_id]['structure'].lattice.matrix,
-            }
-        graph_dict.update(graph_system_dict)
-    return graph_dict
+#         for mp_id, graph in struct_system_dict.items():
+#             struct_system_dict[mp_id] = {
+#                 'graph': graph.to_undirected(),     # UNDIRECTED (for message passing)
+#                 'system': system, 
+#                 'lattice_matrix': doc_system_dict[mp_id]['structure'].lattice.matrix,
+#             }
+#         struct_dict.update(struct_system_dict)
+#     return struct_dict
 
 
 def collect_all_diagrams(data_dir):
@@ -376,49 +370,49 @@ def write_plqy_id_prop_mask():
         writer.writerows(csv_mask_data)
 
 
-def graph_process(abs=False, merge=False, plqy=False, vector=False):
+def move_process(abs=False, merge=False, plqy=False, vector=False):
     """
-    Saves all graphs with labeled crystal systems in CGCNN data folder. 
+    Saves all structures with labeled crystal systems in CGCNN data folder. 
     Computes and prints required bounds for GraphData.
-    Graph structure:
+    Structure structure:
     mp_id: {
-        graph: <graph>, 
+        structure: <structure>, 
         system: <system>,
         lattice_matrix: <structure.lattice.matrix>,
     }
     Optionally saves diagrams and vectorizations as pickle files in CGCNN data folder. 
     """
     # save pretrain data
-    print(f"\nUnpacking PRETRAIN graphs...")
-    graph_dict = unpack_all_graphs(DATA_PRE_DIRECTORY)
-
-    print(f"Saving PRETRAIN graph files to {CGCNN_PRE_DATAPATH}")
-    # save graphs to CGCNN data folder
-    for mp_id, value in tqdm(graph_dict.items()):
-        cgcnn_datapath = open_write_file(f"{CGCNN_PRE_DATAPATH}/graphs", f'{mp_id}.pkl')
+    print(f"\nUnpacking PRETRAIN structures...")
+    struct_dict = unpack_all_structs(DATA_PRE_DIRECTORY)
+    print(f"Saving PRETRAIN structure files to {CGCNN_PRE_DATAPATH}")
+    # save structures to CGCNN data folder
+    for cif_id, value in tqdm(struct_dict.items()):
+        cgcnn_datapath = open_write_file(f"{CGCNN_PRE_DATAPATH}/structs", f'{cif_id}.pkl')
         with open(cgcnn_datapath, 'wb') as f:
             pickle.dump(value, f)
 
     # save abs data if needed
     if abs:
-        print(f"\nUnpacking ABS graphs...")
-        graph_dict = unpack_all_graphs(DATA_ABS_DIRECTORY)
-        print(f"Saving ABS graph files to {CGCNN_ABS_DATAPATH}")
-        # save graphs to CGCNN data folder
-        for mp_id, value in tqdm(graph_dict.items()):
-            cgcnn_datapath = open_write_file(f"{CGCNN_ABS_DATAPATH}/graphs", f'{mp_id}.pkl')
+        print(f"\nUnpacking ABS structures...")
+        struct_dict = unpack_all_structs(DATA_ABS_DIRECTORY)
+        print(f"Saving ABS structure files to {CGCNN_ABS_DATAPATH}")
+        # save structures to CGCNN data folder
+        for cif_id, value in tqdm(struct_dict.items()):
+            cgcnn_datapath = open_write_file(f"{CGCNN_ABS_DATAPATH}/structs", f'{cif_id}.pkl')
             with open(cgcnn_datapath, 'wb') as f:
                 pickle.dump(value, f)
 
     # save PLQY data if needed
     if plqy:
-        print(f"\nUnpacking PLQY graphs...")
-        graph_dict = unpack_plqy_graphs()
-        print(f"Saving ABS graph files to {CGCNN_PLQY_DATAPATH}")
-        # save graphs to CGCNN data folder
-        for mp_id, value in tqdm(graph_dict.items()):
+        print(f"\nUnpacking PLQY structures...")
+        # struct_dict = unpack_plqy_structs()
+        struct_dict = unpack_all_structs(DATA_PLQY_DIRECTORY)
+        print(f"Saving PLQY structure files to {CGCNN_PLQY_DATAPATH}")
+        # save structures to CGCNN data folder
+        for cif_id, value in tqdm(struct_dict.items()):
             # ! NOTE: not actually Materials Project IDs, but need to be same string format
-            cgcnn_datapath = open_write_file(f"{CGCNN_PLQY_DATAPATH}/graphs", f'mp-{mp_id}.pkl')
+            cgcnn_datapath = open_write_file(f"{CGCNN_PLQY_DATAPATH}/structs", f'mp-{cif_id}.pkl')
             with open(cgcnn_datapath, 'wb') as f:
                 pickle.dump(value, f)
     
@@ -543,7 +537,7 @@ def save_bounds(abs=False, merge=False, plqy=False):
 if __name__ == "__main__":
     args = _parse_args()
 
-    graph_process(
+    move_process(
         abs=args.abs, 
         merge=args.merge,
         plqy=args.plqy,
