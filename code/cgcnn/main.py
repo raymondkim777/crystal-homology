@@ -147,7 +147,7 @@ def main():
         torch.manual_seed(42)
     print("GPU Available", args.cuda)
 
-    if args.delete:
+    if args.delete and args.resume == '':
         check_path = f"./checkpoint_{args.id}.pth.tar"
         model_path = f"./model_best_{args.id}.pth.tar"
         stat_path = f"./test_stats_{args.id}.csv"
@@ -207,7 +207,7 @@ def main():
     
     # ! multitask normalizers
     if args.debug:
-        print("Computing normalizers from train sample size 2000")
+        print("Normalizer train sample size 2000")
     # sampler_indices = list(train_loader.sampler)
     # train_dataset = Subset(dataset, sampler_indices)
     # train_data_list = [train_dataset[i] for i in tqdm(range(len(train_dataset)))]
@@ -216,7 +216,7 @@ def main():
     train_indices = list(train_loader.sampler)
     sample_cnt = min(len(train_indices), args.norm_sample)
     sample_indices = sample(train_indices, k=sample_cnt)
-    sample_data_list = [dataset[i] for i in tqdm(sample_indices)]
+    sample_data_list = [dataset[i] for i in tqdm(sample_indices, desc="Normalizers: ")]
     _, _, _, sample_target, sample_mask, _ = collate_pool(sample_data_list)
 
     normalizers = dict()
@@ -754,10 +754,11 @@ def validate(val_loader, model, criterion, normalizers, epoch=0, test=False):
         star_label = '**'
 
         with open(f'test_params_{args.id}.txt', 'w') as f:
-            f.write(f'Vector: {args.vector}\t\tAtom Len: {args.atom_fea_len}\tConv Num: {args.n_conv}')
-            f.write(f'\nHidden Len: {args.h_fea_len}\t\tHidden Num: {args.n_h}')
-            f.write(f'\nHead Layer Num: {args.n_o}\tVec Len: {args.vec_fea_len}\t\tVec Layer Num: {args.n_vec}')
-            f.write(f'\nBest Epoch: {epoch}')
+            f.write(f'Source:\t\t\t{args.vec_source}\nVector:\t\t\t{args.vector}')
+            f.write(f'\nAtom Len:\t\t{args.atom_fea_len}\nConv Num:\t\t{args.n_conv}')
+            f.write(f'\nHidden Len:\t\t{args.h_fea_len}\nHidden Num:\t\t{args.n_h}\nHead Layer Num:\t{args.n_o}')
+            f.write(f'\nVec Len:\t\t{args.vec_fea_len}\nVec Layer Num:\t{args.n_vec}')
+            f.write(f'\nBest Epoch:\t\t{epoch}')
         
         import csv
         # ! saving stats for each prop

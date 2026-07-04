@@ -44,7 +44,6 @@ Moves graph/vectorization data over to `cgcnn/data/<folder>` folder, and stores 
 
 ```
 bash scripts/cgcnn_prep.sh
-
 ```
 
 ## CGCNN Training

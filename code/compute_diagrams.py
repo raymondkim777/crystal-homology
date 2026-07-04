@@ -247,28 +247,28 @@ def cif_to_dist_mat(plqy=False, plqy_full=False):
         else:
             tasks = [(system, filename, None, plqy, plqy_full) for filename in cif_files]
 
-        # with ProcessPoolExecutor(
-        #     max_workers=n_workers,
-        # ) as executor:
-        #     futures = [
-        #         executor.submit(compute_dist_mat_for_cif, task)
-        #         for task in tasks
-        #     ]
-        #     for future in tqdm(
-        #         as_completed(futures),
-        #         total=len(futures),
-        #         desc=f"PC for {system}: ",
-        #     ):
-        #         crystal_id, dist_mat = future.result()
-        #         system_dist_mats[crystal_id] = dist_mat
-
         with ProcessPoolExecutor(
-            max_workers=n_workers, 
+            max_workers=n_workers,
         ) as executor:
-            results = executor.map(compute_dist_mat_for_cif, tasks)
-
-            for crystal_id, dist_mat in tqdm(results, total=len(tasks), desc=f"PC for {system}: "):
+            futures = [
+                executor.submit(compute_dist_mat_for_cif, task)
+                for task in tasks
+            ]
+            for future in tqdm(
+                as_completed(futures),
+                total=len(futures),
+                desc=f"PC for {system}: ",
+            ):
+                crystal_id, dist_mat = future.result()
                 system_dist_mats[crystal_id] = dist_mat
+
+        # with ProcessPoolExecutor(
+        #     max_workers=n_workers, 
+        # ) as executor:
+        #     results = executor.map(compute_dist_mat_for_cif, tasks)
+
+        #     for crystal_id, dist_mat in tqdm(results, total=len(tasks), desc=f"PC for {system}: "):
+        #         system_dist_mats[crystal_id] = dist_mat
         
         dist_dict[system] = system_dist_mats
     return dist_dict
