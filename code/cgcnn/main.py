@@ -466,7 +466,7 @@ def main():
                 total_stats[prop][stat].update(avg_meter.avg)
     
     # ! save results
-    save_results(
+    save_stats_as_csv(
         best_epochs=best_epochs, 
         total_loss=total_losses.avg, 
         total_error=total_errors.avg,
@@ -839,57 +839,12 @@ def validate(val_loader, model, criterion, normalizers, best_epoch=0, test=False
     overall_error = w_cls * cls_error.avg + w_reg + reg_error.avg
 
     if not CROSS_VAL and test:
-        save_results(
+        save_stats_as_csv(
             best_epochs=[best_epoch], 
             total_loss=losses.avg, 
             total_error=overall_error.item(),
             stats_dict=stats,
         )
-        # if args.debug:
-        #     print("Saving test stats/results")
-
-        # with open(f'test_params_{args.id}.txt', 'w') as f:
-        #     f.write(f'Source:\t\t\t{args.vec_source}\nVector:\t\t\t{args.vector}')
-        #     f.write(f'\nAtom Len:\t\t{args.atom_fea_len}\nConv Num:\t\t{args.n_conv}')
-        #     f.write(f'\nHidden Len:\t\t{args.h_fea_len}\nHidden Num:\t\t{args.n_h}\nHead Layer Num:\t{args.n_o}')
-        #     f.write(f'\nVec Len:\t\t{args.vec_fea_len}\nVec Layer Num:\t{args.n_vec}')
-        #     f.write(f'\nBest Epoch:\t\t{best_epoch}')
-        
-        # # ! saving stats for each prop
-        # with open(f'test_stats_{args.id}.csv', 'w', newline='', encoding='utf-8') as file_stats:
-        #     writer = csv.writer(file_stats)
-        #     header = ['head', 'task', 'loss', 'nrmse', 'accuracy', 'precision', 'recall', 'f1', 'auroc']
-        #     writer.writerow(header)
-        #     writer.writerow(['total', overall_error, losses.avg, '', '', '', '', '', ''])
-                    
-        #     for prop, values in stats.items():
-        #         if TASK_SPECS[prop]['head'] in ['binary', 'multiclass']:
-        #             row = [
-        #                 prop, 
-        #                 TASK_SPECS[prop]['head'], 
-        #                 values['loss'].avg, 
-        #                 '', 
-        #                 values['accuracies'].avg, 
-        #                 values['precisions'].avg, 
-        #                 values['recalls'].avg, 
-        #                 values['fscores'].avg, 
-        #                 values['auc_scores'].avg
-        #             ]
-        #         elif TASK_SPECS[prop]['head'] == 'regression':
-        #             row = [
-        #                 prop, 
-        #                 TASK_SPECS[prop]['head'], 
-        #                 values['loss'].avg, 
-        #                 values['nrmse_errors'].avg.item(), 
-        #                 '', 
-        #                 '', 
-        #                 '', 
-        #                 '', 
-        #                 ''
-        #             ]
-        #         else:
-        #             raise ValueError(f"[STAT CSV] Unrecognized task {TASK_SPECS[prop]['head']}")
-        #         writer.writerow(row)
         
         # ! saving results for each prop
         for prop, values in test_stats.items():
@@ -932,7 +887,7 @@ def validate(val_loader, model, criterion, normalizers, best_epoch=0, test=False
     return overall_error, losses.avg, stats
 
 
-def save_results(
+def save_stats_as_csv(
         best_epochs: list, 
         total_loss, 
         total_error,
