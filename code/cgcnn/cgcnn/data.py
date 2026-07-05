@@ -413,6 +413,7 @@ class GraphData(Dataset):
         self.root_dir = root_dir  # cgcnn/data/<folder>
         self.max_num_nbr = max_num_nbr
         self.task_specs = task_specs
+        self.radius = dmax
         assert os.path.exists(root_dir), 'root_dir does not exist!'
         id_prop_file = os.path.join(self.root_dir, 'id_prop.csv')
         assert os.path.exists(id_prop_file), 'id_prop.csv does not exist!'

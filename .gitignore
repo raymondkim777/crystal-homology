@@ -81,6 +81,7 @@ logs
 
 code/ignore*
 
+code/cgcnn/checkpoints
 code/cgcnn/data/abs
 code/cgcnn/data/pretrain
 code/cgcnn/data/plqy
