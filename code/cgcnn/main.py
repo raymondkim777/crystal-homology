@@ -198,8 +198,9 @@ def main():
         "[STOP] Should not run k-fold cross validation on pretrain dataset!"
 
     # load graph data bounds
-    assert os.path.exists(f"{args.data_options}/tasks/bounds.json"), "[GraphData Args] Graph bounds.json doesn't exist!"
-    with open(f"{args.data_options}/tasks/bounds.json") as f:
+    print(f"{args.data_options[0]}")
+    assert os.path.exists(f"{args.data_options[0]}/tasks/bounds.json"), "[GraphData Args] Graph bounds.json doesn't exist!"
+    with open(f"{args.data_options[0]}/tasks/bounds.json") as f:
         g_bounds = json.load(f)
 
     # load data
@@ -207,8 +208,8 @@ def main():
         print("Constructing GraphData")
     dataset = GraphData(
         *args.data_options, 
-        max_num_nbr=g_bounds["max_num_nbr"], 
-        dmax=g_bounds["max_bond_dist"], 
+        # max_num_nbr=g_bounds["max_num_nbr"], 
+        # dmax=g_bounds["max_bond_dist"], 
         vec_source=args.vec_source,
         vector=args.vector,
         dims=args.dims,
@@ -327,7 +328,7 @@ def main():
             phi=args.phi,
             dims=args.dims,
             # ! miscellaneous arguments
-            root_dir=args.data_options,
+            root_dir=args.data_options[0],
             task_specs=TASK_SPECS,
         )
 
@@ -404,6 +405,9 @@ def main():
                 # normalizer.load_state_dict(checkpoint['normalizer'])
                 for prop in normalizers.keys():
                     normalizers[prop].load_state_dict(checkpoint['normalizer'][prop])
+
+                # save checkpoint (need model_best)
+                save_checkpoint(checkpoint, True, fold_it=0)
                 print("=> loaded checkpoint '{}' (epoch {})"
                     .format(args.resume, checkpoint['epoch']))
             else:
@@ -437,7 +441,7 @@ def main():
             scheduler.step()
 
             # remember the best error and save checkpoint
-            is_best = cur_errors < best_errors and epoch > 10
+            is_best = cur_errors <= best_errors and epoch > 10
             best_errors = min(cur_errors, best_errors) if epoch > 10 else best_errors
             save_checkpoint({
                 'epoch': epoch + 1,
@@ -912,7 +916,7 @@ def save_stats_as_csv(
         f.write(f'\nAtom Len:\t\t{args.atom_fea_len}\nConv Num:\t\t{args.n_conv}')
         f.write(f'\nHidden Len:\t\t{args.h_fea_len}\nHidden Num:\t\t{args.n_h}\nHead Layer Num:\t{args.n_o}')
         f.write(f'\nVec Len:\t\t{args.vec_fea_len}\nVec Layer Num:\t{args.n_vec}')
-        f.write(f'\nBest Epochs:\t\t{", ".join(list(map(str, best_epochs)))}')
+        f.write(f'\nBest Epochs:\t{", ".join(list(map(str, best_epochs)))}')
     
     import csv
     # ! saving stats for each prop

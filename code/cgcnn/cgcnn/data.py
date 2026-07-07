@@ -398,9 +398,9 @@ class GraphData(Dataset):
     def __init__(
             self, 
             root_dir, 
-            max_num_nbr=36, 
+            max_num_nbr=36,     # ! shared encoder, so should be max val for pretrain/abs/plqy
             dmin=0, 
-            dmax=16,  # 15.42974841
+            dmax=16,    # ! shared encoder, so should be max val for pretrain/abs/plqy      # 15.42974841
             step=0.2,
             random_seed=42,
             vec_source='graph', 
@@ -456,6 +456,13 @@ class GraphData(Dataset):
         elif self.vector == 'perslay':
             with open(os.path.join(self.root_dir, 'vecs', f'diagrams_{ch}.pkl'), 'rb') as file:
                 self.vector_dict = pickle.load(file)  # technically diagrams, not vector
+        if self.vector != 'none':
+            ex_key = list(self.vector_dict.keys())[0]
+            self.vec_prefix = ''
+            if ex_key.startswith('mp-'):
+                self.vec_prefix = 'mp-' 
+            if ex_key.startswith('cif-'):
+                self.vec_prefix = 'cif-' 
         
 
     def __len__(self):
@@ -528,15 +535,17 @@ class GraphData(Dataset):
         else:
             raise TypeError(f"[DATA Atom Feature] Incorrect node species data type")
 
-        # add fractional coordinates as periodic coordinates
-        periodic_coords = [
-            np.hstack([
-                [np.cos(2 * np.pi * val), np.sin(2 * np.pi * val)]
-                for val in graph.nodes[node]['coords']
-            ])
-            for node in graph.nodes
-        ]
-        atom_fea = np.hstack((feature_list, periodic_coords))
+        # # add fractional coordinates as periodic coordinates
+        # periodic_coords = [
+        #     np.hstack([
+        #         [np.cos(2 * np.pi * val), np.sin(2 * np.pi * val)]
+        #         for val in graph.nodes[node]['coords']
+        #     ])
+        #     for node in graph.nodes
+        # ]
+        # atom_fea = np.hstack((feature_list, periodic_coords))
+        # ! ABLATION
+        atom_fea = np.vstack(feature_list)
 
         # neighbor features (edge attributes)
         nbr_fea_idx, nbr_fea = [], []
@@ -555,41 +564,44 @@ class GraphData(Dataset):
         nbr_fea_idx, nbr_fea = np.array(nbr_fea_idx), np.array(nbr_fea)
         nbr_fea = self.gdf.expand(nbr_fea)
 
-        # increase nbr_fea_len by 3 to hold cartesian displacement vectors
-        padding = ((0, 0), (0, 0), (0, 3))
-        nbr_fea = np.pad(nbr_fea, pad_width=padding, mode='constant', constant_values=0)
+        # ! ABLATION
+        # # increase nbr_fea_len by 3 to hold cartesian displacement vectors
+        # padding = ((0, 0), (0, 0), (0, 3))
+        # nbr_fea = np.pad(nbr_fea, pad_width=padding, mode='constant', constant_values=0)
 
-        # add to_jimage as cartesian displacement vector
-        for u in adj_dict.keys():
-            cart_vectors = []
-            for v in adj_dict[u].keys():
-                for k in adj_dict[u][v].keys():
-                    to_jimage = np.asarray(adj_dict[u][v][k]['to_jimage'])
-                    coord_start = graph.nodes[u]['coords']
-                    coord_end = graph.nodes[v]['coords']
-                    matrix = graph_dict['lattice_matrix']
+        # # add to_jimage as cartesian displacement vector
+        # for u in adj_dict.keys():
+        #     cart_vectors = []
+        #     for v in adj_dict[u].keys():
+        #         for k in adj_dict[u][v].keys():
+        #             to_jimage = np.asarray(adj_dict[u][v][k]['to_jimage'])
+        #             coord_start = graph.nodes[u]['coords']
+        #             coord_end = graph.nodes[v]['coords']
+        #             matrix = graph_dict['lattice_matrix']
 
-                    cart_vector = self.__cart_vector(coord_start, coord_end, to_jimage, matrix)
+        #             cart_vector = self.__cart_vector(coord_start, coord_end, to_jimage, matrix)
 
-                    cart_vectors.append(cart_vector)
-            cart_vectors = np.asarray(cart_vectors)
-            nbr_fea[u, :cart_vectors.shape[0], -3:] = cart_vectors
+        #             cart_vectors.append(cart_vector)
+        #     cart_vectors = np.asarray(cart_vectors)
+        #     nbr_fea[u, :cart_vectors.shape[0], -3:] = cart_vectors
 
         # ! vectorization & normalization (optional)
         if self.vector == 'none':
             vectorizations = np.array([])
             diagrams = [torch.Tensor([]) for _ in range(self.dim_cnt)]
         elif self.vector in ['image', 'landscape']:
-            vectorizations = np.hstack([self.vector_dict[f'mp-{mp_id}'][dim] for dim in range(self.dim_cnt)])
+            vec_key = f"{self.vec_prefix}{mp_id}"
+            vectorizations = np.hstack([self.vector_dict[vec_key][dim] for dim in range(self.dim_cnt)])
             # # normalize vectors (optional, ineffective)
             # if np.sum(vectorizations) != 0:
             #     vec_norm = np.linalg.norm(vectorizations)
             #     vectorizations = vectorizations / vec_norm
             diagrams = [torch.Tensor([]) for _ in range(self.dim_cnt)]
         elif self.vector == 'perslay':
+            vec_key = f"{self.vec_prefix}{mp_id}"
             # ! if perslay, then we pass in diagrams (each should be tensor)
             vectorizations = np.array([])
-            diagrams = [torch.Tensor(self.vector_dict[f'mp-{mp_id}'][dim]) for dim in range(self.dim_cnt)]  # list of np.ndarrays
+            diagrams = [torch.Tensor(self.vector_dict[vec_key][dim]) for dim in range(self.dim_cnt)]  # list of np.ndarrays
 
         atom_fea = torch.Tensor(atom_fea)
         nbr_fea = torch.Tensor(nbr_fea)

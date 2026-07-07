@@ -37,7 +37,7 @@ MAX_DIST = None
 
 def _parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--source', type=str, default='graph', help="how to create complex [graph, point]")
+    parser.add_argument('--source', type=str, default='graph', help="how to create complex [graph, point, custom]")
     parser.add_argument('--abs', action='store_true', help='constructs diagrams for absorption data')
     parser.add_argument('--plqy', action='store_true', help='constructs diagrams for plqy data')
     parser.add_argument('--plqy-full', action='store_true', help='constructs diagrams for plqy-full data')
@@ -336,13 +336,78 @@ def compute_persistence_diagrams_point(plqy=False, plqy_full=False):
     print(f"------ END PERSISTENCE ------")
 
 
+############### CUSTOM POINT CLOUD PERSISTENCE ###############
+
+
+def compute_persistence_diagrams_custom(plqy=False, plqy_full=False):
+    print(f"------ CUSTOM POINT CLOUD PERSISTENCE ------")
+    n_workers = get_num_cpus()
+    print(f"Using {n_workers} job processes")
+
+    # compute distance matrices for each crystal for each system
+    dist_dict = cif_to_dist_mat(plqy=plqy, plqy_full=plqy_full)
+
+    rips = RipsPersistence(
+        homology_dimensions=tuple(range(DIMENSION_CNT)),
+        threshold=MAX_DIST, 
+        input_type='full distance matrix', 
+        n_jobs=n_workers,
+    )
+
+    # compute diagrams for each system
+    for system in CRYSTAL_SYSTEMS:
+        print(f"Computing PD for {system}")
+
+        dist_mat_system = list(dist_dict[system].values())
+        if len(dist_mat_system) == 0:
+            print(f"No crystals for {system} system!")
+            diagrams_with_id = dict()
+            diag_filepath = open_write_file(DIAGRAM_POINT_DIRECTORY, f'{system}.pkl')
+            with open(diag_filepath, 'wb') as f:
+                pickle.dump(diagrams_with_id, f)
+            continue
+        
+        # fit & transform rips to each crystal (point cloud)
+        diagrams = rips.fit_transform(dist_mat_system)
+        # [crystal1, crystal2, ...] where crystaln = [h0_diag, h1_diag, h2_diag]
+
+        diagrams_filtered = []
+        diag_select = DiagramSelector(
+            use=True, 
+            point_type='finite', 
+            limit=MAX_DIST,     # + 1??
+        )
+        for diag_crystal in diagrams:
+            diagrams_filtered.append(diag_select.fit_transform(diag_crystal))
+
+        # match diagrams to crystal id (format with multiple dimensions)
+        keys = list(dist_dict[system].keys())
+        diagrams_with_id = {
+            keys[i]: diagrams_filtered[i]
+            for i in range(len(diagrams_filtered))
+        }
+
+        # print diagram info
+        print(f"diagram cnt: {len(diagrams)}")
+        point_diagram_list = diagrams[0]
+        print("Persistence Diagram Shape for H0:", point_diagram_list[0].shape)
+        print("Points (Birth, Death) for H0:\n", point_diagram_list[0])
+    
+        # save diagrams dict as pickle
+        diag_filepath = open_write_file(DIAGRAM_POINT_DIRECTORY, f'{system}.pkl')
+        with open(diag_filepath, 'wb') as f:
+            pickle.dump(diagrams_with_id, f)
+
+    print(f"------ END PERSISTENCE ------")
+
+
 ############### PERSISTENCE END ###############
 
 
 if __name__ == "__main__":
     args = _parse_args()
 
-    assert args.source in ['graph', 'point']
+    assert args.source in ['graph', 'point', 'custom']
     assert sum([args.abs, args.plqy, args.plqy_full]) <= 1, "Can only choose one of abs/plqy/plqy-full"
 
     DATA_DIRECTORY = "data/pretrain"
@@ -362,8 +427,11 @@ if __name__ == "__main__":
 
     if args.source == 'graph':
         compute_persistence_diagrams_graph()
-    else:
+    elif args.source == 'point':
         compute_persistence_diagrams_point(
             plqy=args.plqy, 
             plqy_full=args.plqy_full,
         )
+    else:
+
+        pass
