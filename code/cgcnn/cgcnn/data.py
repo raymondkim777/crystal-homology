@@ -480,7 +480,7 @@ class GraphData(Dataset):
         
 
     @functools.lru_cache(maxsize=None)
-    def __get_atom_and_nbr_fea(self, cif_id):
+    def _get_atom_and_nbr_fea(self, cif_id):
         struct_dict = self._load_struct_dict(cif_id)
         crystal = struct_dict['structure']
 
@@ -534,6 +534,11 @@ class GraphData(Dataset):
                                         nbr[:self.max_num_nbr])))
         nbr_fea_idx, nbr_fea = np.array(nbr_fea_idx), np.array(nbr_fea)
         nbr_fea = self.gdf.expand(nbr_fea)
+
+        atom_fea = torch.tensor(atom_fea)
+        nbr_fea = torch.tensor(nbr_fea)
+        nbr_fea_idx = torch.tensor(nbr_fea_idx, dtype=torch.long)
+
         return atom_fea, nbr_fea, nbr_fea_idx
 
 
@@ -557,19 +562,19 @@ class GraphData(Dataset):
                 raise ValueError(f'[CIFData] unrecognized target task {task_type}')
             mask[self.predict_list[i]] = torch.tensor([mask_list[i]]).bool()
         
-        atom_fea, nbr_fea, nbr_fea_idx = self.__get_atom_and_nbr_fea(cif_id)
+        atom_fea, nbr_fea, nbr_fea_idx = self._get_atom_and_nbr_fea(cif_id)
 
         # ! vectorization & normalization (optional)
         if self.vector == 'none':
             vectorizations = np.array([])
-            diagrams = [torch.Tensor([]) for _ in range(self.dim_cnt)]
+            diagrams = [torch.tensor([]) for _ in range(self.dim_cnt)]
         elif self.vector in ['image', 'landscape']:
             vectorizations = np.hstack([self.vector_dict[f'mp-{cif_id}'][dim] for dim in range(self.dim_cnt)])
-            diagrams = [torch.Tensor([]) for _ in range(self.dim_cnt)]
+            diagrams = [torch.tensor([]) for _ in range(self.dim_cnt)]
         elif self.vector == 'perslay':
             # ! if perslay, then we pass in diagrams (each should be tensor)
             vectorizations = np.array([])
-            diagrams = [torch.Tensor(self.vector_dict[f'mp-{cif_id}'][dim]) for dim in range(self.dim_cnt)]  # list of np.ndarrays
+            diagrams = [torch.tensor(self.vector_dict[f'mp-{cif_id}'][dim]) for dim in range(self.dim_cnt)]  # list of np.ndarrays
 
         
         # atom_fea = torch.Tensor(atom_fea)
@@ -577,10 +582,7 @@ class GraphData(Dataset):
         # nbr_fea_idx = torch.LongTensor(nbr_fea_idx)
         # target = torch.Tensor([float(target)])
 
-        atom_fea = torch.Tensor(atom_fea)
-        nbr_fea = torch.Tensor(nbr_fea)
-        nbr_fea_idx = torch.LongTensor(nbr_fea_idx)
-        vectorizations = torch.Tensor(vectorizations)
+        vectorizations = torch.tensor(vectorizations)
         return (atom_fea, nbr_fea, nbr_fea_idx), vectorizations, diagrams, targets, mask, cif_id
 
 

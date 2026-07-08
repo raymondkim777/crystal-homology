@@ -206,6 +206,16 @@ def main():
     )
     collate_fn = collate_pool
 
+    # # ! ERASE BELOW
+
+    # _ = dataset[0]
+    # _ = dataset[0]
+    # _ = dataset[0]
+
+    # print(dataset._get_atom_and_nbr_fea.cache_info())
+
+    # # ! ERASE ABOVE
+
     if args.fold == 0:
         # regular training
         if args.debug:
