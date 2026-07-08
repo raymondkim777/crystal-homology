@@ -423,7 +423,7 @@ def plot_landscape_gtda(
 if __name__ == "__main__":
     args = _parse_args()
 
-    assert args.source in ['graph', 'point']
+    assert args.source in ['graph', 'point', 'custom']
     assert sum([args.abs, args.plqy, args.plqy_full]) <= 1, "Can only choose one of abs/plqy/plqy-full"
 
     DATA_DIRECTORY = "data/pretrain"
@@ -434,10 +434,15 @@ if __name__ == "__main__":
     if args.plqy_full:
         DATA_DIRECTORY = "data/plqy-full"
 
-    suffix = 'g' if args.source == 'graph' else 'p'
-    DIAGRAM_DIRECTORY = f"{DATA_DIRECTORY}/diagrams_{suffix}"
-    LANDSCAPE_DIRECTORY = f"{DATA_DIRECTORY}/landscapes_{suffix}"
-    IMAGE_DIRECTORY = f"{DATA_DIRECTORY}/images_{suffix}"
+    if args.source == 'graph':
+        ch = 'g'
+    elif args.source == 'point':
+        ch = 'p'
+    else:
+        ch = 'c'
+    DIAGRAM_DIRECTORY = f"{DATA_DIRECTORY}/diagrams_{ch}"
+    LANDSCAPE_DIRECTORY = f"{DATA_DIRECTORY}/landscapes_{ch}"
+    IMAGE_DIRECTORY = f"{DATA_DIRECTORY}/images_{ch}"
     MAX_DIST = get_max_dist(DATA_DIRECTORY) 
 
     if args.landscape:

@@ -5,7 +5,6 @@ import shutil
 import sys
 import time
 import csv
-import json
 import warnings
 from random import sample
 from tqdm import tqdm
@@ -95,8 +94,6 @@ parser.add_argument('--n-vec', default=1, type=int, metavar='N',
 
 parser.add_argument('--debug', action='store_true',
                     help='prints debug messages')
-parser.add_argument('--result', action='store_true',
-                    help='stores model test prediction results as csv')
 parser.add_argument('--seed', action='store_true',
                     help='sets torch seed to 42')
 # parser.add_argument('--num-classes', default=2, type=int)
@@ -197,19 +194,11 @@ def main():
     assert not CROSS_VAL or args.train != 'pretrain',\
         "[STOP] Should not run k-fold cross validation on pretrain dataset!"
 
-    # load graph data bounds
-    print(f"{args.data_options[0]}")
-    assert os.path.exists(f"{args.data_options[0]}/tasks/bounds.json"), "[GraphData Args] Graph bounds.json doesn't exist!"
-    with open(f"{args.data_options[0]}/tasks/bounds.json") as f:
-        g_bounds = json.load(f)
-
     # load data
     if args.debug:
         print("Constructing GraphData")
     dataset = GraphData(
         *args.data_options, 
-        # max_num_nbr=g_bounds["max_num_nbr"], 
-        # dmax=g_bounds["max_bond_dist"], 
         vec_source=args.vec_source,
         vector=args.vector,
         dims=args.dims,
@@ -266,7 +255,7 @@ def main():
         else:
             raise ValueError(f"[TRAIN STATS] Unknown task {value['head']}")
 
-    # ! K-FOLD CROSS VALIDATION
+    # k-fold cross validation
     fold_num = args.fold if CROSS_VAL else 1
     for fold_it in range(fold_num):
 
@@ -328,7 +317,7 @@ def main():
             phi=args.phi,
             dims=args.dims,
             # ! miscellaneous arguments
-            root_dir=args.data_options[0],
+            root_dir=args.data_options,
             task_specs=TASK_SPECS,
         )
 
@@ -405,9 +394,6 @@ def main():
                 # normalizer.load_state_dict(checkpoint['normalizer'])
                 for prop in normalizers.keys():
                     normalizers[prop].load_state_dict(checkpoint['normalizer'][prop])
-
-                # save checkpoint (need model_best)
-                save_checkpoint(checkpoint, True, fold_it=0)
                 print("=> loaded checkpoint '{}' (epoch {})"
                     .format(args.resume, checkpoint['epoch']))
             else:
@@ -441,7 +427,7 @@ def main():
             scheduler.step()
 
             # remember the best error and save checkpoint
-            is_best = cur_errors <= best_errors and epoch > 10
+            is_best = cur_errors < best_errors and epoch > 10
             best_errors = min(cur_errors, best_errors) if epoch > 10 else best_errors
             save_checkpoint({
                 'epoch': epoch + 1,
@@ -459,15 +445,15 @@ def main():
         # ! PyTorch 2.6 safety measure: only load model weights -> extra argument
         
         if CROSS_VAL:
-            best_checkpoint_path = f"model_best_{args.id}_fold_{fold_it}.pth.tar"
+            best_checkpoint_path = f"checkpoints/model_best_{args.id}_fold_{fold_it}.pth.tar"
         else:
-            best_checkpoint_path = f'model_best_{args.id}.pth.tar'
+            best_checkpoint_path = f'checkpoints/model_best_{args.id}.pth.tar'
 
         best_checkpoint = torch.load(best_checkpoint_path, weights_only=False)
         best_epochs.append(best_checkpoint['epoch'])
         model.load_state_dict(best_checkpoint['state_dict'])
 
-        test_error, test_loss, stat_dict = validate(
+        test_loss, test_error, stat_dict = validate(
             test_loader, model, criterion, normalizers, 
             best_epoch=best_checkpoint['epoch'], 
             test=True
@@ -861,45 +847,52 @@ def validate(val_loader, model, criterion, normalizers, best_epoch=0, test=False
         )
         
         # ! saving results for each prop
-        if args.result:
-            for prop, values in test_stats.items():
-                with open(f'test_results_{args.id}_{prop}.csv', 'w', newline='', encoding='utf-8') as file_results:
-                    writer = csv.writer(file_results)
+        for prop, values in test_stats.items():
+            with open(f'test_results_{args.id}_{prop}.csv', 'w', newline='', encoding='utf-8') as file_results:
+                writer = csv.writer(file_results)
 
-                    if TASK_SPECS[prop]['head'] in ['binary', 'multiclass']:
-                        header = ['mp-id', 'mask', 'target', 'predicted_class']
-                        header += [f'prob_class_{i}' for i in range(len(values['test_probs'][0]))]
-                        writer.writerow(header)
+                if TASK_SPECS[prop]['head'] in ['binary', 'multiclass']:
+                    header = ['mp-id', 'mask', 'target', 'predicted_class']
+                    header += [f'prob_class_{i}' for i in range(len(values['test_probs'][0]))]
+                    writer.writerow(header)
 
-                        for cif_id, mask, target, pred, probs in zip(
-                            values['test_cif_ids'], 
-                            values['test_masks'],
-                            values['test_targets'], 
-                            values['test_preds'], 
-                            values['test_probs'],
-                        ):
-                            writer.writerow([cif_id, mask, target, pred] + probs)
+                    for cif_id, mask, target, pred, probs in zip(
+                        values['test_cif_ids'], 
+                        values['test_masks'],
+                        values['test_targets'], 
+                        values['test_preds'], 
+                        values['test_probs'],
+                    ):
+                        writer.writerow([cif_id, mask, target, pred] + probs)
 
-                    elif TASK_SPECS[prop]['head'] == 'regression':
-                        header = ['mp-id', 'mask', 'target', 'predicted_value']
-                        writer.writerow(header)
+                elif TASK_SPECS[prop]['head'] == 'regression':
+                    header = ['mp-id', 'mask', 'target', 'predicted_value']
+                    writer.writerow(header)
 
-                        for cif_id, mask, target, pred in zip(
-                            values['test_cif_ids'], 
-                            values['test_masks'],
-                            values['test_targets'], 
-                            values['test_preds'], 
-                        ):
-                            writer.writerow([cif_id, mask, target, pred])
-                    else:
-                        raise ValueError(f"[TEST CSV] Unrecognized task {TASK_SPECS[prop]['head']}")
+                    for cif_id, mask, target, pred in zip(
+                        values['test_cif_ids'], 
+                        values['test_masks'],
+                        values['test_targets'], 
+                        values['test_preds'], 
+                    ):
+                        writer.writerow([cif_id, mask, target, pred])
+                else:
+                    raise ValueError(f"[TEST CSV] Unrecognized task {TASK_SPECS[prop]['head']}")
 
     if args.debug:
         print(f'\n Model -- \tVector: {args.vector}\tAtom Len: {args.atom_fea_len}\tConv Num: {args.n_conv}\tHidden Len: {args.h_fea_len}\tHidden Num: {args.n_h}')
         print(f'\t\tHead Layer Num: {args.n_o}\tVec Len: {args.vec_fea_len}\tVec Layer Num: {args.n_vec}')
         
         print(' ** ERROR {error:.3f}'.format(error=overall_error))
-    return overall_error.item(), losses.avg, stats
+    return overall_error, losses.avg, stats
+
+
+def open_write_file(dir_path, file_name):
+    """Opens a file for writing, or creates new file if file doesn't exist."""
+    file_path = os.path.join(dir_path, file_name)
+    if not os.path.exists(os.path.dirname(file_path)):
+        os.makedirs(os.path.dirname(file_path))
+    return file_path
 
 
 def save_stats_as_csv(
@@ -910,17 +903,18 @@ def save_stats_as_csv(
 ):
     if args.debug:
         print("Saving test results and stats as CSV")
-
-    with open(f'test_params_{args.id}.txt', 'w') as f:
+    
+    open_write_file(f'out', '')
+    with open(f'out/test_params_{args.id}.txt', 'w') as f:
         f.write(f'Source:\t\t\t{args.vec_source}\nVector:\t\t\t{args.vector}')
         f.write(f'\nAtom Len:\t\t{args.atom_fea_len}\nConv Num:\t\t{args.n_conv}')
         f.write(f'\nHidden Len:\t\t{args.h_fea_len}\nHidden Num:\t\t{args.n_h}\nHead Layer Num:\t{args.n_o}')
         f.write(f'\nVec Len:\t\t{args.vec_fea_len}\nVec Layer Num:\t{args.n_vec}')
-        f.write(f'\nBest Epochs:\t{", ".join(list(map(str, best_epochs)))}')
+        f.write(f'\nBest Epochs:\t\t{", ".join(list(map(str, best_epochs)))}')
     
     import csv
     # ! saving stats for each prop
-    with open(f'test_stats_{args.id}.csv', 'w', newline='', encoding='utf-8') as file_stats:
+    with open(f'out/test_stats_{args.id}.csv', 'w', newline='', encoding='utf-8') as file_stats:
         writer = csv.writer(file_stats)
         header = ['head', 'task', 'loss', 'nrmse', 'accuracy', 'precision', 'recall', 'f1', 'auroc']
         writer.writerow(header)
@@ -1081,13 +1075,14 @@ class AverageMeter(object):
         self.avg = self.sum / self.count if self.count != 0 else 0
 
 
-def save_checkpoint(state, is_best, fold_it, filename=f'checkpoint_{args.id}.pth.tar'):
+def save_checkpoint(state, is_best, fold_it, filename=f'checkpoints/checkpoint_{args.id}.pth.tar'):
+    open_write_file('checkpoints', '')
     torch.save(state, filename)
     if is_best:
         if CROSS_VAL:
-            best_filename = f"model_best_{args.id}_fold_{fold_it}.pth.tar"
+            best_filename = f"checkpoints/model_best_{args.id}_fold_{fold_it}.pth.tar"
         else:
-            best_filename = f"model_best_{args.id}.pth.tar"
+            best_filename = f"checkpoints/model_best_{args.id}.pth.tar"
         shutil.copyfile(filename, best_filename)
 
 

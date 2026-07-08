@@ -339,10 +339,21 @@ def compute_persistence_diagrams_point(plqy=False, plqy_full=False):
 ############### CUSTOM POINT CLOUD PERSISTENCE ###############
 
 
+def modify_dist_mat(dist_mat, graph):
+    # directed graph (not multigraph)
+    for i, j in graph.edges:
+        dist_mat[i, j] = 0
+        dist_mat[j, i] = 0
+    return dist_mat
+
+
 def compute_persistence_diagrams_custom(plqy=False, plqy_full=False):
     print(f"------ CUSTOM POINT CLOUD PERSISTENCE ------")
     n_workers = get_num_cpus()
     print(f"Using {n_workers} job processes")
+
+    print(f"Unpacking all graphs...")
+    graph_dict = unpack_all_graphs()
 
     # compute distance matrices for each crystal for each system
     dist_dict = cif_to_dist_mat(plqy=plqy, plqy_full=plqy_full)
@@ -358,11 +369,15 @@ def compute_persistence_diagrams_custom(plqy=False, plqy_full=False):
     for system in CRYSTAL_SYSTEMS:
         print(f"Computing PD for {system}")
 
+        # modify dist matrix s.t. graph edges have dist 0
         dist_mat_system = list(dist_dict[system].values())
+        dist_mat_system = list(map(modify_dist_mat, 
+                                   zip(dist_mat_system, graph_dict[system].values())))
+
         if len(dist_mat_system) == 0:
             print(f"No crystals for {system} system!")
             diagrams_with_id = dict()
-            diag_filepath = open_write_file(DIAGRAM_POINT_DIRECTORY, f'{system}.pkl')
+            diag_filepath = open_write_file(DIAGRAM_CUSTOM_DIRECTORY, f'{system}.pkl')
             with open(diag_filepath, 'wb') as f:
                 pickle.dump(diagrams_with_id, f)
             continue
@@ -394,7 +409,7 @@ def compute_persistence_diagrams_custom(plqy=False, plqy_full=False):
         print("Points (Birth, Death) for H0:\n", point_diagram_list[0])
     
         # save diagrams dict as pickle
-        diag_filepath = open_write_file(DIAGRAM_POINT_DIRECTORY, f'{system}.pkl')
+        diag_filepath = open_write_file(DIAGRAM_CUSTOM_DIRECTORY, f'{system}.pkl')
         with open(diag_filepath, 'wb') as f:
             pickle.dump(diagrams_with_id, f)
 
@@ -423,6 +438,7 @@ if __name__ == "__main__":
     STRUCTURE_DIRECTORY = f"{DATA_DIRECTORY}/structs"
     DIAGRAM_GRAPH_DIRECTORY = f"{DATA_DIRECTORY}/diagrams_g"
     DIAGRAM_POINT_DIRECTORY = f"{DATA_DIRECTORY}/diagrams_p"
+    DIAGRAM_CUSTOM_DIRECTORY = f"{DATA_DIRECTORY}/diagrams_c"
     MAX_DIST = get_max_dist(DATA_DIRECTORY)
 
     if args.source == 'graph':
@@ -433,5 +449,7 @@ if __name__ == "__main__":
             plqy_full=args.plqy_full,
         )
     else:
-
-        pass
+        compute_persistence_diagrams_custom(
+            plqy=args.plqy, 
+            plqy_full=args.plqy_full,
+        )

@@ -509,7 +509,7 @@ def graph_process(abs=False, merge=False, plqy=False, vector=False):
         
         for i in idxes:
             print(f"Saving {'PRETRAIN' if i == 0 else 'ABS' if i == 1 else 'PLQY'} graph/point vectorizations...")
-            for ch in ['g', 'p']:
+            for ch in ['g', 'p', 'c']:
                 diagram_dict = retrieve_diagrams(vec_dirs[i])
                 image_dict, landscape_dict = dict(), dict()
                 for system in CRYSTAL_SYSTEMS:
