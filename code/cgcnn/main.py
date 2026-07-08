@@ -445,9 +445,9 @@ def main():
         # ! PyTorch 2.6 safety measure: only load model weights -> extra argument
         
         if CROSS_VAL:
-            best_checkpoint_path = f"model_best_{args.id}_fold_{fold_it}.pth.tar"
+            best_checkpoint_path = f"checkpoints/model_best_{args.id}_fold_{fold_it}.pth.tar"
         else:
-            best_checkpoint_path = f'model_best_{args.id}.pth.tar'
+            best_checkpoint_path = f'checkpoints/model_best_{args.id}.pth.tar'
 
         best_checkpoint = torch.load(best_checkpoint_path, weights_only=False)
         best_epochs.append(best_checkpoint['epoch'])
@@ -887,6 +887,14 @@ def validate(val_loader, model, criterion, normalizers, best_epoch=0, test=False
     return overall_error, losses.avg, stats
 
 
+def open_write_file(dir_path, file_name):
+    """Opens a file for writing, or creates new file if file doesn't exist."""
+    file_path = os.path.join(dir_path, file_name)
+    if not os.path.exists(os.path.dirname(file_path)):
+        os.makedirs(os.path.dirname(file_path))
+    return file_path
+
+
 def save_stats_as_csv(
         best_epochs: list, 
         total_loss, 
@@ -895,8 +903,9 @@ def save_stats_as_csv(
 ):
     if args.debug:
         print("Saving test results and stats as CSV")
-
-    with open(f'test_params_{args.id}.txt', 'w') as f:
+    
+    open_write_file(f'out', '')
+    with open(f'out/test_params_{args.id}.txt', 'w') as f:
         f.write(f'Source:\t\t\t{args.vec_source}\nVector:\t\t\t{args.vector}')
         f.write(f'\nAtom Len:\t\t{args.atom_fea_len}\nConv Num:\t\t{args.n_conv}')
         f.write(f'\nHidden Len:\t\t{args.h_fea_len}\nHidden Num:\t\t{args.n_h}\nHead Layer Num:\t{args.n_o}')
@@ -905,7 +914,7 @@ def save_stats_as_csv(
     
     import csv
     # ! saving stats for each prop
-    with open(f'test_stats_{args.id}.csv', 'w', newline='', encoding='utf-8') as file_stats:
+    with open(f'out/test_stats_{args.id}.csv', 'w', newline='', encoding='utf-8') as file_stats:
         writer = csv.writer(file_stats)
         header = ['head', 'task', 'loss', 'nrmse', 'accuracy', 'precision', 'recall', 'f1', 'auroc']
         writer.writerow(header)
@@ -1066,13 +1075,14 @@ class AverageMeter(object):
         self.avg = self.sum / self.count if self.count != 0 else 0
 
 
-def save_checkpoint(state, is_best, fold_it, filename=f'checkpoint_{args.id}.pth.tar'):
+def save_checkpoint(state, is_best, fold_it, filename=f'checkpoints/checkpoint_{args.id}.pth.tar'):
+    open_write_file('checkpoints', '')
     torch.save(state, filename)
     if is_best:
         if CROSS_VAL:
-            best_filename = f"model_best_{args.id}_fold_{fold_it}.pth.tar"
+            best_filename = f"checkpoints/model_best_{args.id}_fold_{fold_it}.pth.tar"
         else:
-            best_filename = f"model_best_{args.id}.pth.tar"
+            best_filename = f"checkpoints/model_best_{args.id}.pth.tar"
         shutil.copyfile(filename, best_filename)
 
 

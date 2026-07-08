@@ -477,29 +477,10 @@ class GraphData(Dataset):
     def _load_struct_dict(self, cif_id):
         with open(os.path.join(self.root_dir, "structs", f"mp-{cif_id}.pkl"), 'rb') as file:
             return pickle.load(file)
+        
 
-
-    @functools.lru_cache(maxsize=None)  # Cache compiled data dictionaries
-    def __getitem__(self, idx):
-        cif_id = self.id_prop_data[idx][0][0]
-
-        # ! multitask targets
-        target_list = list(self.id_prop_data[idx][0][1:])
-        mask_list = list(self.id_prop_data[idx][1][1:])
-        # print("target list:", target_list)
-        # print("mask list:", mask_list)
-
-        targets, mask = dict(), dict()
-        for i in range(len(self.predict_list)):
-            task_type = self.task_specs[self.predict_list[i]]['head']
-            if task_type in ['binary', 'multiclass']:
-                targets[self.predict_list[i]] = torch.tensor([target_list[i]]).long()
-            elif task_type == 'regression':
-                targets[self.predict_list[i]] = torch.tensor([target_list[i]]).float()
-            else:
-                raise ValueError(f'[CIFData] unrecognized target task {task_type}')
-            mask[self.predict_list[i]] = torch.tensor([mask_list[i]]).bool()
-
+    @functools.lru_cache(maxsize=None)
+    def __get_atom_and_nbr_fea(self, cif_id):
         struct_dict = self._load_struct_dict(cif_id)
         crystal = struct_dict['structure']
 
@@ -511,7 +492,7 @@ class GraphData(Dataset):
         #     ... (additional properties if relevant)
         # }
         ########################
-        
+
         if crystal.is_ordered:
             atom_fea = np.vstack([self.ari.get_atom_fea(crystal[i].specie.number)
                               for i in range(len(crystal))])
@@ -553,6 +534,30 @@ class GraphData(Dataset):
                                         nbr[:self.max_num_nbr])))
         nbr_fea_idx, nbr_fea = np.array(nbr_fea_idx), np.array(nbr_fea)
         nbr_fea = self.gdf.expand(nbr_fea)
+        return atom_fea, nbr_fea, nbr_fea_idx
+
+
+    def __getitem__(self, idx):
+        cif_id = self.id_prop_data[idx][0][0]
+
+        # ! multitask targets
+        target_list = list(self.id_prop_data[idx][0][1:])
+        mask_list = list(self.id_prop_data[idx][1][1:])
+        # print("target list:", target_list)
+        # print("mask list:", mask_list)
+
+        targets, mask = dict(), dict()
+        for i in range(len(self.predict_list)):
+            task_type = self.task_specs[self.predict_list[i]]['head']
+            if task_type in ['binary', 'multiclass']:
+                targets[self.predict_list[i]] = torch.tensor([target_list[i]]).long()
+            elif task_type == 'regression':
+                targets[self.predict_list[i]] = torch.tensor([target_list[i]]).float()
+            else:
+                raise ValueError(f'[CIFData] unrecognized target task {task_type}')
+            mask[self.predict_list[i]] = torch.tensor([mask_list[i]]).bool()
+        
+        atom_fea, nbr_fea, nbr_fea_idx = self.__get_atom_and_nbr_fea(cif_id)
 
         # ! vectorization & normalization (optional)
         if self.vector == 'none':
