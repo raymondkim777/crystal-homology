@@ -37,8 +37,8 @@ PREDICT = [
     # 'bm_vrh', 
     # 'dos',                # future task
     # 'bandstructure',      # extract direct_gap (others already exist)
-    'direct_gap',
-    'band_gap', 
+    # 'direct_gap',
+    # 'band_gap', 
     'efermi', 
     'is_gap_direct',
     # 'max_absorption',
@@ -80,16 +80,16 @@ TASK_SPECS = {
     #     'head': 'regression', 
     #     'out_dim': 1,
     # },
-    'direct_gap': {
-        'head': 'regression', 
-        'out_dim': 1,
-        'weight': 1, 
-    },
-    'band_gap': {
-        'head': 'regression', 
-        'out_dim': 1,
-        'weight': 1, 
-    },
+    # 'direct_gap': {
+    #     'head': 'regression', 
+    #     'out_dim': 1,
+    #     'weight': 1, 
+    # },
+    # 'band_gap': {
+    #     'head': 'regression', 
+    #     'out_dim': 1,
+    #     'weight': 1, 
+    # },
     'efermi': {
         'head': 'regression', 
         'out_dim': 1,

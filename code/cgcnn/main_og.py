@@ -126,8 +126,10 @@ parser.add_argument('--freeze-vectors', action='store_true',
 
 parser.add_argument('--finetune', default='', type=str, metavar='PATH',
                     help='path to pretrain checkpoint')
-parser.add_argument('--val-metric', default='error', type=str, metavar='PATH',
+parser.add_argument('--val-metric', default='error', type=str,
                     help="validation metric: ['error', 'loss']")
+parser.add_argument('--clear-cache', action='store_true',
+                    help="whether to clear dataloader cache before training")
 
 
 args = parser.parse_args(sys.argv[1:])
@@ -163,7 +165,7 @@ def main():
         "No finetune arg if train=pretrain, and need finetune arg if train=abs/plqy"
     assert args.resume == '' or args.finetune == '', "Choose one of resume or finetune!"
     assert args.val_metric in ['error', 'loss']
-    assert args.vec_source in ['graph', 'point']
+    assert args.vec_source in ['graph', 'point', 'custom']
     assert not CROSS_VAL or args.train != 'pretrain',\
         "[STOP] Should not run k-fold cross validation on pretrain dataset!"
 
@@ -273,6 +275,18 @@ def main():
                 raise ValueError(f"[Normalizer] Unknown task {value['head']}")
             normalizers[prop] = normalizer
 
+        # ! clear dataloader cache
+        if args.clear_cache:
+            print("Dataset cache:", train_loader.dataset.__getitem__.cache_info())
+            print("Struct cache:", train_loader.dataset._load_struct_dict.cache_info())
+            print("Atom/Nbr cache:", train_loader.dataset._get_atom_and_nbr_fea.cache_info())
+            train_loader.dataset.__getitem__.cache_clear()
+            train_loader.dataset._load_struct_dict.cache_clear()
+            train_loader.dataset._get_atom_and_nbr_fea.cache_clear()
+            print("Cleared dataset cache", train_loader.dataset.__getitem__.cache_info())
+            print("Struct cache", train_loader.dataset._load_struct_dict.cache_info())
+            print("Atom/Nbr cache", train_loader.dataset._get_atom_and_nbr_fea.cache_info())
+
         # build model
         if args.debug:
             print("Instantiating model")
@@ -364,9 +378,11 @@ def main():
         if not CROSS_VAL and args.resume:
             if os.path.isfile(args.resume):
                 print("=> loading checkpoint '{}'".format(args.resume))
+                best_filename = f"out_{args.id}/model_best_{args.id}.pth.tar"
+                shutil.copyfile(args.resume, best_filename)
                 # ! TRUSTED SOURCE
                 checkpoint = torch.load(args.resume, weights_only=False)
-                args.start_epoch = checkpoint['epoch']
+                args.start_epoch = max(args.start_epoch, checkpoint['epoch'])
                 best_errors = checkpoint['best_errors']
                 model.load_state_dict(checkpoint['state_dict'])
                 optimizer.load_state_dict(checkpoint['optimizer'])
@@ -420,7 +436,7 @@ def main():
             scheduler.step()
 
             # remember the best error and save checkpoint
-            is_best = cur_errors < best_errors and epoch > 10
+            is_best = cur_errors <= best_errors and epoch > 10
             best_errors = min(cur_errors, best_errors) if epoch > 10 else best_errors
             save_checkpoint({
                 'epoch': epoch + 1,
@@ -506,6 +522,7 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers, cache=F
         set_frozen_encoder_parts_to_eval(model)
 
     end = time.time()
+    batch_time_start = perf_counter()
     epoch_batch_times = AverageMeter()
 
     # for i, (input, target, _) in enumerate(train_loader):
@@ -515,7 +532,6 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers, cache=F
     ) in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
-        batch_start = perf_counter()
 
         # ! EDTIED to use torch tensors
         atom_fea = atom_fea.to(device, non_blocking=True)
@@ -587,10 +603,9 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers, cache=F
         # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
-        batch_end = perf_counter()
-        epoch_batch_times.update(batch_end - batch_start)
+        batch_time_end = perf_counter()
+        epoch_batch_times.update(batch_time_end - batch_time_start)
         
-
         # ! print stats for each property
         if args.debug and i % args.print_freq == 0:
             print('\nEpoch: [{0}][{1}/{2}]\tLoss {loss.val:.4f} ({loss.avg:.4f})'.format(
@@ -624,7 +639,9 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers, cache=F
                     )
                 else:
                     raise ValueError(f"[STAT PRINT] Unrecognized task {TASK_SPECS[prop]['head']}")
-    
+
+        batch_time_start = perf_counter()
+
     return epoch_batch_times.avg
             
 
@@ -677,7 +694,12 @@ def validate(val_loader, model, criterion, normalizers, best_epoch=0, test=False
     for i, (
         (atom_fea, nbr_fea, nbr_fea_idx, crys_idx), 
         vectorizations, diagrams, targets, mask, batch_cif_ids
-    ) in enumerate(val_loader):
+    ) in tqdm(
+        enumerate(val_loader), 
+        desc='Val: ', 
+        total=len(val_loader),
+        disable=args.debug or not test,
+    ):
 
         # ! EDTIED to use torch tensors
         atom_fea = atom_fea.to(device, non_blocking=True)
@@ -959,6 +981,12 @@ def save_stats_as_csv(
             else:
                 raise ValueError(f"[STAT CSV] Unrecognized task {TASK_SPECS[prop]['head']}")
             writer.writerow(row)
+
+
+def time_to_str(time):
+    if time < 60:
+        return f"{time:.4f}s"
+    return f"{time / 3600:.0f}:{time / 60:.0f}:{time % 60:.0f}"
     
 
 def save_times(
@@ -968,16 +996,15 @@ def save_times(
         epoch_batch_avg_t, 
         epoch_avg_t
 ):
-    open_write_file(f'out', '')
+    open_write_file(f'out_{args.id}', '')
     with open(f'out_{args.id}/times_{args.id}.txt', 'w') as f:
-        f.write(f'Total Time: {total_t}\n')
+        f.write(f'Total Time: {time_to_str(total_t)}\n')
         f.write('Epoch 0\n')
-        f.write(f'Avg Batch Time: {epoch_0_batch_avg_t}\n')
-        f.write(f'Total Epoch Time: {epoch_0_t}\n')
+        f.write(f'Avg Batch Time: {time_to_str(epoch_0_batch_avg_t)}\n')
+        f.write(f'Total Epoch Time: {time_to_str(epoch_0_t)}\n')
         f.write('Other Epochs\n')
-        f.write(f'Avg Batch Time: {epoch_batch_avg_t}\n')
-        f.write(f'Avg Total Epoch Time: {epoch_avg_t}\n')
-    pass
+        f.write(f'Avg Batch Time: {time_to_str(epoch_batch_avg_t)}\n')
+        f.write(f'Avg Total Epoch Time: {time_to_str(epoch_avg_t)}\n')
 
 
 class NormalizerProp(object):

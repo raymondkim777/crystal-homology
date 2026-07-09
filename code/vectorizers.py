@@ -266,7 +266,8 @@ def save_image_transformer_bounds(source, image_transformers):
         image_bnds_list.append(bounds_tuple)
     
     # save JSON
-    file_path = open_write_file(f'{DATA_DIRECTORY}', f"image_bounds_{'g' if source == 'graph' else 'p'}.pkl")
+    ch = 'g' if source == 'graph' else 'p' if source == 'point' else 'c'
+    file_path = open_write_file(f'{DATA_DIRECTORY}', f"image_bounds_{ch}.pkl")
     with open(file_path, "wb") as f:
         pickle.dump(image_bnds_list, f)
 

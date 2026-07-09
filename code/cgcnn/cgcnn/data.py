@@ -8,12 +8,12 @@ import os
 import random
 import warnings
 
-from time import perf_counter
 import numpy as np
 import networkx as nx
 import torch
 import torch.nn as nn
 from pymatgen.core.structure import Structure
+from pymatgen.core.periodic_table import Element
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.dataloader import default_collate
 from torch.utils.data.sampler import SubsetRandomSampler
@@ -442,7 +442,7 @@ class GraphData(Dataset):
         self.gdf = GaussianDistance(dmin=dmin, dmax=dmax, step=step)
 
         # ! vectorization support
-        assert vec_source in ['graph', 'point'], 'incorrect vectorization source input!'
+        assert vec_source in ['graph', 'point', 'custom'], 'incorrect vectorization source input!'
         assert vector in ['none', 'image', 'landscape', 'perslay'], 'incorrect vectorization input!'
         self.dim_cnt = dims
         self.vector = vector
@@ -808,9 +808,8 @@ class CifData(Dataset):
         return atom_fea, nbr_fea, nbr_fea_idx
 
 
+    @functools.lru_cache(maxsize=None)
     def __getitem__(self, idx):
-        t0 = perf_counter()
-
         cif_id = self.id_prop_data[idx][0][0]
 
         # ! multitask targets
@@ -829,12 +828,8 @@ class CifData(Dataset):
             else:
                 raise ValueError(f'[CIFData] unrecognized target task {task_type}')
             mask[self.predict_list[i]] = torch.tensor([mask_list[i]]).bool()
-        
-        t1 = perf_counter()
 
         atom_fea, nbr_fea, nbr_fea_idx = self._get_atom_and_nbr_fea(cif_id)
-
-        t2 = perf_counter()
 
         # ! vectorization & normalization (optional)
         if self.vector == 'none':
@@ -849,8 +844,6 @@ class CifData(Dataset):
             diagrams = [torch.tensor(self.vector_dict[f'mp-{cif_id}'][dim], dtype=torch.float32)
                         for dim in range(self.dim_cnt)]  # list of np.ndarrays
 
-        t3 = perf_counter()
-
         # atom_fea = torch.Tensor(atom_fea)
         # nbr_fea = torch.Tensor(nbr_fea)
         # nbr_fea_idx = torch.LongTensor(nbr_fea_idx)
@@ -858,13 +851,4 @@ class CifData(Dataset):
 
         vectorizations = torch.tensor(vectorizations, dtype=torch.float32)
 
-        t4 = perf_counter()
-
-        # print(
-        #     f"{cif_id}: "
-        #     f"target={t1-t0:.4f}, "
-        #     f"atom_nbr_fea={t2-t1:.4f}, "
-        #     f"vector_np={t3-t2:.4f}, "
-        #     f"tensor={t4-t3:.4f}, "
-        # )
         return (atom_fea, nbr_fea, nbr_fea_idx), vectorizations, diagrams, targets, mask, cif_id

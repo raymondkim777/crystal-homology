@@ -57,7 +57,7 @@ def filter_copper_and_halide():
 
 
 def collect_cifs(id_list):
-    for mp_id in id_list:
+    for mp_id in tqdm(id_list, desc='Downloading: '):
         link = f'http://crystallography.net/cod/{mp_id}.cif'
         file_name = f'cod-{mp_id}.cif'
         response = requests.get(link, stream=True)
@@ -67,7 +67,7 @@ def collect_cifs(id_list):
             with open(file_path, 'wb') as file:
                 for chunk in response.iter_content(chunk_size=8192):
                     file.write(chunk)
-            print(f"Downloaded and saved {file_name} from COD")
+            # print(f"Downloaded and saved {file_name} from COD")
         else:
             print(f"Failed to download {file_name} from COD")
 
