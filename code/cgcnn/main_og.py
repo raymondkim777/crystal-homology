@@ -20,7 +20,7 @@ from torch.optim.lr_scheduler import MultiStepLR
 
 from time import perf_counter
 from cgcnn.loss import MultiTaskLoss
-from cgcnn.data import GraphData
+from cgcnn.data import CifData
 from cgcnn.data import collate_pool, get_train_val_test_loader, \
     get_fold_indices, get_train_val_test_loader_from_folds
 from cgcnn.model import CrystalGraphConvNet, \
@@ -153,37 +153,9 @@ def main():
     print("GPU Available", args.cuda)
 
     if args.delete and args.resume == '':
-        file_names = [f for f in os.listdir('.') if os.path.isfile(os.path.join('.', f))]
-
-        check_path = f"./checkpoint_{args.id}.pth.tar"
-        # model_path = f"./model_best_{args.id}.pth.tar"
-        model_paths = [
-            f"./{f}" for f in file_names 
-            if f.startswith(f"model_best_{args.id}")
-            and f.endswith(".pth.tar")
-        ]
-        # f"model_best_{args.id}_fold_{fold_it}.pth.tar"
-        stat_path = f"./test_stats_{args.id}.csv"
-        param_paths = f"./test_params_{args.id}.txt"
-        result_paths = [
-            f"./{f}" for f in file_names
-            if f.startswith(f"test_results_{args.id}")
-            and f.endswith(".csv")
-        ]
-        # result_paths = [f"./test_results_{args.id}_{prop}.csv" for prop in TASK_SPECS.keys()]
-        
-        if os.path.exists(check_path):
-            os.remove(check_path)
-        for model_path in model_paths:
-            if os.path.exists(model_path):
-                os.remove(model_path)
-        if os.path.exists(stat_path):
-            os.remove(stat_path)
-        if os.path.exists(param_paths):
-            os.remove(param_paths)
-        for result_path in result_paths:
-            if os.path.exists(result_path):
-                os.remove(result_path)
+        if os.path.exists(f'out_{args.id}'):
+            shutil.rmtree(f'out_{args.id}')
+    open_write_file(f'out_{args.id}', '')
     
     assert args.train in ['pretrain', 'abs', 'plqy'],\
         "Wrong train argument! Should be one of 'pretrain', 'abs', 'plqy'"
@@ -198,7 +170,7 @@ def main():
     # load data
     if args.debug:
         print("Constructing GraphData")
-    dataset = GraphData(
+    dataset = CifData(
         *args.data_options, 
         vec_source=args.vec_source,
         vector=args.vector,
@@ -256,10 +228,16 @@ def main():
         else:
             raise ValueError(f"[TRAIN STATS] Unknown task {value['head']}")
 
+    # ! time logging for all folds
+    total_times = AverageMeter()
+    epoch_0_batch_times = AverageMeter()
+    epoch_0_times = AverageMeter()
+    epoch_n_batch_times = AverageMeter()
+    epoch_n_times = AverageMeter()
+
     # k-fold cross validation
     fold_num = args.fold if CROSS_VAL else 1
     for fold_it in range(fold_num):
-
         best_errors = float('inf')
 
         if CROSS_VAL:
@@ -403,13 +381,27 @@ def main():
         scheduler = MultiStepLR(optimizer, milestones=args.lr_milestones,
                                 gamma=0.1)
 
+        t_start_train = perf_counter()
         if args.debug:
             print("Starting training epochs")
         for epoch in tqdm(range(args.start_epoch, args.epochs), desc='Epochs: ', disable=args.debug):
+            t_start_epoch = perf_counter()
+            
             # train for one epoch
             if args.debug:
                 print(f"Training epoch {epoch}")
-            train(train_loader, model, criterion, optimizer, epoch, normalizers)
+            avg_batch_time = train(
+                train_loader, model, criterion, optimizer, 
+                epoch, normalizers, cache=epoch==0
+            )
+
+            t_end_train = perf_counter()
+            if epoch == 0:
+                epoch_0_times.update(t_end_train - t_start_epoch)
+                epoch_0_batch_times.update(avg_batch_time)
+            else:
+                epoch_n_times.update(t_end_train - t_start_epoch)
+                epoch_n_batch_times.update(avg_batch_time)
 
             # evaluate on validation set
             if args.debug:
@@ -446,9 +438,9 @@ def main():
         # ! PyTorch 2.6 safety measure: only load model weights -> extra argument
         
         if CROSS_VAL:
-            best_checkpoint_path = f"checkpoints/model_best_{args.id}_fold_{fold_it}.pth.tar"
+            best_checkpoint_path = f"out_{args.id}/model_best_{args.id}_fold_{fold_it}.pth.tar"
         else:
-            best_checkpoint_path = f'checkpoints/model_best_{args.id}.pth.tar'
+            best_checkpoint_path = f'out_{args.id}/model_best_{args.id}.pth.tar'
 
         best_checkpoint = torch.load(best_checkpoint_path, weights_only=False)
         best_epochs.append(best_checkpoint['epoch'])
@@ -459,12 +451,16 @@ def main():
             best_epoch=best_checkpoint['epoch'], 
             test=True
         )
+
         # saving validation stats to total stats
         total_losses.update(test_loss)
         total_errors.update(test_error)
         for prop, value in TASK_SPECS.items():
             for stat, avg_meter in stat_dict[prop].items():
                 total_stats[prop][stat].update(avg_meter.avg)
+        
+        t_end_train = perf_counter()
+        total_times.update(t_end_train - t_start_train)
     
     # ! save results
     save_stats_as_csv(
@@ -473,9 +469,16 @@ def main():
         total_error=total_errors.avg,
         stats_dict=total_stats
     )
+    save_times(
+        total_t=total_times.avg,
+        epoch_0_batch_avg_t=epoch_0_batch_times.avg,
+        epoch_0_t=epoch_0_times.avg, 
+        epoch_batch_avg_t=epoch_n_batch_times.avg, 
+        epoch_avg_t=epoch_n_times.avg,
+    )
 
 
-def train(train_loader, model, criterion, optimizer, epoch, normalizers):
+def train(train_loader, model, criterion, optimizer, epoch, normalizers, cache=False):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     # ! stat trackers for each metric per head
@@ -503,6 +506,8 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers):
         set_frozen_encoder_parts_to_eval(model)
 
     end = time.time()
+    epoch_batch_times = AverageMeter()
+
     # for i, (input, target, _) in enumerate(train_loader):
     for i, (
         (atom_fea, nbr_fea, nbr_fea_idx, crys_idx), 
@@ -510,6 +515,7 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers):
     ) in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
+        batch_start = perf_counter()
 
         # ! EDTIED to use torch tensors
         atom_fea = atom_fea.to(device, non_blocking=True)
@@ -581,6 +587,9 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers):
         # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
+        batch_end = perf_counter()
+        epoch_batch_times.update(batch_end - batch_start)
+        
 
         # ! print stats for each property
         if args.debug and i % args.print_freq == 0:
@@ -615,6 +624,8 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers):
                     )
                 else:
                     raise ValueError(f"[STAT PRINT] Unrecognized task {TASK_SPECS[prop]['head']}")
+    
+    return epoch_batch_times.avg
             
 
 def validate(val_loader, model, criterion, normalizers, best_epoch=0, test=False):
@@ -792,7 +803,7 @@ def validate(val_loader, model, criterion, normalizers, best_epoch=0, test=False
                     )
                 else:
                     raise ValueError(f"[STAT PRINT] Unrecognized task {TASK_SPECS[prop]['head']}")
-    
+
     # finished validation testing    
     if args.debug:
         print('Final Test\tLoss {loss.val:.4f} ({loss.avg:.4f})'.format(loss=losses))
@@ -849,7 +860,7 @@ def validate(val_loader, model, criterion, normalizers, best_epoch=0, test=False
         
         # ! saving results for each prop
         for prop, values in test_stats.items():
-            with open(f'test_results_{args.id}_{prop}.csv', 'w', newline='', encoding='utf-8') as file_results:
+            with open(f'out_{args.id}/test_results_{args.id}_{prop}.csv', 'w', newline='', encoding='utf-8') as file_results:
                 writer = csv.writer(file_results)
 
                 if TASK_SPECS[prop]['head'] in ['binary', 'multiclass']:
@@ -905,8 +916,7 @@ def save_stats_as_csv(
     if args.debug:
         print("Saving test results and stats as CSV")
     
-    open_write_file(f'out', '')
-    with open(f'out/test_params_{args.id}.txt', 'w') as f:
+    with open(f'out_{args.id}/test_params_{args.id}.txt', 'w') as f:
         f.write(f'Source:\t\t\t{args.vec_source}\nVector:\t\t\t{args.vector}')
         f.write(f'\nAtom Len:\t\t{args.atom_fea_len}\nConv Num:\t\t{args.n_conv}')
         f.write(f'\nHidden Len:\t\t{args.h_fea_len}\nHidden Num:\t\t{args.n_h}\nHead Layer Num:\t{args.n_o}')
@@ -915,7 +925,7 @@ def save_stats_as_csv(
     
     import csv
     # ! saving stats for each prop
-    with open(f'out/test_stats_{args.id}.csv', 'w', newline='', encoding='utf-8') as file_stats:
+    with open(f'out_{args.id}/test_stats_{args.id}.csv', 'w', newline='', encoding='utf-8') as file_stats:
         writer = csv.writer(file_stats)
         header = ['head', 'task', 'loss', 'nrmse', 'accuracy', 'precision', 'recall', 'f1', 'auroc']
         writer.writerow(header)
@@ -950,6 +960,25 @@ def save_stats_as_csv(
                 raise ValueError(f"[STAT CSV] Unrecognized task {TASK_SPECS[prop]['head']}")
             writer.writerow(row)
     
+
+def save_times(
+        total_t,
+        epoch_0_batch_avg_t,
+        epoch_0_t, 
+        epoch_batch_avg_t, 
+        epoch_avg_t
+):
+    open_write_file(f'out', '')
+    with open(f'out_{args.id}/times_{args.id}.txt', 'w') as f:
+        f.write(f'Total Time: {total_t}\n')
+        f.write('Epoch 0\n')
+        f.write(f'Avg Batch Time: {epoch_0_batch_avg_t}\n')
+        f.write(f'Total Epoch Time: {epoch_0_t}\n')
+        f.write('Other Epochs\n')
+        f.write(f'Avg Batch Time: {epoch_batch_avg_t}\n')
+        f.write(f'Avg Total Epoch Time: {epoch_avg_t}\n')
+    pass
+
 
 class NormalizerProp(object):
     """Normalize a Tensor for one property and restore it later. """
@@ -1076,14 +1105,13 @@ class AverageMeter(object):
         self.avg = self.sum / self.count if self.count != 0 else 0
 
 
-def save_checkpoint(state, is_best, fold_it, filename=f'checkpoints/checkpoint_{args.id}.pth.tar'):
-    open_write_file('checkpoints', '')
+def save_checkpoint(state, is_best, fold_it, filename=f'out_{args.id}/checkpoint_{args.id}.pth.tar'):
     torch.save(state, filename)
     if is_best:
         if CROSS_VAL:
-            best_filename = f"checkpoints/model_best_{args.id}_fold_{fold_it}.pth.tar"
+            best_filename = f"out_{args.id}/model_best_{args.id}_fold_{fold_it}.pth.tar"
         else:
-            best_filename = f"checkpoints/model_best_{args.id}.pth.tar"
+            best_filename = f"out_{args.id}/model_best_{args.id}.pth.tar"
         shutil.copyfile(filename, best_filename)
 
 

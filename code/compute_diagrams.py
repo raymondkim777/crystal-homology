@@ -33,6 +33,7 @@ STRUCTURE_DIRECTORY = None
 DIAGRAM_GRAPH_DIRECTORY = None
 DIAGRAM_POINT_DIRECTORY = None
 MAX_DIST = None
+LABEL = None
 
 
 def _parse_args():
@@ -70,7 +71,7 @@ def plot_persistence_diagram(mp_id, diagram) -> None:
 
 
 def compute_persistence_diagrams_graph() -> None:
-    print(f"------ GRAPH PERSISTENCE ------")
+    print(f"------ {{{LABEL}}} GRAPH PERSISTENCE ------")
     n_jobs = get_num_cpus()
     print(f"Using {n_jobs} job processes")
     
@@ -191,6 +192,9 @@ def get_structures_from_cif_plqy_full(filepath: str) -> list:
 
 
 def compute_dist_mat_for_cif(args):
+    '''
+    distance matrix is normalized; max pairwise distance is 1
+    '''
     # accept one tuple for multiprocessing
     system, filename, structure, plqy, plqy_full = args
 
@@ -212,6 +216,7 @@ def compute_dist_mat_for_cif(args):
     n = len(structure)
     dist_mat = np.zeros((n, n))
 
+    max_dist = 0
     for i in range(n):
         for j in range(i + 1, n):
             dist, jimage = structure.lattice.get_distance_and_image(
@@ -220,11 +225,13 @@ def compute_dist_mat_for_cif(args):
             )
             dist_mat[i, j] = dist
             dist_mat[j, i] = dist
+            max_dist = max(max_dist, dist)
+    if max_dist == 0:
+        max_dist = 1
+    return filename[:-4], dist_mat / max_dist   # normalized to 1
 
-    return filename[:-4], dist_mat
 
-
-def cif_to_dist_mat(plqy=False, plqy_full=False):
+def cif_to_dist_mat_norm(plqy=False, plqy_full=False):
     n_workers = get_num_cpus()
     dist_dict = dict()
 
@@ -247,6 +254,8 @@ def cif_to_dist_mat(plqy=False, plqy_full=False):
         else:
             tasks = [(system, filename, None, plqy, plqy_full) for filename in cif_files]
 
+        uncompleted_files = set([filename[:-4] for filename in cif_files])
+
         with ProcessPoolExecutor(
             max_workers=n_workers,
         ) as executor:
@@ -257,10 +266,12 @@ def cif_to_dist_mat(plqy=False, plqy_full=False):
             for future in tqdm(
                 as_completed(futures),
                 total=len(futures),
-                desc=f"PC for {system}: ",
+                desc=f"{system}: ",
             ):
                 crystal_id, dist_mat = future.result()
                 system_dist_mats[crystal_id] = dist_mat
+                uncompleted_files.remove(crystal_id)
+                print(uncompleted_files)
 
         # with ProcessPoolExecutor(
         #     max_workers=n_workers, 
@@ -275,16 +286,16 @@ def cif_to_dist_mat(plqy=False, plqy_full=False):
 
 
 def compute_persistence_diagrams_point(plqy=False, plqy_full=False):
-    print(f"------ POINT CLOUD PERSISTENCE ------")
+    print(f"------ {{{LABEL}}} POINT CLOUD PERSISTENCE ------")
     n_workers = get_num_cpus()
     print(f"Using {n_workers} job processes")
 
-    # compute distance matrices for each crystal for each system
-    dist_dict = cif_to_dist_mat(plqy=plqy, plqy_full=plqy_full)
+    # compute normalized distance matrices for each crystal for each system
+    dist_dict = cif_to_dist_mat_norm(plqy=plqy, plqy_full=plqy_full)
 
     rips = RipsPersistence(
         homology_dimensions=tuple(range(DIMENSION_CNT)),
-        threshold=MAX_DIST, 
+        threshold=0.5, 
         input_type='full distance matrix', 
         n_jobs=n_workers,
     )
@@ -323,8 +334,8 @@ def compute_persistence_diagrams_point(plqy=False, plqy_full=False):
         }
 
         # print diagram info
-        print(f"diagram cnt: {len(diagrams)}")
-        point_diagram_list = diagrams[0]
+        print(f"diagram cnt: {len(diagrams_filtered)}")
+        point_diagram_list = diagrams_filtered[0]
         print("Persistence Diagram Shape for H0:", point_diagram_list[0].shape)
         print("Points (Birth, Death) for H0:\n", point_diagram_list[0])
     
@@ -348,19 +359,19 @@ def modify_dist_mat(dist_mat, graph):
 
 
 def compute_persistence_diagrams_custom(plqy=False, plqy_full=False):
-    print(f"------ CUSTOM POINT CLOUD PERSISTENCE ------")
+    print(f"------ {{{LABEL}}} CUSTOM POINT CLOUD PERSISTENCE ------")
     n_workers = get_num_cpus()
     print(f"Using {n_workers} job processes")
 
     print(f"Unpacking all graphs...")
     graph_dict = unpack_all_graphs()
 
-    # compute distance matrices for each crystal for each system
-    dist_dict = cif_to_dist_mat(plqy=plqy, plqy_full=plqy_full)
+    # compute normalized distance matrices for each crystal for each system
+    dist_dict = cif_to_dist_mat_norm(plqy=plqy, plqy_full=plqy_full)
 
     rips = RipsPersistence(
         homology_dimensions=tuple(range(DIMENSION_CNT)),
-        threshold=MAX_DIST, 
+        threshold=0.5, 
         input_type='full distance matrix', 
         n_jobs=n_workers,
     )
@@ -370,9 +381,11 @@ def compute_persistence_diagrams_custom(plqy=False, plqy_full=False):
         print(f"Computing PD for {system}")
 
         # modify dist matrix s.t. graph edges have dist 0
-        dist_mat_system = list(dist_dict[system].values())
-        dist_mat_system = list(map(modify_dist_mat, 
-                                   zip(dist_mat_system, graph_dict[system].values())))
+        dist_mat_system = [
+            modify_dist_mat(dist_dict[system][id], graph_dict[system][id])
+            for id in dist_dict[system]
+        ]
+        # dist_mat_system = list(map(modify_dist_mat, dist_dict[system].values(), graph_dict[system].values()))
 
         if len(dist_mat_system) == 0:
             print(f"No crystals for {system} system!")
@@ -403,8 +416,8 @@ def compute_persistence_diagrams_custom(plqy=False, plqy_full=False):
         }
 
         # print diagram info
-        print(f"diagram cnt: {len(diagrams)}")
-        point_diagram_list = diagrams[0]
+        print(f"diagram cnt: {len(diagrams_filtered)}")
+        point_diagram_list = diagrams_filtered[0]
         print("Persistence Diagram Shape for H0:", point_diagram_list[0].shape)
         print("Points (Birth, Death) for H0:\n", point_diagram_list[0])
     
@@ -440,6 +453,8 @@ if __name__ == "__main__":
     DIAGRAM_POINT_DIRECTORY = f"{DATA_DIRECTORY}/diagrams_p"
     DIAGRAM_CUSTOM_DIRECTORY = f"{DATA_DIRECTORY}/diagrams_c"
     MAX_DIST = get_max_dist(DATA_DIRECTORY)
+
+    LABEL = 'ABS' if args.abs else 'PLQY' if args.plqy else 'PLQY-FULL' if args.plqy_full else 'PRETRAIN'
 
     if args.source == 'graph':
         compute_persistence_diagrams_graph()

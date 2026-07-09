@@ -24,6 +24,7 @@ PLQY_FULL_PATH = 'data/plqy-full'
 PLQY_FULL_CIF_PATH = f'{PLQY_FULL_PATH}/cif'
 PLQY_FULL_CIF_RAW_PATH = f'{PLQY_FULL_PATH}/cif-raw'
 PLQY_FULL_DOC_PATH = f'{PLQY_FULL_PATH}/cod-plqy'
+PROBLEM_CIFS = ['cod-7058666.cif']
 
 
 def _parse_args():
@@ -80,7 +81,8 @@ def fetch_cif_filenames() -> list:
         for entry in entries:
             if not entry.is_file():
                 continue
-            cif_files.append(entry.name)
+            if entry.name not in PROBLEM_CIFS:
+                cif_files.append(entry.name)
     return cif_files
 
 
