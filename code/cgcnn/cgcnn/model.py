@@ -83,7 +83,7 @@ class CrystalGraphEncoder(nn.Module):
             vec_fea_len=64, n_vec=1,
             # classification=False, num_classes=2,
             vec_source='graph', vector='none', weight='none', phi='none',
-            dims=3, root_dir='data/graph_data'
+            dims=2, root_dir='data/graph_data'
     ):
         super().__init__()
 
@@ -196,7 +196,7 @@ class CrystalGraphEncoder(nn.Module):
                     for i in range(len(self.perslays))
                 ], dim=1)
             # vec processing layers
-            vec_fea = self.vec_embedding(vectorizations)
+            vec_fea = self.vec_embedding(vec_fea)
             for vec_fc in self.vec_fcs:
                 vec_fea = vec_fc(vec_fea)
             vec_fea = self.vec_pooling(vec_fea)

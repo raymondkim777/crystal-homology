@@ -254,7 +254,7 @@ def persistence_landscape(
 def pad_bounds(bound_x, bound_y, eps=0.001):
     if bound_x == bound_y:
         bound_x -= eps
-        bound_y -= eps
+        bound_y += eps
     return (bound_x, bound_y)
 
 

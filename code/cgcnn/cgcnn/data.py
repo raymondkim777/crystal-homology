@@ -12,11 +12,13 @@ import numpy as np
 import networkx as nx
 import torch
 import torch.nn as nn
-from pymatgen.core.structure import Structure
-from pymatgen.core.periodic_table import Element
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.dataloader import default_collate
 from torch.utils.data.sampler import SubsetRandomSampler
+
+from pymatgen.core import Lattice
+from pymatgen.core.structure import Structure
+from pymatgen.core.periodic_table import Element
 
 
 def get_fold_indices(dataset, k=5):
@@ -404,14 +406,18 @@ class GraphData(Dataset):
             dmax=16,    # ! shared encoder, so should be max val for pretrain/abs/plqy      # 15.42974841
             step=0.2,
             random_seed=42,
+            attr=False,
             vec_source='graph', 
             vector='none',  # 'none', 'image', 'landscape', 'perslay
             dims=3,
             task_specs=None,
+            warn=False,
     ):
         self.root_dir = root_dir  # cgcnn/data/graph_data
         self.max_num_nbr = max_num_nbr
         self.task_specs = task_specs
+        self.warn = warn
+        self.attr = attr
         assert os.path.exists(root_dir), 'root_dir does not exist!'
         id_prop_file = os.path.join(self.root_dir, 'id_prop.csv')
         assert os.path.exists(id_prop_file), 'id_prop.csv does not exist!'
@@ -478,8 +484,35 @@ class GraphData(Dataset):
         return delta_cart
     
 
+    def __periodic_mean(self, cid, frac_coords, eps=1e-4):
+        frac_coords_np = np.asarray(frac_coords)
+        angles = 2.0 * np.pi * frac_coords_np
+
+        sin_mean = np.sin(angles).mean(axis=0)
+        cos_mean = np.cos(angles).mean(axis=0)
+
+        if self.warn and np.any(np.sqrt(sin_mean ** 2 + cos_mean ** 2) <= eps):
+            warnings.warn(f"Crystal {cid}: Periodic mean is ambiguous along at least one axis", UserWarning)
+        
+        mean_angles = np.arctan2(sin_mean, cos_mean)
+        mean_frac = mean_angles / (2.0 * np.pi)
+        return mean_frac
+    
+
+    def __find_distances(self, cid, graph, lattice_matrix):
+        frac_coords = np.array([
+            graph.nodes[i]['coords'] for i in graph.nodes
+        ], dtype=float)
+        lattice = Lattice(lattice_matrix)
+
+        center_frac = self.__periodic_mean(cid, frac_coords)
+        # center_cart = lattice.get_cartesian_coords(center_frac)
+        dists = lattice.get_all_distances(frac_coords, center_frac[None, :])[:, 0]
+        return dists
+    
+
     @functools.lru_cache(maxsize=None)  # Cache computed attributes
-    def _load_graph_dict(self, mp_id):
+    def __load_graph_dict(self, mp_id):
         with open(os.path.join(self.root_dir, "graphs", f"mp-{mp_id}.pkl"), 'rb') as file:
             return pickle.load(file)
 
@@ -504,7 +537,7 @@ class GraphData(Dataset):
                 raise ValueError(f'[GraphData] unrecognized target task {task_type}')
             mask[self.predict_list[i]] = torch.tensor([mask_list[i]]).bool()
 
-        graph_dict = self._load_graph_dict(mp_id)
+        graph_dict = self.__load_graph_dict(mp_id)
         graph = graph_dict['graph']
 
         ########################
@@ -536,6 +569,17 @@ class GraphData(Dataset):
         else:
             raise TypeError(f"[DATA Atom Feature] Incorrect node species data type")
 
+        if self.attr:
+            # add distance to periodic center
+            dists_to_periodic_center = self.__find_distances(
+                cid=mp_id, 
+                graph=graph, 
+                lattice_matrix=graph_dict['lattice_matrix']
+            )[:, np.newaxis]
+            atom_fea = np.hstack((feature_list, dists_to_periodic_center))
+        else:
+            atom_fea = np.vstack(feature_list)
+
         # # add fractional coordinates as periodic coordinates
         # periodic_coords = [
         #     np.hstack([
@@ -545,8 +589,6 @@ class GraphData(Dataset):
         #     for node in graph.nodes
         # ]
         # atom_fea = np.hstack((feature_list, periodic_coords))
-        # ! ABLATION
-        atom_fea = np.vstack(feature_list)
 
         # neighbor features (edge attributes)
         nbr_fea_idx, nbr_fea = [], []
@@ -610,9 +652,6 @@ class GraphData(Dataset):
         vectorizations = torch.Tensor(vectorizations)
         return (atom_fea, nbr_fea, nbr_fea_idx), vectorizations, diagrams, targets, mask, mp_id
     
-
-
-
 
 class CifData(Dataset):
     """
@@ -729,14 +768,6 @@ class CifData(Dataset):
 
     def __len__(self):
         return len(self.id_prop_data)
-    
-
-    def __cart_vector(self, coord_start, coord_end, jimage, matrix):
-        jimage = np.array(jimage)
-
-        delta_frac = coord_end + jimage - coord_start
-        delta_cart = delta_frac @ matrix
-        return delta_cart
     
 
     @functools.lru_cache(maxsize=None)  # Cache computed attributes

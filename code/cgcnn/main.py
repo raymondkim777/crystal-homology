@@ -100,6 +100,8 @@ parser.add_argument('--seed', action='store_true',
 # parser.add_argument('--num-classes', default=2, type=int)
 parser.add_argument('--delete', action='store_true',
                     help='deletes generated training files before training')
+parser.add_argument('--warn', action='store_true',
+                    help="print warnings (doesn't suppress errors)")
 parser.add_argument('--id', default=0, type=int, metavar='N',
                     help='identifier for multiple checkpoint/models')
 parser.add_argument('--dims', default=3, type=int,
@@ -110,6 +112,8 @@ parser.add_argument('--norm-sample', default=2000, type=int,
 
 parser.add_argument('--fold', default=0, type=int, 
                     help='use k-fold cross validation for val/test')
+parser.add_argument('--attr', action='store_true', 
+                    help='add node attributes to input')
 parser.add_argument('--vec-source', default='graph', type=str,
                     help='choose a vectorization source: graph, point')
 parser.add_argument('--vector', default='none', type=str,
@@ -120,16 +124,22 @@ parser.add_argument('--phi', default='none', type=str,
                     help='choose a transformation function: none, image, landscape, betti')
 parser.add_argument('--train', default='pretrain', type=str, 
                     help='choose training type: pretrain, abs, plqy')
-parser.add_argument('--freeze-vectors', action='store_true', 
-                    help='freezes vectorization MLP for abs/plqy fine-tuning')
+parser.add_argument('--freeze-vectors', default='none', type=str, 
+                    help="'none', 'abs', 'plqy', 'both'")
+# parser.add_argument('--freeze-vectors', action='store_true', 
+#                     help='freezes vectorization MLP for abs/plqy fine-tuning')
 
 
 parser.add_argument('--finetune', default='', type=str, metavar='PATH',
                     help='path to pretrain checkpoint')
+parser.add_argument('--finetune-auto', action='store_true', 
+                    help='finetune, automatically finds path')
 parser.add_argument('--val-metric', default='error', type=str,
                     help="validation metric: ['error', 'loss']")
 parser.add_argument('--clear-cache', action='store_true',
                     help="whether to clear dataloader cache before training")
+parser.add_argument('--save-fold', action='store_true',
+                    help="whether to save fold checkpoints")
 
 
 args = parser.parse_args(sys.argv[1:])
@@ -161,11 +171,13 @@ def main():
     
     assert args.train in ['pretrain', 'abs', 'plqy'],\
         "Wrong train argument! Should be one of 'pretrain', 'abs', 'plqy'"
-    assert (args.train == 'pretrain' and args.finetune == '')or (args.train != 'pretrain' and args.finetune != ''), \
+    finetune_true = args.finetune != '' or args.finetune_auto
+    assert (args.train == 'pretrain' and not finetune_true) or (args.train != 'pretrain' and finetune_true), \
         "No finetune arg if train=pretrain, and need finetune arg if train=abs/plqy"
-    assert args.resume == '' or args.finetune == '', "Choose one of resume or finetune!"
+    assert args.resume == '' or not finetune_true, "Choose one of resume or finetune!"
     assert args.val_metric in ['error', 'loss']
     assert args.vec_source in ['graph', 'point', 'custom']
+    assert args.freeze_vectors in ['none', 'abs', 'plqy', 'both']
     assert not CROSS_VAL or args.train != 'pretrain',\
         "[STOP] Should not run k-fold cross validation on pretrain dataset!"
 
@@ -174,10 +186,12 @@ def main():
         print("Constructing GraphData")
     dataset = GraphData(
         *args.data_options, 
+        attr=args.attr,
         vec_source=args.vec_source,
         vector=args.vector,
         dims=args.dims,
-        task_specs=TASK_SPECS
+        task_specs=TASK_SPECS,
+        warn=args.warn,
     )
     collate_fn = collate_pool
 
@@ -278,11 +292,11 @@ def main():
         # ! clear dataloader cache
         if args.clear_cache:
             print("Dataset cache:", train_loader.dataset.__getitem__.cache_info())
-            print("Graph cache:", train_loader.dataset._load_graph_dict.cache_info())
+            print("Graph cache:", train_loader.dataset._GraphData__load_graph_dict.cache_info())
             train_loader.dataset.__getitem__.cache_clear()
-            train_loader.dataset._load_graph_dict.cache_clear()
+            train_loader.dataset._GraphData__load_graph_dict.cache_clear()
             print("Cleared dataset cache", train_loader.dataset.__getitem__.cache_info())
-            print("Cleared graph cache", train_loader.dataset._load_graph_dict.cache_info())
+            print("Cleared graph cache", train_loader.dataset._GraphData__load_graph_dict.cache_info())
 
         # build model
         if args.debug:
@@ -307,21 +321,41 @@ def main():
             phi=args.phi,
             dims=args.dims,
             # ! miscellaneous arguments
-            root_dir=args.data_options,
+            root_dir=args.data_options[0],
             task_specs=TASK_SPECS,
         )
 
         # ! if fine-tune, freeze lower encoder layers
         if args.train in ['abs', 'plqy']:
-            assert args.finetune != ''
+            assert args.finetune != '' or args.finetune_auto
+            assert args.finetune == '' or not args.finetune_auto
+
+            if args.finetune_auto:
+                prefix = 'pre' if args.data_options[0][5:8] == 'abs' else 'abs'
+                in_filename = f"{prefix}" \
+                + f"_{args.atom_fea_len}" \
+                + f"_{args.n_conv}" \
+                + f"_{args.h_fea_len}" \
+                + f"_{args.n_h}" \
+                + f"_{args.n_o}" \
+                + (f'_attr' if args.attr else '') \
+                + (f'_{args.vec_fea_len}_{args.n_vec}' if args.vector != 'none' else '') \
+                + (f'_image{args.vec_source[0]}' if args.vector == 'image' else '') \
+                + (f'_land{args.vec_source[0]}' if args.vector == 'landscape' else '') \
+                + (f'_pers{args.vec_source[0]}' if args.vector == 'perslay' else '') \
+                + (f'_fr_{args.freeze_vectors}' if args.train == 'plqy' and args.freeze_vectors != 'none' else '') \
+                + ".pth.tar"
+            else:
+                in_filename = args.finetune
+            in_filepath = f'./checkpoints/{in_filename}'
 
             # load checkpoint encoder weights
-            if not os.path.isfile(args.finetune):
-                raise ValueError(f"=> no pretrained checkpoint found at '{args.finetune}'")
-            print(f"=> Loading pretrained checkpoint '{args.finetune}'")
+            if not os.path.isfile(in_filepath):
+                raise ValueError(f"=> no pretrained checkpoint found at '{in_filepath}'")
+            print(f"=> Loading pretrained checkpoint '{in_filepath}'")
 
             # load checkpoint from file
-            checkpoint = torch.load(args.finetune, weights_only=True)     # may set weights to Falseff
+            checkpoint = torch.load(in_filepath, weights_only=True)     # may set weights to Falseff
 
             # isolate encoder state dict
             if not any(k.startswith("encoder.") for k in checkpoint['state_dict']):
@@ -340,8 +374,9 @@ def main():
                 encoder_state_dict, 
                 strict=True
             )
-            print(f"=> loaded checkpoint '{args.finetune}' encoder")
-            freeze_lower_encoder(model=model, freeze_vectors=args.freeze_vectors)
+            print(f"=> loaded checkpoint '{in_filepath}' encoder")
+            freeze_vectors = args.freeze_vectors in [args.train, 'both']
+            freeze_lower_encoder(model=model, freeze_vectors=freeze_vectors)
 
         # ! updated tensor cuda code
         if args.debug:
@@ -350,7 +385,7 @@ def main():
 
         # ! moving torchPerslay inner params to cuda
         if args.vector == 'perslay':
-            for perslay in model.perslays:
+            for perslay in model.encoder.perslays:
                 perslay.phi.mu = perslay.phi.mu.to(device)
                 perslay.phi.M = tuple(m.to(device) for m in perslay.phi.M)
 
@@ -405,7 +440,7 @@ def main():
                 print(f"Training epoch {epoch}")
             avg_batch_time = train(
                 train_loader, model, criterion, optimizer, 
-                epoch, normalizers, cache=epoch==0
+                epoch, normalizers,
             )
 
             t_end_train = perf_counter()
@@ -433,8 +468,8 @@ def main():
             scheduler.step()
 
             # remember the best error and save checkpoint
-            is_best = cur_errors <= best_errors and epoch > 10
-            best_errors = min(cur_errors, best_errors) if epoch > 10 else best_errors
+            is_best = cur_errors <= best_errors and epoch >= 10
+            best_errors = min(cur_errors, best_errors) if epoch >= 10 else best_errors
             save_checkpoint({
                 'epoch': epoch + 1,
                 'state_dict': model.state_dict(),
@@ -466,19 +501,24 @@ def main():
         )
 
         # copy best model to ./checkpoints
-        filename = f"{args.data_options[0][5:8]}" \
+        out_filename = f"{args.data_options[0][5:8]}" \
             + f"_{args.atom_fea_len}" \
             + f"_{args.n_conv}" \
             + f"_{args.h_fea_len}" \
             + f"_{args.n_h}" \
             + f"_{args.n_o}" \
+            + (f'_attr' if args.attr else '') \
             + (f'_{args.vec_fea_len}_{args.n_vec}' if args.vector != 'none' else '') \
             + (f'_image{args.vec_source[0]}' if args.vector == 'image' else '') \
             + (f'_land{args.vec_source[0]}' if args.vector == 'landscape' else '') \
+            + (f'_pers{args.vec_source[0]}' if args.vector == 'perslay' else '') \
+            + (f'_fr_{args.freeze_vectors}' if args.freeze_vectors != 'none' else '') \
             + (f'_fold_{fold_it}' if CROSS_VAL else '') \
             + ".pth.tar"
-        shutil.copyfile(best_checkpoint_path, f"checkpoints/{filename}")
-        print(f"Saved best model to: {filename}")
+        out_filepath = f"checkpoints/{out_filename}"
+        if not CROSS_VAL or (CROSS_VAL and args.save_fold):
+            shutil.copyfile(best_checkpoint_path, out_filepath)
+            print(f"Saved best model to: {out_filepath}")
 
         # saving validation stats to total stats
         total_losses.update(test_loss)
@@ -506,7 +546,7 @@ def main():
     )
 
 
-def train(train_loader, model, criterion, optimizer, epoch, normalizers, cache=False):
+def train(train_loader, model, criterion, optimizer, epoch, normalizers):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     # ! stat trackers for each metric per head
@@ -534,6 +574,7 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers, cache=F
         set_frozen_encoder_parts_to_eval(model)
 
     end = time.time()
+    batch_time_start = perf_counter()
     epoch_batch_times = AverageMeter()
 
     # for i, (input, target, _) in enumerate(train_loader):
@@ -543,8 +584,7 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers, cache=F
     ) in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
-        batch_start = perf_counter()
-
+        
         # ! EDTIED to use torch tensors
         atom_fea = atom_fea.to(device, non_blocking=True)
         nbr_fea = nbr_fea.to(device, non_blocking=True)
@@ -615,8 +655,8 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers, cache=F
         # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
-        batch_end = perf_counter()
-        epoch_batch_times.update(batch_end - batch_start)
+        batch_time_end = perf_counter()
+        epoch_batch_times.update(batch_time_end - batch_time_start)
         
 
         # ! print stats for each property
@@ -652,7 +692,9 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers, cache=F
                     )
                 else:
                     raise ValueError(f"[STAT PRINT] Unrecognized task {TASK_SPECS[prop]['head']}")
-    
+                
+        batch_time_start = perf_counter()
+        
     return epoch_batch_times.avg
             
 
@@ -950,11 +992,13 @@ def save_stats_as_csv(
         print("Saving test results and stats as CSV")
     
     with open(f'out_{args.id}/test_params_{args.id}.txt', 'w') as f:
-        f.write(f'Source:\t\t\t{args.vec_source}\nVector:\t\t\t{args.vector}')
+        f.write(f"Attributes:\t\t{'Yes' if args.attr else 'No'}")
+        f.write(f'\nSource:\t\t\t{args.vec_source}\nVector:\t\t\t{args.vector}')
         f.write(f'\nAtom Len:\t\t{args.atom_fea_len}\nConv Num:\t\t{args.n_conv}')
         f.write(f'\nHidden Len:\t\t{args.h_fea_len}\nHidden Num:\t\t{args.n_h}\nHead Layer Num:\t{args.n_o}')
         f.write(f'\nVec Len:\t\t{args.vec_fea_len}\nVec Layer Num:\t{args.n_vec}')
-        f.write(f'\nBest Epochs:\t\t{", ".join(list(map(str, best_epochs)))}')
+        f.write(f"\nVec Freeze:\t\t{args.freeze_vectors}")
+        f.write(f'\nBest Epochs:\t{", ".join(list(map(str, best_epochs)))}')
     
     import csv
     # ! saving stats for each prop
@@ -997,7 +1041,7 @@ def save_stats_as_csv(
 def time_to_str(time):
     if time < 60:
         return f"{time:.4f}s"
-    return f"{time / 3600:.0f}:{time / 60:.0f}:{time % 60:.0f}"
+    return f"{time / 3600:02.0f}:{time / 60:02.0f}:{time % 60:05.2f}"
     
 
 def save_times(
@@ -1010,10 +1054,10 @@ def save_times(
     open_write_file(f'out_{args.id}', '')
     with open(f'out_{args.id}/times_{args.id}.txt', 'w') as f:
         f.write(f'Total Time: {time_to_str(total_t)}\n')
-        f.write('Epoch 0\n')
+        f.write('\nEpoch 0\n')
         f.write(f'Avg Batch Time: {time_to_str(epoch_0_batch_avg_t)}\n')
         f.write(f'Total Epoch Time: {time_to_str(epoch_0_t)}\n')
-        f.write('Other Epochs\n')
+        f.write('\nOther Epochs\n')
         f.write(f'Avg Batch Time: {time_to_str(epoch_batch_avg_t)}\n')
         f.write(f'Avg Total Epoch Time: {time_to_str(epoch_avg_t)}\n')
 
