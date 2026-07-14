@@ -3,7 +3,8 @@ from __future__ import print_function, division
 import pickle
 import torch
 import torch.nn as nn
-import torchPersLay as tp
+import perslay as tp
+import perslay.models as tpm
 
 
 class ConvLayer(nn.Module):
@@ -74,7 +75,80 @@ class ConvLayer(nn.Module):
         nbr_sumed = self.bn2(nbr_sumed)
         out = self.softplus2(atom_in_fea + nbr_sumed)
         return out
-    
+
+
+class VecEmbedder(nn.Module):
+    def __init__(
+            self, vector='none', vec_source='graph', 
+            vec_fea_len=64, n_vec=1, vector_len=400,
+            dims=2, root_dir='data/graph_data'
+    ):
+        super().__init__()
+        
+        self.vector = vector
+        self.vector_len = vector_len
+        # self.vec_norm = nn.LayerNorm(vec_fea_len)
+
+        # ! vectorization process layers
+        self.vec_embedding = nn.Linear(self.vector_len * dims, vec_fea_len * dims)
+        self.vec_fcs = nn.ModuleList([nn.Linear(vec_fea_len * dims, vec_fea_len * dims)
+                                        for _ in range(n_vec)])
+        self.vec_softpluses = nn.ModuleList([nn.Softplus() for _ in range(n_vec)])
+        self.vec_pooling = nn.Linear(vec_fea_len * dims, vec_fea_len)
+        self.vec_pooling_softplus = nn.Softplus()
+
+        # ! perslay
+        if self.vector == 'perslay':
+            # input (read from pickle)
+            ch = vec_source[0]
+            with open(f'{root_dir}/tasks/image_bounds_{ch}.pkl', 'rb') as file:
+                self.image_bnds = pickle.load(file)
+            self.weights = nn.ModuleList([
+                # tp.PowerPerslayWeight(
+                #     constant=1.0,   # learnable
+                #     power=1.0
+                # )
+                tp.NormalizedLearnablePowerPerslayWeight(self.image_bnds[i])
+                for i in range(dims)
+            ])
+            self.phis = nn.ModuleList([
+                tp.GaussianPerslayPhi(
+                    image_size=(20, 20),
+                    image_bnds=self.image_bnds[i],
+                    sigma_x=0.2,   # learnable
+                )
+                for i in range(dims)
+            ])
+            self.perm_op = torch.sum
+            self.rho = tpm.FlattenRho()
+
+            self.perslays = nn.ModuleList([
+                tp.Perslay(weight=self.weights[i], phi=self.phis[i], perm_op=self.perm_op, rho=self.rho)
+                for i in range(dims)
+            ])
+
+    def forward(
+            self, 
+            vectorizations, 
+            diagrams, 
+        ):
+        # initialize vec embeddings
+        if self.vector in ['image', 'landscape']:
+            vec_fea = vectorizations
+        elif self.vector == 'perslay':
+            vec_fea = torch.cat([
+                self.perslays[i](diagrams[i]).squeeze(-1).flatten(start_dim=1)
+                for i in range(len(self.perslays))
+            ], dim=1)
+        # vec processing layers
+        vec_fea = self.vec_embedding(vec_fea)
+        for vec_fc, vec_softplus in zip(self.vec_fcs, self.vec_softpluses):
+            vec_fea = vec_softplus(vec_fc(vec_fea))
+        vec_fea = self.vec_pooling(vec_fea)
+        vec_fea = self.vec_pooling_softplus(vec_fea)
+        # vec_fea = self.vec_norm(vec_fea)
+        return vec_fea
+        
 
 class CrystalGraphEncoder(nn.Module):
     def __init__(
@@ -82,19 +156,13 @@ class CrystalGraphEncoder(nn.Module):
             atom_fea_len=64, n_conv=3, h_fea_len=128, n_h=1,
             vec_fea_len=64, n_vec=1,
             # classification=False, num_classes=2,
-            vec_source='graph', vector='none', weight='none', phi='none',
+            vec_source='graph', vector='none',
             dims=2, root_dir='data/graph_data'
     ):
         super().__init__()
 
         assert vector in ['none', 'image', 'landscape', 'perslay'], 'incorrect vectorization input!'
-        assert weight in ['none', 'power', 'grid', 'gaussian']  # only none or power
-        assert phi in ['none', 'image', 'landscape', 'betti']   # only none or image
-        
         self.vector = vector
-        self.weight = weight
-        self.phi = phi
-
         if self.vector == 'none':
             self.vector_len = 0
         elif self.vector == 'image':
@@ -102,18 +170,7 @@ class CrystalGraphEncoder(nn.Module):
         elif self.vector == 'landscape':
             self.vector_len = 500
         elif self.vector == 'perslay':
-            if self.phi == 'image':
-                self.vector_len = 400
-
-            # ! Don't use landscape/betti for now
-            # TentPerslayPhi/FlatPerslayPhi function doesn't compute k-th highest tent,
-            # it concatenates tent/betti functions (len: sample) for each point --> sample * point
-            # so vectorization is absurdly long
-
-            # elif self.phi == 'landscape':
-            #     pass
-            # elif self.phi == 'betti':
-            #     pass
+            self.vector_len = 400
         
         # self.classification = classification
         self.embedding = nn.Linear(orig_atom_fea_len, atom_fea_len)
@@ -129,50 +186,21 @@ class CrystalGraphEncoder(nn.Module):
             self.fcs = nn.ModuleList([nn.Linear(h_fea_len, h_fea_len) for _ in range(n_h-1)])
             self.softpluses = nn.ModuleList([nn.Softplus() for _ in range(n_h-1)])
         
-        # ! adapt to multitask
-        # if self.classification:
-        #     self.fc_out = nn.Linear(h_fea_len, num_classes)  # ! Changed 2 --> 7 (for systems)
-        # else:
-        #     self.fc_out = nn.Linear(h_fea_len, 1)
-        # if self.classification:
-        #     self.logsoftmax = nn.LogSoftmax(dim=1)
-        #     self.dropout = nn.Dropout()
+        # ! layer normalization (to match scale of graph/vecs)
+        # self.graph_norm = nn.LayerNorm(atom_fea_len)
 
-        # ! vectorization process layers
-        self.vec_embedding = nn.Linear(self.vector_len * dims, vec_fea_len * dims)
-        self.vec_fcs = nn.ModuleList([nn.Linear(vec_fea_len * dims, vec_fea_len * dims)
-                                     for _ in range(n_vec)])
-        self.vec_pooling = nn.Linear(vec_fea_len * dims, vec_fea_len)
+        # ! vectorization layers
+        if self.vector != 'none':
+            self.vec_mlp = VecEmbedder(
+                vector=self.vector,
+                vec_source=vec_source,
+                vec_fea_len=vec_fea_len,
+                n_vec=n_vec,
+                vector_len=self.vector_len,
+                dims=dims,
+                root_dir=root_dir,
+            )
 
-        # ! perslay --> experiment with parameters
-        if self.vector == 'perslay':
-            self.weights = nn.ModuleList([
-                tp.PowerPerslayWeight(
-                    constant=1.0,   # learnable
-                    power=1.0
-                )
-                for _ in range(dims)
-            ])
-            # input (read from pickle)
-            ch = vec_source[0]
-            with open(f'{root_dir}/tasks/image_bounds_{ch}.pkl', 'rb') as file:
-                self.image_bnds = pickle.load(file)
-            self.phis = nn.ModuleList([
-                tp.GaussianPerslayPhi(
-                    image_size=(20, 20),
-                    image_bnds=self.image_bnds[i],
-                    variance=0.1,   # learnable
-                )
-                for i in range(dims)
-            ])
-            self.perm_op = torch.sum
-            self.rho = nn.Identity()
-
-            self.perslays = nn.ModuleList([
-                tp.Perslay(weight=self.weights[i], phi=self.phis[i], perm_op=self.perm_op, rho=self.rho)
-                for i in range(dims)
-            ])
-    
     def forward(
             self, 
             atom_fea, nbr_fea, nbr_fea_idx, 
@@ -184,23 +212,11 @@ class CrystalGraphEncoder(nn.Module):
         for conv_func in self.convs:
             atom_fea = conv_func(atom_fea, nbr_fea, nbr_fea_idx)
         crys_fea = self.pooling(atom_fea, crystal_atom_idx)
+        # crys_fea = self.graph_norm(crys_fea)
 
         # ! concatenating vectorizations
         if self.vector != 'none':
-            # initialize vec embeddings
-            if self.vector in ['image', 'landscape']:
-                vec_fea = vectorizations
-            elif self.vector == 'perslay':
-                vec_fea = torch.cat([
-                    self.perslays[i](diagrams[i]).squeeze(-1).flatten(start_dim=1)
-                    for i in range(len(self.perslays))
-                ], dim=1)
-            # vec processing layers
-            vec_fea = self.vec_embedding(vec_fea)
-            for vec_fc in self.vec_fcs:
-                vec_fea = vec_fc(vec_fea)
-            vec_fea = self.vec_pooling(vec_fea)
-                
+            vec_fea = self.vec_mlp(vectorizations, diagrams)
             # concatenating processed vec to crystal features
             crys_fea = torch.cat([crys_fea, vec_fea], dim=1)
 
@@ -263,7 +279,7 @@ class CrystalGraphConvNet(nn.Module):
             self, orig_atom_fea_len, nbr_fea_len,
             atom_fea_len=64, n_conv=3, h_fea_len=128, n_h=1,
             vec_fea_len=64, n_vec=1, n_o=1,
-            vec_source='graph', vector='none', weight='none', phi='none',
+            vec_source='graph', vector='none', 
             dims=3, root_dir='data/graph_data', task_specs=None,
     ):
         """
@@ -292,7 +308,7 @@ class CrystalGraphConvNet(nn.Module):
             atom_fea_len, n_conv, h_fea_len, n_h,
             vec_fea_len, n_vec,
             # classification, num_classes,
-            vec_source, vector, weight, phi,
+            vec_source, vector,
             dims, root_dir
         )
         # load head information
@@ -369,23 +385,19 @@ def freeze_lower_encoder(model: CrystalGraphConvNet, freeze_vectors=False):
     encoder.convs.requires_grad_(False)
     encoder.convs.eval()
 
+    # freeze normalization layers
+    # encoder.graph_norm.requires_grad_(False)
+
     # (optional) freeze vector processing layers
     if not freeze_vectors:
         return
     
-    encoder.vec_embedding.requires_grad_(False)
-    encoder.vec_fcs.requires_grad_(False)
-    encoder.vec_pooling.requires_grad_(False)
-
-    if encoder.vector == 'perslay':
-        encoder.weights.requires_grad_(False)
-        encoder.weights.eval()
-        encoder.phis.requires_grad_(False)
-        encoder.phis.eval()
-        encoder.perslays.requires_grad_(False)
-        encoder.perslays.eval()
+    encoder.vec_mlp.requires_grad_(False)
+    encoder.vec_mlp.eval()
 
 
-def set_frozen_encoder_parts_to_eval(model: CrystalGraphConvNet):
+def set_frozen_encoder_parts_to_eval(model: CrystalGraphConvNet, freeze_vectors=False):
     model.encoder.embedding.eval()
     model.encoder.convs.eval()
+    if freeze_vectors:
+        model.encoder.vec_mlp.eval()

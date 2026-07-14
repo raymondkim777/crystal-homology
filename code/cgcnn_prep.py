@@ -537,7 +537,7 @@ def graph_process(abs=False, merge=False, plqy=False, vector=False):
 def save_bounds(abs=False, merge=False, plqy=False):
     print(f"\n Saving PRETRAIN image transformer bounds...")
 
-    for ch in ['g', 'p']:
+    for ch in ['g', 'p', 'c']:
         source_file = f'{DATA_PRE_DIRECTORY}/image_bounds_{ch}.pkl'
         destination = open_write_file(f'{CGCNN_PRE_DATAPATH}/tasks', '')
         shutil.copy(source_file, destination)

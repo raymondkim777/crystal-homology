@@ -1,5 +1,5 @@
 mp-api
 giotto-tda==0.6.2
 gudhi
-torchPersLay
+torchPersLay==0.1.5
 tqdm

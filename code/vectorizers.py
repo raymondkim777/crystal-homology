@@ -175,7 +175,20 @@ def fit_image_transformers(source, bandwidth, resolution):
         transformer = PersistenceImage(bandwidth=bandwidth, resolution=resolution)
         transformer.fit(processed_diagrams[dim])
         transformers.append(transformer)
-    return transformers
+    
+    # compute image bounds
+    perslay_img_bnds = []
+    for dim in range(DIMENSION_CNT):
+        min_x, max_x, min_p, max_p = float('inf'), 0, float('inf'), 0
+        for diag in processed_diagrams[dim]:
+            if diag.size == 0:
+                continue
+            birth_col = diag[:, 0]
+            pers_col = diag[:, 1] - diag[:, 0]
+            min_x, max_x = min(min_x, birth_col.min()), max(max_x, birth_col.max())
+            min_p, max_p = min(min_p, pers_col.min()), max(max_p, pers_col.max())
+        perslay_img_bnds.append([[min_x, max_x], [min_p, max_p]])
+    return transformers, perslay_img_bnds
 
 
 def init_landscape_transformers(transformers):
@@ -258,11 +271,11 @@ def pad_bounds(bound_x, bound_y, eps=0.001):
     return (bound_x, bound_y)
 
 
-def save_image_transformer_bounds(source, image_transformers):
+def save_image_transformer_bounds(source, perslay_img_bnds):
     image_bnds_list = []
     for dim in range(DIMENSION_CNT):
-        bounds = image_transformers[dim].im_range_fixed_
-        bounds_tuple = (pad_bounds(bounds[0], bounds[1]), pad_bounds(bounds[2], bounds[3]))
+        bounds = perslay_img_bnds[dim]
+        bounds_tuple = (pad_bounds(bounds[0][0], bounds[0][1]), pad_bounds(bounds[1][0], bounds[1][1]))
         image_bnds_list.append(bounds_tuple)
     
     # save JSON
@@ -321,10 +334,10 @@ def persistence_image(
     Uses multiprocessing. 
     '''
     n_workers = get_num_cpus()
-    image_transformers = fit_image_transformers(source, bandwidth, resolution)
+    image_transformers, perslay_img_bnds = fit_image_transformers(source, bandwidth, resolution)
 
     # save image bounds
-    save_image_transformer_bounds(source, image_transformers)
+    save_image_transformer_bounds(source, perslay_img_bnds)
     tasks = [(system, source) for system in CRYSTAL_SYSTEMS]
 
     print(f"Computing images with {n_workers} workers...")

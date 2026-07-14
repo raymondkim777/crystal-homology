@@ -8,6 +8,7 @@ import csv
 import warnings
 from random import sample
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 
 import numpy as np
 import torch
@@ -118,10 +119,6 @@ parser.add_argument('--vec-source', default='graph', type=str,
                     help='choose a vectorization source: graph, point')
 parser.add_argument('--vector', default='none', type=str,
                     help='choose a vectorization: none, image, landscape, perslay')
-parser.add_argument('--weight', default='none', type=str,
-                    help='choose a weight function: none, power, grid, gaussian')
-parser.add_argument('--phi', default='none', type=str,
-                    help='choose a transformation function: none, image, landscape, betti')
 parser.add_argument('--train', default='pretrain', type=str, 
                     help='choose training type: pretrain, abs, plqy')
 parser.add_argument('--freeze-vectors', default='none', type=str, 
@@ -256,6 +253,11 @@ def main():
     for fold_it in range(fold_num):
         best_errors = float('inf')
 
+        # loss plotting
+        loss_t_epochs = []
+        loss_t_batches = []
+        loss_v_epochs = []
+
         if CROSS_VAL:
             print(f"\n--------FOLD {fold_it + 1}--------")
             if args.debug:
@@ -317,8 +319,6 @@ def main():
             # ! vectorization arguments
             vec_source=args.vec_source,
             vector=args.vector,
-            weight=args.weight,
-            phi=args.phi,
             dims=args.dims,
             # ! miscellaneous arguments
             root_dir=args.data_options[0],
@@ -332,6 +332,11 @@ def main():
 
             if args.finetune_auto:
                 prefix = 'pre' if args.data_options[0][5:8] == 'abs' else 'abs'
+                if args.train == 'plqy' and args.freeze_vectors in ['abs', 'both']:
+                    freeze_label = '_fr'
+                else:
+                    freeze_label = ''
+
                 in_filename = f"{prefix}" \
                 + f"_{args.atom_fea_len}" \
                 + f"_{args.n_conv}" \
@@ -343,7 +348,7 @@ def main():
                 + (f'_image{args.vec_source[0]}' if args.vector == 'image' else '') \
                 + (f'_land{args.vec_source[0]}' if args.vector == 'landscape' else '') \
                 + (f'_pers{args.vec_source[0]}' if args.vector == 'perslay' else '') \
-                + (f'_fr_{args.freeze_vectors}' if args.train == 'plqy' and args.freeze_vectors != 'none' else '') \
+                + freeze_label \
                 + ".pth.tar"
             else:
                 in_filename = args.finetune
@@ -384,10 +389,10 @@ def main():
         model = model.to(device)
 
         # ! moving torchPerslay inner params to cuda
-        if args.vector == 'perslay':
-            for perslay in model.encoder.perslays:
-                perslay.phi.mu = perslay.phi.mu.to(device)
-                perslay.phi.M = tuple(m.to(device) for m in perslay.phi.M)
+        # if args.vector == 'perslay':
+        #     for perslay in model.encoder.vec_mlp.perslays:
+        #         perslay.phi.mu = perslay.phi.mu.to(device)
+        #         perslay.phi.M = tuple(m.to(device) for m in perslay.phi.M)
 
         # define loss func and optimizer
         # should move loss function outside of fold loop, but whatever
@@ -440,7 +445,7 @@ def main():
                 print(f"Training epoch {epoch}")
             avg_batch_time = train(
                 train_loader, model, criterion, optimizer, 
-                epoch, normalizers,
+                epoch, normalizers, loss_t_epochs, loss_t_batches,
             )
 
             t_end_train = perf_counter()
@@ -454,7 +459,10 @@ def main():
             # evaluate on validation set
             if args.debug:
                 print("Validating")
-            val_error, val_loss, _ = validate(val_loader, model, criterion, normalizers)
+            val_error, val_loss, _ = validate(
+                val_loader, model, criterion, normalizers, 
+                loss_v_epochs=loss_v_epochs,
+            )
 
             if args.val_metric == 'error':
                 cur_errors = val_error
@@ -468,8 +476,8 @@ def main():
             scheduler.step()
 
             # remember the best error and save checkpoint
-            is_best = cur_errors <= best_errors and epoch >= 10
-            best_errors = min(cur_errors, best_errors) if epoch >= 10 else best_errors
+            is_best = cur_errors <= best_errors
+            best_errors = min(cur_errors, best_errors)
             save_checkpoint({
                 'epoch': epoch + 1,
                 'state_dict': model.state_dict(),
@@ -479,6 +487,13 @@ def main():
                             for prop in normalizers.keys()},
                 'args': vars(args)
             }, is_best, fold_it=fold_it)
+
+        # plot/save train/val loss figures
+        save_loss_fig(
+            loss_t_epochs, 
+            loss_t_batches,
+            loss_v_epochs, 
+        )
 
         # test best model
         if args.debug:
@@ -494,13 +509,20 @@ def main():
         best_epochs.append(best_checkpoint['epoch'])
         model.load_state_dict(best_checkpoint['state_dict'])
 
-        test_loss, test_error, stat_dict = validate(
+        test_error, test_loss, stat_dict = validate(
             test_loader, model, criterion, normalizers, 
             best_epoch=best_checkpoint['epoch'], 
             test=True
         )
 
         # copy best model to ./checkpoints
+        if args.train == 'abs' and args.freeze_vectors in ['abs', 'both']:
+            freeze_label = '_fr'
+        elif args.train == 'plqy' and args.freeze_vectors in ['plqy', 'both']:
+            freeze_label = f'_fr{args.freeze_vectors}'
+        else:
+            freeze_label = ''
+
         out_filename = f"{args.data_options[0][5:8]}" \
             + f"_{args.atom_fea_len}" \
             + f"_{args.n_conv}" \
@@ -512,7 +534,7 @@ def main():
             + (f'_image{args.vec_source[0]}' if args.vector == 'image' else '') \
             + (f'_land{args.vec_source[0]}' if args.vector == 'landscape' else '') \
             + (f'_pers{args.vec_source[0]}' if args.vector == 'perslay' else '') \
-            + (f'_fr_{args.freeze_vectors}' if args.freeze_vectors != 'none' else '') \
+            + freeze_label \
             + (f'_fold_{fold_it}' if CROSS_VAL else '') \
             + ".pth.tar"
         out_filepath = f"checkpoints/{out_filename}"
@@ -546,7 +568,7 @@ def main():
     )
 
 
-def train(train_loader, model, criterion, optimizer, epoch, normalizers):
+def train(train_loader, model, criterion, optimizer, epoch, normalizers, loss_t_epochs, loss_t_batches):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     # ! stat trackers for each metric per head
@@ -571,7 +593,8 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers):
 
     # ! set frozen layers to eval (undo model.train() for those layers)
     if args.train in ['abs', 'plqy']:
-        set_frozen_encoder_parts_to_eval(model)
+        freeze_vectors = args.freeze_vectors in [args.train, 'both']
+        set_frozen_encoder_parts_to_eval(model, freeze_vectors)
 
     end = time.time()
     batch_time_start = perf_counter()
@@ -624,14 +647,21 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers):
             task_specs=TASK_SPECS,
         )
 
+        loss_t_batches.append(loss.detach().cpu().item())
+
         # measure accuracy and record loss
         losses.update(loss.detach().cpu().item())
         for prop, value in TASK_SPECS.items():
             task = value['head']
             stats[prop]['loss'].update(loss_dict[prop]['loss'], int(mask[prop].sum().item()))
+            
+            valid = mask[prop].bool().view(-1)
+            pred_valid = output[prop].detach().cpu()[valid]
+            targ_valid = targets[prop][valid]
+
             if task in ['binary', 'multiclass']:
                 accuracy, precision, recall, fscore, auc_score = \
-                    class_eval(output[prop].detach().cpu(), targets[prop])
+                    class_eval(pred_valid, targ_valid)
                 stats[prop]['accuracies'].update(accuracy, int(mask[prop].sum().item()))
                 stats[prop]['precisions'].update(precision, int(mask[prop].sum().item()))
                 stats[prop]['recalls'].update(recall, int(mask[prop].sum().item()))
@@ -639,8 +669,8 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers):
                 stats[prop]['auc_scores'].update(auc_score, int(mask[prop].sum().item()))
             elif task == 'regression':
                 nrmse_error = nrmse(
-                    normalizers[prop].denorm(output[prop].detach().cpu()), 
-                    targets[prop],
+                    normalizers[prop].denorm(pred_valid), 
+                    targ_valid,
                     normalizers[prop]
                 )
                 stats[prop]['nrmse_errors'].update(nrmse_error, int(mask[prop].sum().item()))
@@ -694,11 +724,15 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers):
                     raise ValueError(f"[STAT PRINT] Unrecognized task {TASK_SPECS[prop]['head']}")
                 
         batch_time_start = perf_counter()
-        
+    loss_t_epochs.append(losses.avg)
     return epoch_batch_times.avg
             
 
-def validate(val_loader, model, criterion, normalizers, best_epoch=0, test=False):
+def validate(
+        val_loader, model, criterion, normalizers, 
+        loss_v_epochs=None, 
+        best_epoch=0, test=False
+):
     batch_time = AverageMeter()
     # ! stat trackers for each metric per head
     losses = AverageMeter()
@@ -797,9 +831,14 @@ def validate(val_loader, model, criterion, normalizers, best_epoch=0, test=False
         for prop, value in TASK_SPECS.items():
             task = value['head']
             stats[prop]['loss'].update(loss_dict[prop]['loss'], int(mask[prop].sum().item()))
+
+            valid = mask[prop].bool().view(-1)
+            pred_valid = output[prop].detach().cpu()[valid]
+            targ_valid = targets[prop][valid]
+
             if task in ['binary', 'multiclass']:
                 accuracy, precision, recall, fscore, auc_score = \
-                    class_eval(output[prop].detach().cpu(), targets[prop])
+                    class_eval(pred_valid, targ_valid)
                 stats[prop]['accuracies'].update(accuracy, int(mask[prop].sum().item()))
                 stats[prop]['precisions'].update(precision, int(mask[prop].sum().item()))
                 stats[prop]['recalls'].update(recall, int(mask[prop].sum().item()))
@@ -807,8 +846,9 @@ def validate(val_loader, model, criterion, normalizers, best_epoch=0, test=False
                 stats[prop]['auc_scores'].update(auc_score, int(mask[prop].sum().item()))
                 
                 if test:
-                    test_pred = torch.exp(output[prop].detach().cpu())
-                    test_target = targets[prop]
+                    # test_pred = torch.exp(output[prop].detach().cpu())
+                    test_pred = pred_valid
+                    test_target = targ_valid
                     
                     # if binary classification
                     if TASK_SPECS[prop]['out_dim'] == 1:
@@ -826,15 +866,15 @@ def validate(val_loader, model, criterion, normalizers, best_epoch=0, test=False
             
             elif task == 'regression':
                 nrmse_error = nrmse(
-                    normalizers[prop].denorm(output[prop].detach().cpu()), 
-                    targets[prop],
+                    normalizers[prop].denorm(pred_valid), 
+                    targ_valid,
                     normalizers[prop]
                 )
                 stats[prop]['nrmse_errors'].update(nrmse_error, int(mask[prop].sum().item()))
 
                 if test:
-                    test_pred = normalizers[prop].denorm(output[prop].detach().cpu())
-                    test_target = targets[prop]
+                    test_pred = normalizers[prop].denorm(pred_valid)
+                    test_target = targ_valid
                     test_stats[prop]['test_preds'] += test_pred.view(-1).tolist()
                     test_stats[prop]['test_targets'] += test_target.view(-1).tolist()
                     test_stats[prop]['test_cif_ids'] += batch_cif_ids
@@ -878,6 +918,9 @@ def validate(val_loader, model, criterion, normalizers, best_epoch=0, test=False
                     )
                 else:
                     raise ValueError(f"[STAT PRINT] Unrecognized task {TASK_SPECS[prop]['head']}")
+    
+    if loss_v_epochs is not None:
+        loss_v_epochs.append(losses.avg)
 
     # finished validation testing    
     if args.debug:
@@ -923,7 +966,7 @@ def validate(val_loader, model, criterion, normalizers, best_epoch=0, test=False
         else:
             raise ValueError(f"[VAL ERROR] Unrecognized task {TASK_SPECS[prop]['head']}")
     
-    overall_error = w_cls * cls_error.avg + w_reg + reg_error.avg
+    overall_error = w_cls * cls_error.avg + w_reg * reg_error.avg
 
     if not CROSS_VAL and test:
         save_stats_as_csv(
@@ -1060,6 +1103,31 @@ def save_times(
         f.write('\nOther Epochs\n')
         f.write(f'Avg Batch Time: {time_to_str(epoch_batch_avg_t)}\n')
         f.write(f'Avg Total Epoch Time: {time_to_str(epoch_avg_t)}\n')
+
+
+def save_loss_fig(
+        loss_t_epochs, 
+        loss_t_batches,
+        loss_v_epochs, 
+):
+    assert len(loss_t_epochs) == len(loss_v_epochs)
+    ratio = int(len(loss_t_batches) / len(loss_t_epochs))
+    batch_x = np.asarray(list(range(len(loss_t_batches))))
+    epoch_x = np.asarray(list(range(len(loss_t_epochs)))) * ratio
+
+    plt.clf()
+    plt.plot(batch_x, loss_t_batches, color='tab:blue', label='Training Loss (Batch)')
+    plt.plot(epoch_x, loss_t_epochs, color='tab:orange', label='Training Loss (Epoch)')
+    plt.plot(epoch_x, loss_v_epochs, color='tab:red', label='Val Loss')
+
+    plt.xlabel('Batches')
+    plt.ylabel('Loss')
+    plt.title('Train/Val Loss Curve')
+    # plt.grid(True)
+    plt.legend()
+
+    # Display the plot
+    plt.savefig(f"out_{args.id}/loss_plot.png")
 
 
 class NormalizerProp(object):

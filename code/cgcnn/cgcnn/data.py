@@ -415,6 +415,7 @@ class GraphData(Dataset):
     ):
         self.root_dir = root_dir  # cgcnn/data/graph_data
         self.max_num_nbr = max_num_nbr
+        self.dmax = dmax
         self.task_specs = task_specs
         self.warn = warn
         self.attr = attr
@@ -570,25 +571,26 @@ class GraphData(Dataset):
             raise TypeError(f"[DATA Atom Feature] Incorrect node species data type")
 
         if self.attr:
-            # add distance to periodic center
-            dists_to_periodic_center = self.__find_distances(
-                cid=mp_id, 
-                graph=graph, 
-                lattice_matrix=graph_dict['lattice_matrix']
-            )[:, np.newaxis]
-            atom_fea = np.hstack((feature_list, dists_to_periodic_center))
+            # # add distance to periodic center
+            # dists_to_periodic_center = self.__find_distances(
+            #     cid=mp_id, 
+            #     graph=graph, 
+            #     lattice_matrix=graph_dict['lattice_matrix']
+            # )[:, np.newaxis]
+            # atom_fea = np.hstack((feature_list, dists_to_periodic_center))
+
+            # add fractional coordinates as periodic coordinates
+            periodic_coords = [
+                np.hstack([
+                    [np.cos(2 * np.pi * val), np.sin(2 * np.pi * val)]
+                    for val in graph.nodes[node]['coords']
+                ])
+                for node in graph.nodes
+            ]
+            atom_fea = np.hstack((feature_list, periodic_coords))
         else:
             atom_fea = np.vstack(feature_list)
 
-        # # add fractional coordinates as periodic coordinates
-        # periodic_coords = [
-        #     np.hstack([
-        #         [np.cos(2 * np.pi * val), np.sin(2 * np.pi * val)]
-        #         for val in graph.nodes[node]['coords']
-        #     ])
-        #     for node in graph.nodes
-        # ]
-        # atom_fea = np.hstack((feature_list, periodic_coords))
 
         # neighbor features (edge attributes)
         nbr_fea_idx, nbr_fea = [], []
@@ -602,31 +604,31 @@ class GraphData(Dataset):
                     nbr_list.append(v)
                     dist.append(adj_dict[u][v][k]['weight'])
             nbr_fea_idx.append(nbr_list + [0] * (self.max_num_nbr - len(nbr_list)))
-            nbr_fea.append(dist + [0] * (self.max_num_nbr - len(nbr_list)))
+            nbr_fea.append(dist + [self.dmax + 1.] * (self.max_num_nbr - len(nbr_list)))
         
         nbr_fea_idx, nbr_fea = np.array(nbr_fea_idx), np.array(nbr_fea)
         nbr_fea = self.gdf.expand(nbr_fea)
 
-        # ! ABLATION
-        # # increase nbr_fea_len by 3 to hold cartesian displacement vectors
-        # padding = ((0, 0), (0, 0), (0, 3))
-        # nbr_fea = np.pad(nbr_fea, pad_width=padding, mode='constant', constant_values=0)
+        if self.attr:
+            # increase nbr_fea_len by 3 to hold cartesian displacement vectors
+            padding = ((0, 0), (0, 0), (0, 3))
+            nbr_fea = np.pad(nbr_fea, pad_width=padding, mode='constant', constant_values=0)
 
-        # # add to_jimage as cartesian displacement vector
-        # for u in adj_dict.keys():
-        #     cart_vectors = []
-        #     for v in adj_dict[u].keys():
-        #         for k in adj_dict[u][v].keys():
-        #             to_jimage = np.asarray(adj_dict[u][v][k]['to_jimage'])
-        #             coord_start = graph.nodes[u]['coords']
-        #             coord_end = graph.nodes[v]['coords']
-        #             matrix = graph_dict['lattice_matrix']
+            # add to_jimage as cartesian displacement vector
+            for u in adj_dict.keys():
+                cart_vectors = []
+                for v in adj_dict[u].keys():
+                    for k in adj_dict[u][v].keys():
+                        to_jimage = np.asarray(adj_dict[u][v][k]['to_jimage'])
+                        coord_start = graph.nodes[u]['coords']
+                        coord_end = graph.nodes[v]['coords']
+                        matrix = graph_dict['lattice_matrix']
 
-        #             cart_vector = self.__cart_vector(coord_start, coord_end, to_jimage, matrix)
+                        cart_vector = self.__cart_vector(coord_start, coord_end, to_jimage, matrix)
 
-        #             cart_vectors.append(cart_vector)
-        #     cart_vectors = np.asarray(cart_vectors)
-        #     nbr_fea[u, :cart_vectors.shape[0], -3:] = cart_vectors
+                        cart_vectors.append(cart_vector)
+                cart_vectors = np.asarray(cart_vectors)
+                nbr_fea[u, :cart_vectors.shape[0], -3:] = cart_vectors
 
         # ! vectorization & normalization (optional)
         if self.vector == 'none':
