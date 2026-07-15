@@ -41,21 +41,15 @@ PREDICT = [
     'band_gap', 
     'efermi', 
     'is_gap_direct',
-    # 'max_absorption',
-    # 'max_absorption_energy',
-    # 'integrated_absorption',
-    # 'integrated_absorption_visible',
-    # 'average_absorption_visible',
-    # 'absorption_onset_energy',
 ]
 
 ABS_PREDICT = [
-    'max_absorption',
-    'max_absorption_energy',
+    # 'max_absorption',
+    # 'max_absorption_energy',
     'integrated_absorption',
     'integrated_absorption_visible',
     'average_absorption_visible',
-    'absorption_onset_energy',
+    # 'absorption_onset_energy',
 ]
 
 PLQY_PREDICT = [
@@ -100,6 +94,9 @@ TASK_SPECS = {
         'out_dim': 1,
         'weight': 1, 
     },
+}
+
+ABS_TASK_SPECS = {
     # 'max_absorption': {
     #     'head': 'regression', 
     #     'out_dim': 1,
@@ -110,39 +107,6 @@ TASK_SPECS = {
     #     'out_dim': 1,
     #     'weight': 1, 
     # },
-    # 'integrated_absorption': {
-    #     'head': 'regression', 
-    #     'out_dim': 1,
-    #     'weight': 1, 
-    # },
-    # 'integrated_absorption_visible': {
-    #     'head': 'regression', 
-    #     'out_dim': 1,
-    #     'weight': 1, 
-    # },
-    # 'average_absorption_visible': {
-    #     'head': 'regression', 
-    #     'out_dim': 1,
-    #     'weight': 1, 
-    # },
-    # 'absorption_onset_energy': {
-    #     'head': 'regression', 
-    #     'out_dim': 1,
-    #     'weight': 1, 
-    # }, 
-}
-
-ABS_TASK_SPECS = {
-    'max_absorption': {
-        'head': 'regression', 
-        'out_dim': 1,
-        'weight': 1, 
-    },
-    'max_absorption_energy': {
-        'head': 'regression', 
-        'out_dim': 1,
-        'weight': 1, 
-    },
     'integrated_absorption': {
         'head': 'regression', 
         'out_dim': 1,
@@ -158,11 +122,11 @@ ABS_TASK_SPECS = {
         'out_dim': 1,
         'weight': 1, 
     },
-    'absorption_onset_energy': {
-        'head': 'regression', 
-        'out_dim': 1,
-        'weight': 1, 
-    }, 
+    # 'absorption_onset_energy': {
+    #     'head': 'regression', 
+    #     'out_dim': 1,
+    #     'weight': 1, 
+    # }, 
 }
 
 PLQY_TASK_SPECS = {

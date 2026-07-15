@@ -11,7 +11,8 @@ class MultiTaskLoss(nn.Module):
             pos_weight=torch.tensor([4]).to(device)    # 6.94, computed from find_bounds.py --dist
         )  
         self.loss_class = nn.CrossEntropyLoss(reduction='none')
-        self.loss_reg = nn.HuberLoss(reduction='none')
+        # self.loss_reg = nn.HuberLoss(reduction='none')
+        self.loss_reg = nn.MSELoss(reduction='none')
     
 
     def forward(self, input, target_dict, mask_dict, task_specs):
@@ -55,7 +56,7 @@ class MultiTaskLoss(nn.Module):
             batch_loss = (prop_loss * mask_float).sum() / mask_float.sum().clamp_min(1.0)
             batch_loss *= task_specs[prop]['weight']
             
-            losses.append(batch_loss)   # batch loss across all props (accounting for invalid labels)
+            losses.append(batch_loss)   # batch loss for this prop (accounting for invalid labels)
             loss_dict[prop] = {
                 'loss': float(batch_loss.detach().cpu()), # batch loss for each prop
                 'num_avail': num_avail,

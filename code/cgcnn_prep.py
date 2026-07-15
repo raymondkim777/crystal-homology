@@ -10,7 +10,6 @@ from tqdm import tqdm
 
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from create_bonds import get_structures_from_cif
-from vectorizers import IM_BANDWIDTH, IM_RESOLUTION, fit_image_transformers
 from utils import CRYSTAL_SYSTEMS, DIMENSION_CNT, get_num_cpus, open_write_file
 from utils import PREDICT, ABS_PREDICT, PLQY_PREDICT, TASK_SPECS, ABS_TASK_SPECS, PLQY_TASK_SPECS
 
@@ -538,19 +537,21 @@ def save_bounds(abs=False, merge=False, plqy=False):
     print(f"\n Saving PRETRAIN image transformer bounds...")
 
     for ch in ['g', 'p', 'c']:
+        # ! for perslay --> need same image bounds across pretrain/abs/plqy
+        # ! --> use pretrain image bounds for everything
         source_file = f'{DATA_PRE_DIRECTORY}/image_bounds_{ch}.pkl'
         destination = open_write_file(f'{CGCNN_PRE_DATAPATH}/tasks', '')
         shutil.copy(source_file, destination)
 
         if abs and not merge:
             print(f"\n Saving ABS image transformer bounds...")
-            source_file = f'{DATA_ABS_DIRECTORY}/image_bounds_{ch}.pkl'
+            source_file = f'{DATA_PRE_DIRECTORY}/image_bounds_{ch}.pkl'
             destination = open_write_file(f'{CGCNN_ABS_DATAPATH}/tasks', '')
             shutil.copy(source_file, destination)
         
         if plqy:
             print(f"\n Saving PLQY image transformer bounds...")
-            source_file = f'{DATA_PLQY_DIRECTORY}/image_bounds_{ch}.pkl'
+            source_file = f'{DATA_PRE_DIRECTORY}/image_bounds_{ch}.pkl'
             destination = open_write_file(f'{CGCNN_PLQY_DATAPATH}/tasks', '')
             shutil.copy(source_file, destination)
             

@@ -36,8 +36,8 @@ def get_fold_indices(dataset, k=5):
 
 def get_train_val_test_loader_from_folds(
         dataset, folds, test_fold_idx, collate_fn=default_collate,
-        batch_size=64, num_workers=1, pin_memory=False, 
-        persistent_workers=False,
+        batch_size=64, num_workers=1, drop_last=False,
+        pin_memory=False, persistent_workers=False,
 ):
     assert test_fold_idx < len(folds)
     val_fold_idx = (test_fold_idx - 1) % len(folds)
@@ -53,20 +53,23 @@ def get_train_val_test_loader_from_folds(
     test_sampler = SubsetRandomSampler(folds[test_fold_idx])
 
     train_loader = DataLoader(dataset, batch_size=batch_size,
+                              drop_last=drop_last,
                               sampler=train_sampler,
                               num_workers=num_workers,
                               collate_fn=collate_fn, pin_memory=pin_memory, 
                               persistent_workers=persistent_workers)
     val_loader = DataLoader(dataset, batch_size=batch_size,
+                            drop_last=drop_last,
                             sampler=val_sampler,
                             num_workers=num_workers,
                             collate_fn=collate_fn, pin_memory=pin_memory,
                             persistent_workers=persistent_workers)
     test_loader = DataLoader(dataset, batch_size=batch_size,
-                                 sampler=test_sampler,
-                                 num_workers=num_workers,
-                                 collate_fn=collate_fn, pin_memory=pin_memory,
-                                 persistent_workers=persistent_workers)
+                             drop_last=drop_last,
+                             sampler=test_sampler,
+                             num_workers=num_workers,
+                             collate_fn=collate_fn, pin_memory=pin_memory,
+                             persistent_workers=persistent_workers)
     return train_loader, val_loader, test_loader
 
 
@@ -512,6 +515,10 @@ class GraphData(Dataset):
         return dists
     
 
+    def get_id_from_idx(self, idx):
+        return self.id_prop_data[idx][0][0]
+    
+
     @functools.lru_cache(maxsize=None)  # Cache computed attributes
     def __load_graph_dict(self, mp_id):
         with open(os.path.join(self.root_dir, "graphs", f"mp-{mp_id}.pkl"), 'rb') as file:
@@ -605,6 +612,7 @@ class GraphData(Dataset):
                     dist.append(adj_dict[u][v][k]['weight'])
             nbr_fea_idx.append(nbr_list + [0] * (self.max_num_nbr - len(nbr_list)))
             nbr_fea.append(dist + [self.dmax + 1.] * (self.max_num_nbr - len(nbr_list)))
+            # nbr_fea.append(dist + [0] * (self.max_num_nbr - len(nbr_list)))
         
         nbr_fea_idx, nbr_fea = np.array(nbr_fea_idx), np.array(nbr_fea)
         nbr_fea = self.gdf.expand(nbr_fea)
@@ -629,6 +637,7 @@ class GraphData(Dataset):
                         cart_vectors.append(cart_vector)
                 cart_vectors = np.asarray(cart_vectors)
                 nbr_fea[u, :cart_vectors.shape[0], -3:] = cart_vectors
+            pass
 
         # ! vectorization & normalization (optional)
         if self.vector == 'none':

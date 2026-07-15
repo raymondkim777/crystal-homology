@@ -1,8 +1,10 @@
 from __future__ import print_function, division
 
 import pickle
+import math
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import perslay as tp
 import perslay.models as tpm
 
@@ -80,34 +82,33 @@ class ConvLayer(nn.Module):
 class VecEmbedder(nn.Module):
     def __init__(
             self, vector='none', vec_source='graph', 
-            vec_fea_len=64, n_vec=1, vector_len=400,
+            vec_fea_len=256, cat_fea_len=64, n_vec=0, vector_len=400,
             dims=2, root_dir='data/graph_data'
     ):
         super().__init__()
         
         self.vector = vector
         self.vector_len = vector_len
-        # self.vec_norm = nn.LayerNorm(vec_fea_len)
 
         # ! vectorization process layers
-        self.vec_embedding = nn.Linear(self.vector_len * dims, vec_fea_len * dims)
-        self.vec_fcs = nn.ModuleList([nn.Linear(vec_fea_len * dims, vec_fea_len * dims)
-                                        for _ in range(n_vec)])
-        self.vec_softpluses = nn.ModuleList([nn.Softplus() for _ in range(n_vec)])
-        self.vec_pooling = nn.Linear(vec_fea_len * dims, vec_fea_len)
-        self.vec_pooling_softplus = nn.Softplus()
+        self.vec_reduce = nn.Sequential(
+            nn.LayerNorm(self.vector_len * dims),               # normalize
+            nn.Linear(self.vector_len * dims, vec_fea_len),     # reduce to hidden dim
+            nn.GELU(),                                          # activation
+            nn.Dropout(0.1),                                    # dropout
+        )
+        # linear processing (modular, default 0)
+        self.vec_fcs = nn.ModuleList([nn.Linear(vec_fea_len, vec_fea_len) for _ in range(n_vec)])
+        self.vec_acts = nn.ModuleList([nn.GELU() for _ in range(n_vec)])
+        # reduce to output dim
+        self.vec_out = nn.Linear(vec_fea_len, cat_fea_len)
 
         # ! perslay
         if self.vector == 'perslay':
-            # input (read from pickle)
             ch = vec_source[0]
             with open(f'{root_dir}/tasks/image_bounds_{ch}.pkl', 'rb') as file:
                 self.image_bnds = pickle.load(file)
             self.weights = nn.ModuleList([
-                # tp.PowerPerslayWeight(
-                #     constant=1.0,   # learnable
-                #     power=1.0
-                # )
                 tp.NormalizedLearnablePowerPerslayWeight(self.image_bnds[i])
                 for i in range(dims)
             ])
@@ -119,7 +120,11 @@ class VecEmbedder(nn.Module):
                 )
                 for i in range(dims)
             ])
-            self.perm_op = torch.sum
+            def perm_op(tensor):
+                tensor = torch.sum(tensor, dim=1)
+                return F.normalize(tensor, p=2, dim=1)
+            
+            self.perm_op = perm_op
             self.rho = tpm.FlattenRho()
 
             self.perslays = nn.ModuleList([
@@ -141,12 +146,10 @@ class VecEmbedder(nn.Module):
                 for i in range(len(self.perslays))
             ], dim=1)
         # vec processing layers
-        vec_fea = self.vec_embedding(vec_fea)
-        for vec_fc, vec_softplus in zip(self.vec_fcs, self.vec_softpluses):
-            vec_fea = vec_softplus(vec_fc(vec_fea))
-        vec_fea = self.vec_pooling(vec_fea)
-        vec_fea = self.vec_pooling_softplus(vec_fea)
-        # vec_fea = self.vec_norm(vec_fea)
+        vec_fea = self.vec_reduce(vec_fea)
+        for fc, act in zip(self.vec_fcs, self.vec_acts):
+            vec_fea = act(fc(vec_fea))    
+        vec_fea = self.vec_out(vec_fea)
         return vec_fea
         
 
@@ -154,7 +157,7 @@ class CrystalGraphEncoder(nn.Module):
     def __init__(
             self, orig_atom_fea_len, nbr_fea_len,
             atom_fea_len=64, n_conv=3, h_fea_len=128, n_h=1,
-            vec_fea_len=64, n_vec=1,
+            vec_fea_len=256, cat_fea_len=64, n_vec=0, ph_gate_init=0.1,
             # classification=False, num_classes=2,
             vec_source='graph', vector='none',
             dims=2, root_dir='data/graph_data'
@@ -179,15 +182,14 @@ class CrystalGraphEncoder(nn.Module):
                                     for _ in range(n_conv)])
         
         # ! vectorization concatenation length
-        conv_to_fc_input_len = atom_fea_len if self.vector == 'none' else atom_fea_len + vec_fea_len
+        conv_to_fc_input_len = atom_fea_len if self.vector == 'none' else atom_fea_len + cat_fea_len
         self.conv_to_fc = nn.Linear(conv_to_fc_input_len, h_fea_len)
         self.conv_to_fc_softplus = nn.Softplus()
         if n_h > 1:
             self.fcs = nn.ModuleList([nn.Linear(h_fea_len, h_fea_len) for _ in range(n_h-1)])
             self.softpluses = nn.ModuleList([nn.Softplus() for _ in range(n_h-1)])
-        
-        # ! layer normalization (to match scale of graph/vecs)
-        # self.graph_norm = nn.LayerNorm(atom_fea_len)
+        self.graph_norm = nn.LayerNorm(atom_fea_len)
+        self.vec_norm = nn.LayerNorm(cat_fea_len)
 
         # ! vectorization layers
         if self.vector != 'none':
@@ -195,10 +197,18 @@ class CrystalGraphEncoder(nn.Module):
                 vector=self.vector,
                 vec_source=vec_source,
                 vec_fea_len=vec_fea_len,
+                cat_fea_len=cat_fea_len,
                 n_vec=n_vec,
                 vector_len=self.vector_len,
                 dims=dims,
                 root_dir=root_dir,
+            )
+            assert 0.0 < ph_gate_init < 1.0
+            ph_gate_logit_init = math.log(
+                ph_gate_init / (1.0 - ph_gate_init)
+            )
+            self.ph_gate_logit = nn.Parameter(
+                torch.tensor(ph_gate_logit_init, dtype=torch.float32)
             )
 
     def forward(
@@ -212,13 +222,15 @@ class CrystalGraphEncoder(nn.Module):
         for conv_func in self.convs:
             atom_fea = conv_func(atom_fea, nbr_fea, nbr_fea_idx)
         crys_fea = self.pooling(atom_fea, crystal_atom_idx)
-        # crys_fea = self.graph_norm(crys_fea)
 
         # ! concatenating vectorizations
         if self.vector != 'none':
             vec_fea = self.vec_mlp(vectorizations, diagrams)
+            vec_fea = self.vec_norm(vec_fea)
+            crys_fea = self.graph_norm(crys_fea)
             # concatenating processed vec to crystal features
-            crys_fea = torch.cat([crys_fea, vec_fea], dim=1)
+            ph_gate = torch.sigmoid(self.ph_gate_logit)
+            crys_fea = torch.cat([crys_fea, ph_gate * vec_fea], dim=1)
 
         crys_fea = self.conv_to_fc(self.conv_to_fc_softplus(crys_fea))
         crys_fea = self.conv_to_fc_softplus(crys_fea)
@@ -278,8 +290,8 @@ class CrystalGraphConvNet(nn.Module):
     def __init__(
             self, orig_atom_fea_len, nbr_fea_len,
             atom_fea_len=64, n_conv=3, h_fea_len=128, n_h=1,
-            vec_fea_len=64, n_vec=1, n_o=1,
-            vec_source='graph', vector='none', 
+            vec_fea_len=256, cat_fea_len=64, n_vec=0, n_o=1,
+            vec_source='graph', vector='none', ph_gate_init=0.1,
             dims=3, root_dir='data/graph_data', task_specs=None,
     ):
         """
@@ -304,12 +316,20 @@ class CrystalGraphConvNet(nn.Module):
         super(CrystalGraphConvNet, self).__init__()
 
         self.encoder = CrystalGraphEncoder(
-            orig_atom_fea_len, nbr_fea_len,
-            atom_fea_len, n_conv, h_fea_len, n_h,
-            vec_fea_len, n_vec,
-            # classification, num_classes,
-            vec_source, vector,
-            dims, root_dir
+            orig_atom_fea_len=orig_atom_fea_len,
+            nbr_fea_len=nbr_fea_len,
+            atom_fea_len=atom_fea_len, 
+            n_conv=n_conv, 
+            h_fea_len=h_fea_len,
+            n_h=n_h,
+            vec_fea_len=vec_fea_len, 
+            cat_fea_len=cat_fea_len, 
+            n_vec=n_vec, 
+            ph_gate_init=ph_gate_init,
+            vec_source=vec_source, 
+            vector=vector,
+            dims=dims, 
+            root_dir=root_dir
         )
         # load head information
         assert task_specs is not None, 'No head tasks inputted!'
@@ -391,7 +411,6 @@ def freeze_lower_encoder(model: CrystalGraphConvNet, freeze_vectors=False):
     # (optional) freeze vector processing layers
     if not freeze_vectors:
         return
-    
     encoder.vec_mlp.requires_grad_(False)
     encoder.vec_mlp.eval()
 
