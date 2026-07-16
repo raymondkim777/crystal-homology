@@ -152,6 +152,19 @@ def get_train_val_test_loader(dataset, collate_fn=default_collate,
                                  num_workers=num_workers,
                                  collate_fn=collate_fn, pin_memory=pin_memory,
                                  persistent_workers=persistent_workers)
+    # save train/val/test mp id
+    with open(f"data_train_idx.txt", 'w') as f:
+        for idx in indices[:train_size]:
+            f.write(f"{dataset.get_id_from_idx(idx)}\n")
+    
+    with open(f"data_val_idx.txt", 'w') as f:
+        for idx in indices[-(valid_size + test_size):-test_size]:
+            f.write(f"{dataset.get_id_from_idx(idx)}\n")
+    
+    with open(f"data_test_idx.txt", 'w') as f:
+        for idx in indices[-test_size:]:
+            f.write(f"{dataset.get_id_from_idx(idx)}\n")
+
     if return_test:
         return train_loader, val_loader, test_loader
     else:
