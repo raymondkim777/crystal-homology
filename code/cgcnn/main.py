@@ -107,7 +107,7 @@ parser.add_argument('--delete', action='store_true',
                     help='deletes generated training files before training')
 parser.add_argument('--warn', action='store_true',
                     help="print warnings (doesn't suppress errors)")
-parser.add_argument('--id', default=0, type=int, metavar='N',
+parser.add_argument('--id', default='0', type=str, metavar='N',
                     help='identifier for multiple checkpoint/models')
 parser.add_argument('--dims', default=3, type=int,
                     help='number of persistence homology dimensions')
@@ -412,7 +412,7 @@ def main():
                                 momentum=args.momentum,
                                 weight_decay=args.weight_decay)
         elif args.optim == 'Adam':
-            optimizer = optim.Adam(model.parameters(), args.lr,
+            optimizer = optim.AdamW(model.parameters(), args.lr,
                                 weight_decay=args.weight_decay)
         else:
             raise NameError('Only SGD or Adam is allowed as --optim')

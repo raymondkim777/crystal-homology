@@ -120,9 +120,9 @@ class VecEmbedder(nn.Module):
                 )
                 for i in range(dims)
             ])
-            def perm_op(tensor):
-                tensor = torch.sum(tensor, dim=1)
-                return F.normalize(tensor, p=2, dim=1)
+            def perm_op(tensor, dim=1):
+                tensor = torch.sum(tensor, dim=dim)
+                return F.normalize(tensor, p=2, dim=dim)
             
             self.perm_op = perm_op
             self.rho = tpm.FlattenRho()

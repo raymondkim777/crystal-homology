@@ -152,6 +152,19 @@ def get_train_val_test_loader(dataset, collate_fn=default_collate,
                                  num_workers=num_workers,
                                  collate_fn=collate_fn, pin_memory=pin_memory,
                                  persistent_workers=persistent_workers)
+    # save train/val/test mp id
+    with open(f"data_train_idx.txt", 'w') as f:
+        for idx in indices[:train_size]:
+            f.write(f"{dataset.get_id_from_idx(idx)}\n")
+    
+    with open(f"data_val_idx.txt", 'w') as f:
+        for idx in indices[-(valid_size + test_size):-test_size]:
+            f.write(f"{dataset.get_id_from_idx(idx)}\n")
+    
+    with open(f"data_test_idx.txt", 'w') as f:
+        for idx in indices[-test_size:]:
+            f.write(f"{dataset.get_id_from_idx(idx)}\n")
+
     if return_test:
         return train_loader, val_loader, test_loader
     else:
@@ -775,13 +788,6 @@ class CifData(Dataset):
         elif self.vector == 'perslay':
             with open(os.path.join(self.root_dir, 'vecs', f'diagrams_{ch}.pkl'), 'rb') as file:
                 self.vector_dict = pickle.load(file)  # technically diagrams, not vector
-        if self.vector != 'none':
-            ex_key = list(self.vector_dict.keys())[0]
-            self.vec_prefix = ''
-            if ex_key.startswith('mp-'):
-                self.vec_prefix = 'mp-' 
-            if ex_key.startswith('cif-'):
-                self.vec_prefix = 'cif-' 
         
 
     def __len__(self):
