@@ -52,14 +52,17 @@ class MultiTaskLoss(nn.Module):
                 raise ValueError(f"[Loss] Unknown task: {task}")
 
             mask_float = mask.float()
+            prop_loss_valid = prop_loss * mask_float
+
             # batch loss for each prop
-            batch_loss = (prop_loss * mask_float).sum() / mask_float.sum().clamp_min(1.0)
+            batch_loss = prop_loss_valid.sum() / mask_float.sum().clamp_min(1.0)
             batch_loss *= task_specs[prop]['weight']
             
             losses.append(batch_loss)   # batch loss for this prop (accounting for invalid labels)
             loss_dict[prop] = {
                 'loss': float(batch_loss.detach().cpu()), # batch loss for each prop
                 'num_avail': num_avail,
+                'loss_each': prop_loss_valid.detach().cpu()
             }
         
         if len(losses) > 0:

@@ -266,6 +266,8 @@ def main():
         loss_t_epochs = []
         loss_t_batches = []
         loss_v_epochs = []
+        highest_loss_mp_ids = dict()
+        open_write_file(f"out_{args.id}/loss_{fold_it}", "")
 
         if CROSS_VAL:
             print(f"\n--------FOLD {fold_it + 1}--------")
@@ -454,6 +456,7 @@ def main():
             avg_batch_time = train(
                 train_loader, model, criterion, optimizer, 
                 epoch, normalizers, loss_t_epochs, loss_t_batches,
+                highest_loss_mp_ids, fold_it=fold_it
             )
 
             t_end_train = perf_counter()
@@ -506,6 +509,13 @@ def main():
             loss_v_epochs, 
             fold_it,
         )
+
+        # ! TEST sort highest_loss_mp_ids by score, save to CSV
+        sorted_id_losses = sorted(list(highest_loss_mp_ids.items()), key=lambda x: x[1], reverse=True)
+        with open(f"out_{args.id}/loss_{fold_it}/loss_hi.csv", 'w', newline='', encoding='utf-8') as f:
+            sorted_id_losses = [("MP ID", "Score")] + sorted_id_losses
+            writer = csv.writer(f)
+            writer.writerows(sorted_id_losses)
 
         # test best model
         if args.debug:
@@ -567,6 +577,26 @@ def main():
         t_end_train = perf_counter()
         total_times.update(t_end_train - t_start_train)
     
+    # ! TEST log highest loss mp_ids across all folds
+    id_to_score = dict()    # key: mp_id, value: score sum
+
+    for fold_it in range(args.folds):
+        with open(f"out_{args.id}/loss_{fold_it}/loss_hi.csv", "r", newline='', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            next(reader)
+            for row in reader:
+                if row[0] in id_to_score.keys():
+                    id_to_score[row[0]] += float(row[1]) / (args.folds - 2)     # k-2 train folds
+                else:
+                    id_to_score[row[0]] = float(row[1]) / (args.folds - 2)
+    
+    sorted_id_to_scores = sorted(list(id_to_score.items()), key=lambda x: x[1], reverse=True)
+    
+    with open(f"out_{args.id}/loss_hi_total.csv", "w", newline='', encoding='utf-8') as f:
+        sorted_id_to_scores = [('MP ID', 'Score')] + sorted_id_to_scores
+        writer = csv.writer(f)
+        writer.writerows(sorted_id_to_scores)
+        
     # ! save results
     save_stats_as_csv(
         best_epochs=best_epochs, 
@@ -583,7 +613,8 @@ def main():
     )
 
 
-def train(train_loader, model, criterion, optimizer, epoch, normalizers, loss_t_epochs, loss_t_batches):
+def train(train_loader, model, criterion, optimizer, epoch, normalizers, loss_t_epochs, loss_t_batches, 
+          highest_loss_mp_ids, fold_it=0):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     # ! stat trackers for each metric per head
@@ -616,10 +647,13 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers, loss_t_
     batch_time_start = perf_counter()
     epoch_batch_times = AverageMeter()
 
+    mp_id_list = []
+    id_loss_list = []
+
     # for i, (input, target, _) in enumerate(train_loader):
     for i, (
         (atom_fea, nbr_fea, nbr_fea_idx, crys_idx), 
-        vectorizations, diagrams, targets, mask, _
+        vectorizations, diagrams, targets, mask, mp_ids
     ) in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
@@ -662,6 +696,15 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers, loss_t_
             mask_dict=mask, 
             task_specs=TASK_SPECS,
         )
+
+        # ! TEST find highest loss values and corresponding IDs
+        for prop, value in TASK_SPECS.items():
+            if prop != 'plqy':
+                continue
+            loss_list = loss_dict[prop]['loss_each'].tolist()
+            assert len(mp_ids) == len(loss_list)
+            id_loss_list += loss_list
+            mp_id_list += mp_ids
 
         loss_t_batches.append(loss.detach().cpu().item())
 
@@ -749,6 +792,33 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers, loss_t_
                     raise ValueError(f"[STAT PRINT] Unrecognized task {TASK_SPECS[prop]['head']}")
                 
         batch_time_start = perf_counter()
+
+    # ! TEST find highest loss values and corresponding IDs
+    
+    for prop, value in TASK_SPECS.items():
+        if prop != 'plqy':
+            continue
+
+        id_loss_arr = np.asarray(id_loss_list)
+        mean, std = np.mean(id_loss_arr), np.std(id_loss_arr)
+        id_loss_z = np.abs((id_loss_arr - mean) / std).tolist()
+
+        assert len(mp_id_list) == len(id_loss_list)
+        id_loss_match = list(zip(mp_id_list, id_loss_list, id_loss_z))
+        id_loss_sorted = sorted(id_loss_match, key=lambda x: x[2], reverse=True)
+
+        id_score = [(id_loss_sorted[i][0], ((len(mp_id_list) - i) ** 2) / args.epochs) for i in range(len(mp_id_list))]
+        for id, score in id_score:
+            if id not in highest_loss_mp_ids.keys():
+                highest_loss_mp_ids[id] = 0
+            else:
+                highest_loss_mp_ids[id] += score
+
+        open_write_file(f"out_{args.id}/loss_{fold_it}/raw_losses", "")
+        with open(f"out_{args.id}/loss_{fold_it}/raw_losses/epoch{epoch}.csv", 'w', newline='', encoding='utf-8') as f:
+            id_loss_sorted = [('MP ID', 'Loss', 'Loss-Z')] + id_loss_sorted
+            writer = csv.writer(f)
+            writer.writerows(id_loss_sorted)
 
     loss_t_epochs.append(losses.avg)
     return epoch_batch_times.avg
