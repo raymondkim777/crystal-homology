@@ -1,6 +1,7 @@
 import os
 import shutil
 from tqdm import tqdm
+import random
 import csv
 import numpy as np
 import networkx as nx
@@ -10,8 +11,6 @@ from pymatgen.io.cif import CifParser
 from utils import CRYSTAL_SYSTEMS, open_write_file
 from utils import PREDICT, ABS_PREDICT, PLQY_PREDICT, TASK_SPECS, ABS_TASK_SPECS, PLQY_TASK_SPECS
 
-
-CIF_DIRECTORY = "data/cif"
 
 DATA_PRE_DIRECTORY = "data/pretrain"
 DATA_ABS_DIRECTORY = "data/abs"
@@ -23,12 +22,12 @@ CGCNN_ABS_DATAPATH = f'{CGCNN_DATAPATH}/abs_base'
 CGCNN_PLQY_DATAPATH = f'{CGCNN_DATAPATH}/plqy_base'
 
 
-def fetch_cif_filenames(system: str) -> list:
-    print(f"Fetching CIF files of {system} system...")
+def fetch_cif_filenames(cif_dir, system: str) -> list:
+    print(f"Fetching CIF files of {system} system in {cif_dir}...")
     cif_files = []
 
     # os.scandir() returns an iterator of DirEntry objects
-    with os.scandir(f"{CIF_DIRECTORY}/{system}") as entries:
+    with os.scandir(f"{cif_dir}/{system}") as entries:
         for entry in entries:
             if not entry.is_file():
                 continue
@@ -50,7 +49,14 @@ def write_pretrain_id_prop_mask():
     system_to_int = {CRYSTAL_SYSTEMS[idx]: idx for idx in range(len(CRYSTAL_SYSTEMS))}
 
     print(f"\nComputing PRETRAIN id_prop.csv and id_mask.csv...")
+    # counter = 0
+    # doc_dict_list = list(doc_dict.items())
+    # random.shuffle(doc_dict_list)
+    # for mp_id, doc in tqdm(doc_dict_list):
     for mp_id, doc in tqdm(doc_dict.items()):
+        # if counter > 1000:
+        #     break
+        # counter += 1
         prop_dict = {
             'system': system_to_int[str(doc['symmetry'].crystal_system).lower()],
             'direct_gap': doc['bandstructure'].latimer_munro.direct_gap 
@@ -184,18 +190,16 @@ def write_plqy_id_prop_mask():
 
 
 def prep_data() -> dict:
-    print(f"Saving files to {CGCNN_DATAPATH}")
-    open_write_file(CGCNN_DATAPATH, '')  # creates cgcnn data directory
-
+    open_write_file(CGCNN_PRE_DATAPATH, '')
     for system in CRYSTAL_SYSTEMS:
-        cif_files = fetch_cif_filenames(system)
+        cif_files = fetch_cif_filenames(f"{DATA_PRE_DIRECTORY}/cif", system)
                     
         print(f"Moving CIF files of {system} system...")
         for filename in tqdm(cif_files):
-            structure_filename = f"{CIF_DIRECTORY}/{system}/{filename}"
+            cif_filename = f"{DATA_PRE_DIRECTORY}/cif/{system}/{filename}"
             
             # copy file over to cgcnn data folder
-            shutil.copy(structure_filename, f"{CGCNN_DATAPATH}/{filename[3:]}")
+            shutil.copy(cif_filename, f"{CGCNN_PRE_DATAPATH}/{filename[3:]}")
     
     # create id_prop.csv
     write_pretrain_id_prop_mask()
@@ -221,6 +225,20 @@ def prep_data() -> dict:
     destination = open_write_file(f'{CGCNN_PRE_DATAPATH}', '')
     shutil.copy(source_file, destination)
 
+
+
+
+    open_write_file(CGCNN_ABS_DATAPATH, '')
+    for system in CRYSTAL_SYSTEMS:
+        cif_files = fetch_cif_filenames(f"{DATA_ABS_DIRECTORY}/cif", system)
+                    
+        print(f"Moving CIF files of {system} system...")
+        for filename in tqdm(cif_files):
+            cif_filename = f"{DATA_ABS_DIRECTORY}/cif/{system}/{filename}"
+            
+            # copy file over to cgcnn data folder
+            shutil.copy(cif_filename, f"{CGCNN_ABS_DATAPATH}/{filename[3:]}")
+
     write_abs_id_prop_mask()
 
     print(f"\nSaving ABS task specs...")
@@ -243,6 +261,19 @@ def prep_data() -> dict:
     source_file = f'{CGCNN_DATAPATH}/atom_init.json'
     destination = open_write_file(f'{CGCNN_ABS_DATAPATH}', '')
     shutil.copy(source_file, destination)
+    
+
+
+    open_write_file(CGCNN_PLQY_DATAPATH, '')
+    for system in CRYSTAL_SYSTEMS:
+        cif_files = fetch_cif_filenames(f"{DATA_PLQY_DIRECTORY}/cif", system)
+                    
+        print(f"Moving CIF files of {system} system...")
+        for filename in tqdm(cif_files):
+            cif_filename = f"{DATA_PLQY_DIRECTORY}/cif/{system}/{filename}"
+            
+            # copy file over to cgcnn data folder
+            shutil.copy(cif_filename, f"{CGCNN_PLQY_DATAPATH}/{filename}")
     
     write_plqy_id_prop_mask()
 

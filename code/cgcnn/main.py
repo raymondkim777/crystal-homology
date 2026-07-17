@@ -170,21 +170,24 @@ def main():
 
     # load data
     print("Constructing CIFData")
-    dataset = CIFData(*args.data_options)
+    dataset = CIFData(
+        *args.data_options, 
+        task_specs=TASK_SPECS)
     collate_fn = collate_pool
-    train_loader, val_loader, test_loader = get_train_val_test_loader(
-        dataset=dataset,
-        collate_fn=collate_fn,
-        batch_size=args.batch_size,
-        train_ratio=args.train_ratio,
-        num_workers=args.workers,
-        val_ratio=args.val_ratio,
-        test_ratio=args.test_ratio,
-        pin_memory=args.cuda,
-        train_size=args.train_size,
-        val_size=args.val_size,
-        test_size=args.test_size,
-        return_test=True)
+
+    # train_loader, val_loader, test_loader = get_train_val_test_loader(
+    #     dataset=dataset,
+    #     collate_fn=collate_fn,
+    #     batch_size=args.batch_size,
+    #     train_ratio=args.train_ratio,
+    #     num_workers=args.workers,
+    #     val_ratio=args.val_ratio,
+    #     test_ratio=args.test_ratio,
+    #     pin_memory=args.cuda,
+    #     train_size=args.train_size,
+    #     val_size=args.val_size,
+    #     test_size=args.test_size,
+    #     return_test=True)
 
     if args.fold == 0:
         # regular training
@@ -286,7 +289,7 @@ def main():
         sample_cnt = min(len(train_indices), args.norm_sample)
         sample_indices = sample(train_indices, k=sample_cnt)
         sample_data_list = [dataset[i] for i in tqdm(sample_indices, desc="Normalizers: ")]
-        _, _, _, sample_target, sample_mask, _ = collate_pool(sample_data_list)
+        _, sample_target, sample_mask, _ = collate_pool(sample_data_list)
 
         normalizers = dict()
         for prop, value in TASK_SPECS.items():
@@ -789,7 +792,6 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers, loss_t_
             nbr_fea_idx, 
             crys_idx,
         )
-    
         # normalize target
         # ! target normalization applied to each property
         targets_normed = {
@@ -837,7 +839,7 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers, loss_t_
                 stats[prop]['valid_cnts'].append(valid_cnt)
             else:
                 raise ValueError(f"[STAT SAVE] Unknown task {value['head']}")
-
+        
         # compute gradient and do SGD step
         optimizer.zero_grad()
         loss.backward()
@@ -1372,8 +1374,8 @@ def validate(
                 else:
                     raise ValueError(f"[TEST CSV] Unrecognized task {TASK_SPECS[prop]['head']}")
 
-    print(f'\n Model -- \tVector: {args.vector}\tAtom Len: {args.atom_fea_len}\tConv Num: {args.n_conv}\tHidden Len: {args.h_fea_len}\tHidden Num: {args.n_h}')
-    print(f'\t\tHead Layer Num: {args.n_o}\tVec Len: {args.vec_fea_len}\tVec Layer Num: {args.n_vec}')
+    # print(f'\n Model -- \tAtom Len: {args.atom_fea_len}\tConv Num: {args.n_conv}\tHidden Len: {args.h_fea_len}\tHidden Num: {args.n_h}')
+    # print(f'\t\tHead Layer Num: {args.n_o}')
     
     print(' ** ERROR {error:.3f}'.format(error=overall_error))
     return overall_error, losses.avg, stats
@@ -1435,7 +1437,11 @@ def save_stats_as_csv(
 def time_to_str(time):
     if time < 60:
         return f"{time:.4f}s"
-    return f"{time / 3600:02.0f}:{time / 60:02.0f}:{time % 60:05.2f}"
+    hours = int(time / 3600)
+    minutes = int((time - (hours * 3600)) / 60)
+    seconds = time % 60
+    
+    return f"{hours:02.0f}:{minutes:02.0f}:{seconds:05.2f}"
     
 
 def save_times(
@@ -1602,7 +1608,7 @@ def sum_sq_err(prediction, target):
 def class_eval(prediction, target):
     with torch.no_grad():
         target_label = target.detach().cpu().numpy()
-        target_label = np.squeeze(target)
+        target_label = np.squeeze(target_label)
 
         if not target_label.shape:
             target_label = np.asarray([target_label])
