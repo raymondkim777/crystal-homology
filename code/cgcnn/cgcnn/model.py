@@ -74,14 +74,111 @@ class ConvLayer(nn.Module):
         return out
 
 
+class CrystalGraphEncoder(nn.Module):
+    def __init__(
+            self, orig_atom_fea_len, nbr_fea_len,
+            atom_fea_len=64, n_conv=3, h_fea_len=128, n_h=1
+    ):
+        super().__init__()
+
+        self.embedding = nn.Linear(orig_atom_fea_len, atom_fea_len)
+        self.convs = nn.ModuleList([ConvLayer(atom_fea_len=atom_fea_len,
+                                    nbr_fea_len=nbr_fea_len)
+                                    for _ in range(n_conv)])
+        self.conv_to_fc = nn.Linear(atom_fea_len, h_fea_len)
+        self.conv_to_fc_softplus = nn.Softplus()
+
+        # ! Design of CGCNN is that this is the head processing layer
+        # ! Add in if necessary
+        # if n_h > 1:
+        #     self.fcs = nn.ModuleList([nn.Linear(h_fea_len, h_fea_len) for _ in range(n_h-1)])
+        #     self.softpluses = nn.ModuleList([nn.Softplus() for _ in range(n_h-1)])
+        
+        # if self.classification:
+        #     self.fc_out = nn.Linear(h_fea_len, num_classes)
+        # else:
+        #     self.fc_out = nn.Linear(h_fea_len, 1)
+        # if self.classification:
+        #     self.logsoftmax = nn.LogSoftmax(dim=1)
+        #     self.dropout = nn.Dropout()
+        
+    def forward(
+            self, 
+            atom_fea, nbr_fea, nbr_fea_idx, 
+            crystal_atom_idx,
+        ):
+        atom_fea = self.embedding(atom_fea)
+        for conv_func in self.convs:
+            atom_fea = conv_func(atom_fea, nbr_fea, nbr_fea_idx)
+        crys_fea = self.pooling(atom_fea, crystal_atom_idx)
+        crys_fea = self.conv_to_fc(self.conv_to_fc_softplus(crys_fea))
+        crys_fea = self.conv_to_fc_softplus(crys_fea)
+        
+        # if self.classification:
+        #     crys_fea = self.dropout(crys_fea)
+
+        # ! Design of CGCNN is that this is the head processing layer
+        # ! Add in if necessary
+        # if hasattr(self, 'fcs') and hasattr(self, 'softpluses'):
+        #     for fc, softplus in zip(self.fcs, self.softpluses):
+        #         crys_fea = softplus(fc(crys_fea))
+        return crys_fea
+    
+        # out = self.fc_out(crys_fea)
+        # if self.classification:
+        #     out = self.logsoftmax(out)
+        # return out
+    
+    def pooling(self, atom_fea, crystal_atom_idx):
+        """
+        Pooling the atom features to crystal features
+
+        N: Total number of atoms in the batch
+        N0: Total number of crystals in the batch
+
+        Parameters
+        ----------
+
+        atom_fea: Variable(torch.Tensor) shape (N, atom_fea_len)
+          Atom feature vectors of the batch
+        crystal_atom_idx: list of torch.LongTensor of length N0
+          Mapping from the crystal idx to atom idx
+        """
+        assert sum([len(idx_map) for idx_map in crystal_atom_idx]) ==\
+            atom_fea.data.shape[0]
+        summed_fea = [torch.mean(atom_fea[idx_map], dim=0, keepdim=True)
+                      for idx_map in crystal_atom_idx]
+        return torch.cat(summed_fea, dim=0)
+    
+
+class MLPHead(nn.Module):
+    '''
+    Small MLP prediction head for individual crystal properties. 
+    Can modify hidden/output dimension, as well as layer depth. 
+    '''
+    def __init__(self, hidden_dim, output_dim, layer_cnt=1, classification=False):
+        super().__init__()
+        layers = []
+        if classification:
+            layers.append(nn.Dropout())
+        for _ in range(layer_cnt):
+            layers.append(nn.Linear(hidden_dim, hidden_dim))
+            layers.append(nn.Softplus())
+        layers.append(nn.Linear(hidden_dim, output_dim))
+        self.model = nn.Sequential(*layers)
+
+    def forward(self, input):
+        return self.model(input)
+
+
 class CrystalGraphConvNet(nn.Module):
     """
     Create a crystal graph convolutional neural network for predicting total
     material properties.
     """
     def __init__(self, orig_atom_fea_len, nbr_fea_len,
-                 atom_fea_len=64, n_conv=3, h_fea_len=128, n_h=1,
-                 classification=False, num_classes=2):
+                 atom_fea_len=64, n_conv=3, h_fea_len=128, n_h=1, n_o=1,
+                 task_specs=None):
         """
         Initialize CrystalGraphConvNet.
 
@@ -102,25 +199,26 @@ class CrystalGraphConvNet(nn.Module):
           Number of hidden layers after pooling
         """
         super(CrystalGraphConvNet, self).__init__()
-        self.classification = classification
-        self.embedding = nn.Linear(orig_atom_fea_len, atom_fea_len)
-        self.convs = nn.ModuleList([ConvLayer(atom_fea_len=atom_fea_len,
-                                    nbr_fea_len=nbr_fea_len)
-                                    for _ in range(n_conv)])
-        self.conv_to_fc = nn.Linear(atom_fea_len, h_fea_len)
-        self.conv_to_fc_softplus = nn.Softplus()
-        if n_h > 1:
-            self.fcs = nn.ModuleList([nn.Linear(h_fea_len, h_fea_len)
-                                      for _ in range(n_h-1)])
-            self.softpluses = nn.ModuleList([nn.Softplus()
-                                             for _ in range(n_h-1)])
-        if self.classification:
-            self.fc_out = nn.Linear(h_fea_len, num_classes)
-        else:
-            self.fc_out = nn.Linear(h_fea_len, 1)
-        if self.classification:
-            self.logsoftmax = nn.LogSoftmax(dim=1)
-            self.dropout = nn.Dropout()
+        self.encoder = CrystalGraphEncoder(
+            orig_atom_fea_len=orig_atom_fea_len, 
+            nbr_fea_len=nbr_fea_len,
+            atom_fea_len=atom_fea_len,
+            n_conv=n_conv,
+            h_fea_len=h_fea_len,
+            n_h=n_h,
+        )
+
+        assert task_specs is not None, 'No head tasks inputted!'
+
+        # define ModuleDict for each property head
+        self.heads = nn.ModuleDict()
+        for task, item in task_specs.items():
+            self.heads[task] = MLPHead(
+                h_fea_len, 
+                item['out_dim'], 
+                layer_cnt=n_o,
+                classification=item['head'] in ['multiclass', 'binary'],
+            )
 
     def forward(self, atom_fea, nbr_fea, nbr_fea_idx, crystal_atom_idx):
         """
@@ -149,39 +247,33 @@ class CrystalGraphConvNet(nn.Module):
           Atom hidden features after convolution
 
         """
-        atom_fea = self.embedding(atom_fea)
-        for conv_func in self.convs:
-            atom_fea = conv_func(atom_fea, nbr_fea, nbr_fea_idx)
-        crys_fea = self.pooling(atom_fea, crystal_atom_idx)
-        crys_fea = self.conv_to_fc(self.conv_to_fc_softplus(crys_fea))
-        crys_fea = self.conv_to_fc_softplus(crys_fea)
-        if self.classification:
-            crys_fea = self.dropout(crys_fea)
-        if hasattr(self, 'fcs') and hasattr(self, 'softpluses'):
-            for fc, softplus in zip(self.fcs, self.softpluses):
-                crys_fea = softplus(fc(crys_fea))
-        out = self.fc_out(crys_fea)
-        if self.classification:
-            out = self.logsoftmax(out)
+        crys_fea = self.encoder(
+            atom_fea, nbr_fea, nbr_fea_idx, 
+            crystal_atom_idx,
+        )
+
+        out = dict()
+        for task, head in self.heads.items():
+            predict = head(crys_fea)
+            if predict.shape[-1] == 1:
+                predict = predict.squeeze(-1)
+            out[task] = predict
         return out
+    
 
-    def pooling(self, atom_fea, crystal_atom_idx):
-        """
-        Pooling the atom features to crystal features
+def freeze_lower_encoder(model: CrystalGraphConvNet):
+    # ! make sure to turn layers into eval AGAIN after model.train() is called
+    encoder = model.encoder
 
-        N: Total number of atoms in the batch
-        N0: Total number of crystals in the batch
+    # freeze atom embedding layer
+    encoder.embedding.requires_grad_(False)
+    encoder.embedding.eval()
 
-        Parameters
-        ----------
+    # freeze convolutional layers
+    encoder.convs.requires_grad_(False)
+    encoder.convs.eval()
 
-        atom_fea: Variable(torch.Tensor) shape (N, atom_fea_len)
-          Atom feature vectors of the batch
-        crystal_atom_idx: list of torch.LongTensor of length N0
-          Mapping from the crystal idx to atom idx
-        """
-        assert sum([len(idx_map) for idx_map in crystal_atom_idx]) ==\
-            atom_fea.data.shape[0]
-        summed_fea = [torch.mean(atom_fea[idx_map], dim=0, keepdim=True)
-                      for idx_map in crystal_atom_idx]
-        return torch.cat(summed_fea, dim=0)
+
+def set_frozen_encoder_parts_to_eval(model: CrystalGraphConvNet):
+    model.encoder.embedding.eval()
+    model.encoder.convs.eval()

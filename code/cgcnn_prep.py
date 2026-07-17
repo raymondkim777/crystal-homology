@@ -27,19 +27,6 @@ def fetch_cif_filenames(system: str) -> list:
     return cif_files
 
 
-def get_structures_from_cif(filepath: str) -> list:
-    cif_parser = CifParser(filepath)
-    structures = cif_parser.parse_structures()
-    for struct in structures:
-        check_result = cif_parser.check(struct)
-        if check_result is not None:
-            print(f"CIF Error: {filepath}")
-            print(f"Error Message: {check_result}")
-            raise ValueError(f"Struct contained in {filepath} is invalid")
-    # TODO: look into which crystals have multiple structures
-    return structures
-
-
 def prep_data() -> dict:
     print(f"Saving files to {CGCNN_DATAPATH}")
     open_write_file(CGCNN_DATAPATH, '')  # creates cgcnn data directory

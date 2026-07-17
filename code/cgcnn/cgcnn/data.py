@@ -6,6 +6,7 @@ import json
 import os
 import random
 import warnings
+import pickle
 
 import numpy as np
 import torch
@@ -17,6 +18,57 @@ from torch.utils.data.sampler import SubsetRandomSampler
 # ! disable structure warnings
 import warnings
 
+
+def get_fold_indices(dataset, k=5):
+    assert k >= 5, f"[Fold Idx] k-value of {k} is too small"
+    total_size = len(dataset)
+    indices = list(range(total_size))
+    k_size, remainder = divmod(total_size, k)
+    
+    fold_indices = [
+        indices[i * k_size + min(i, remainder) : (i + 1) * k_size + min(i + 1, remainder)]
+        for i in range(k)
+    ]
+    return fold_indices
+
+
+def get_train_val_test_loader_from_folds(
+        dataset, folds, test_fold_idx, collate_fn=default_collate,
+        batch_size=64, num_workers=1, drop_last=False,
+        pin_memory=False, persistent_workers=False,
+):
+    assert test_fold_idx < len(folds)
+    val_fold_idx = (test_fold_idx - 1) % len(folds)
+    # concatenate remaining folds to form train indices
+    train_indices = [
+        idx
+        for fold_idx, fold in enumerate(folds)
+        if fold_idx not in [val_fold_idx, test_fold_idx]
+        for idx in fold
+    ]
+    train_sampler = SubsetRandomSampler(train_indices)
+    val_sampler = SubsetRandomSampler(folds[val_fold_idx])
+    test_sampler = SubsetRandomSampler(folds[test_fold_idx])
+
+    train_loader = DataLoader(dataset, batch_size=batch_size,
+                              drop_last=drop_last,
+                              sampler=train_sampler,
+                              num_workers=num_workers,
+                              collate_fn=collate_fn, pin_memory=pin_memory, 
+                              persistent_workers=persistent_workers)
+    val_loader = DataLoader(dataset, batch_size=batch_size,
+                            drop_last=drop_last,
+                            sampler=val_sampler,
+                            num_workers=num_workers,
+                            collate_fn=collate_fn, pin_memory=pin_memory,
+                            persistent_workers=persistent_workers)
+    test_loader = DataLoader(dataset, batch_size=batch_size,
+                             drop_last=drop_last,
+                             sampler=test_sampler,
+                             num_workers=num_workers,
+                             collate_fn=collate_fn, pin_memory=pin_memory,
+                             persistent_workers=persistent_workers)
+    return train_loader, val_loader, test_loader
 
 
 def get_train_val_test_loader(dataset, collate_fn=default_collate,
@@ -133,26 +185,49 @@ def collate_pool(dataset_list):
     batch_cif_ids: list
     """
     batch_atom_fea, batch_nbr_fea, batch_nbr_fea_idx = [], [], []
-    crystal_atom_idx, batch_target = [], []
+    crystal_atom_idx = []
+    # batch_target = []
+    batch_targets, batch_mask = dict(), dict()
     batch_cif_ids = []
     base_idx = 0
-    for i, ((atom_fea, nbr_fea, nbr_fea_idx), target, cif_id)\
-            in enumerate(dataset_list):
+    for i, (
+        (atom_fea, nbr_fea, nbr_fea_idx), 
+        targets, mask,
+        cif_id) in enumerate(dataset_list):
+
         n_i = atom_fea.shape[0]  # number of atoms for this crystal
         batch_atom_fea.append(atom_fea)
         batch_nbr_fea.append(nbr_fea)
         batch_nbr_fea_idx.append(nbr_fea_idx+base_idx)
         new_idx = torch.LongTensor(np.arange(n_i)+base_idx)
         crystal_atom_idx.append(new_idx)
-        batch_target.append(target)
+        # batch_target.append(target)
+        for key in targets.keys():
+            if key not in batch_targets.keys():
+                batch_targets[key] = []
+            batch_targets[key].append(targets[key])
+        # mask
+        for key in mask.keys():
+            if key not in batch_mask.keys():
+                batch_mask[key] = []
+            batch_mask[key].append(mask[key])
         batch_cif_ids.append(cif_id)
         base_idx += n_i
+    
     return (torch.cat(batch_atom_fea, dim=0),
             torch.cat(batch_nbr_fea, dim=0),
             torch.cat(batch_nbr_fea_idx, dim=0),
             crystal_atom_idx),\
-        torch.stack(batch_target, dim=0),\
+        {
+            key: torch.cat(batch_targets[key], dim=0)
+            for key in batch_targets.keys()
+        },\
+        {
+            key: torch.cat(batch_mask[key], dim=0)
+            for key in batch_mask.keys()
+        },\
         batch_cif_ids
+        # torch.stack(batch_target, dim=0),\
 
 
 class GaussianDistance(object):
@@ -301,16 +376,35 @@ class CIFData(Dataset):
     target: torch.Tensor shape (1, )
     cif_id: str or int
     """
-    def __init__(self, root_dir, max_num_nbr=12, radius=8, dmin=0, step=0.2,
-                 random_seed=123):
+    def __init__(self, root_dir, max_num_nbr=30, radius=16, dmin=0, step=0.2,
+                 random_seed=42):
         self.root_dir = root_dir
         self.max_num_nbr, self.radius = max_num_nbr, radius
         assert os.path.exists(root_dir), 'root_dir does not exist!'
         id_prop_file = os.path.join(self.root_dir, 'id_prop.csv')
         assert os.path.exists(id_prop_file), 'id_prop.csv does not exist!'
+        # with open(id_prop_file) as f:
+        #     reader = csv.reader(f)
+        #     self.id_prop_data = [row for row in reader]
+
         with open(id_prop_file) as f:
             reader = csv.reader(f)
-            self.id_prop_data = [row for row in reader]
+            self.id_prop_data = [[[row[0]] + [float(item) for item in row[1:]]] for row in reader]
+        # ! appending mask data to prop data
+        id_mask_file = os.path.join(self.root_dir, 'id_mask.csv')
+        assert os.path.exists(id_mask_file), 'id_mask.csv does not exist!'
+        with open(id_mask_file) as f:
+            reader = csv.reader(f)
+            id_mask_data = [[row[0]] + [float(item) for item in row[1:]] for row in reader]
+        for i in range(len(self.id_prop_data)):
+            assert self.id_prop_data[i][0][0] == id_mask_data[i][0], 'id_prop and id_mask IDs do not match!'
+            self.id_prop_data[i].append(id_mask_data[i])
+        predict_file = os.path.join(self.root_dir, 'tasks', 'predict.pkl')
+        with open(predict_file, 'rb') as f:
+            self.predict_list = pickle.load(f)
+        assert len(self.id_prop_data[0][0][1:]) == len(self.predict_list), 'prop count does not match predict count!'
+        assert len(self.id_prop_data[0][1][1:]) == len(self.predict_list), 'mask count does not match predict count!'
+
         random.seed(random_seed)
         random.shuffle(self.id_prop_data)
         atom_init_file = os.path.join(self.root_dir, 'atom_init.json')
@@ -323,12 +417,28 @@ class CIFData(Dataset):
 
     @functools.lru_cache(maxsize=None)  # Cache loaded structures
     def __getitem__(self, idx):
-        cif_id, target = self.id_prop_data[idx]
+        # cif_id, target = self.id_prop_data[idx]
+
+        cif_id = self.id_prop_data[idx][0][0]
+        # ! multitask targets
+        target_list = list(self.id_prop_data[idx][0][1:])
+        mask_list = list(self.id_prop_data[idx][1][1:])
+        targets, mask = dict(), dict()
+        for i in range(len(self.predict_list)):
+            task_type = self.task_specs[self.predict_list[i]]['head']
+            if task_type in ['binary', 'multiclass']:
+                targets[self.predict_list[i]] = torch.tensor([target_list[i]]).long()
+            elif task_type == 'regression':
+                targets[self.predict_list[i]] = torch.tensor([target_list[i]]).float()
+            else:
+                raise ValueError(f'[CIFData] unrecognized target task {task_type}')
+            mask[self.predict_list[i]] = torch.tensor([mask_list[i]]).bool()
+
+
         # ! disable structure warnings
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            crystal = Structure.from_file(os.path.join(self.root_dir,
-                                                   cif_id+'.cif'))
+            crystal = Structure.from_file(os.path.join(self.root_dir, cif_id+'.cif'))
         atom_fea = np.vstack([self.ari.get_atom_fea(crystal[i].specie.number)
                               for i in range(len(crystal))])
         atom_fea = torch.Tensor(atom_fea)
@@ -356,5 +466,5 @@ class CIFData(Dataset):
         atom_fea = torch.Tensor(atom_fea)
         nbr_fea = torch.Tensor(nbr_fea)
         nbr_fea_idx = torch.LongTensor(nbr_fea_idx)
-        target = torch.Tensor([float(target)])
-        return (atom_fea, nbr_fea, nbr_fea_idx), target, cif_id
+        # target = torch.Tensor([float(target)])  # ! target changed from list --> dict
+        return (atom_fea, nbr_fea, nbr_fea_idx), targets, mask, cif_id
