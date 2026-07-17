@@ -6,22 +6,28 @@ import time
 import warnings
 import pickle
 import csv
-from random import sample
+from random import sample, seed
 from tqdm import tqdm
 
 import numpy as np
+import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from sklearn import metrics
 from torch.autograd import Variable
 from torch.optim.lr_scheduler import MultiStepLR, ReduceLROnPlateau
+from sklearn.metrics import r2_score
 
+from time import perf_counter
+from cgcnn.loss import MultiTaskLoss
 from cgcnn.data import CIFData
 # from cgcnn.data import collate_pool, get_train_val_test_loader
 from cgcnn.data import collate_pool, get_train_val_test_loader, \
     get_fold_indices, get_train_val_test_loader_from_folds
-from cgcnn.model import CrystalGraphConvNet
+# from cgcnn.model import CrystalGraphConvNet
+from cgcnn.model import CrystalGraphConvNet, \
+    freeze_lower_encoder, set_frozen_encoder_parts_to_eval
 
 parser = argparse.ArgumentParser(description='Crystal Graph Convolutional Neural Networks')
 parser.add_argument('data_options', metavar='OPTIONS', nargs='+',
@@ -121,7 +127,7 @@ parser.add_argument('--drop-last', action='store_true',
 args = parser.parse_args(sys.argv[1:])
 
 args.cuda = not args.disable_cuda and torch.cuda.is_available()
-
+device = torch.device("cuda" if args.cuda else "cpu")
 
 # read in head tasks
 task_filepath = os.path.join(args.data_options[0], 'tasks', 'tasks.pkl')
@@ -143,6 +149,7 @@ def main():
     # ! CUSTOM
     if args.seed:
         torch.manual_seed(42)
+        seed(42)
     print("GPU Available", args.cuda)
 
     if args.delete and args.resume == '':
@@ -248,8 +255,7 @@ def main():
 
         if CROSS_VAL:
             print(f"\n--------FOLD {fold_it + 1}--------")
-            if args.debug:
-                print(f"Constructing train/val/test loaders for {fold_num} folds")
+            print(f"Constructing train/val/test loaders for {fold_num} folds")
             train_loader, val_loader, test_loader = get_train_val_test_loader_from_folds(
                 dataset=dataset,
                 folds=folds, 
@@ -260,14 +266,6 @@ def main():
                 pin_memory=args.cuda,
                 drop_last=args.drop_last,
             )
-        
-        print("Normalizer train sample size 2000")    
-        train_indices = list(train_loader.sampler)
-        sample_cnt = min(len(train_indices), args.norm_sample)
-        sample_indices = sample(train_indices, k=sample_cnt)
-        sample_data_list = [dataset[i] for i in tqdm(sample_indices, desc="Normalizers: ")]
-        _, _, _, sample_target, sample_mask, _ = collate_pool(sample_data_list)
-
     # # obtain target value normalizer
     # if args.task == 'classification':
     #     normalizer = Normalizer(torch.zeros(2))
@@ -282,150 +280,563 @@ def main():
     #                             sample(range(len(dataset)), 500)]
     #     _, sample_target, _ = collate_pool(sample_data_list)
     #     normalizer = Normalizer(sample_target)
+        
+        print("Normalizer train sample size 2000")    
+        train_indices = list(train_loader.sampler)
+        sample_cnt = min(len(train_indices), args.norm_sample)
+        sample_indices = sample(train_indices, k=sample_cnt)
+        sample_data_list = [dataset[i] for i in tqdm(sample_indices, desc="Normalizers: ")]
+        _, _, _, sample_target, sample_mask, _ = collate_pool(sample_data_list)
 
-    # build model
-    structures, _, _ = dataset[0]
-    orig_atom_fea_len = structures[0].shape[-1]
-    nbr_fea_len = structures[1].shape[-1]
-    model = CrystalGraphConvNet(orig_atom_fea_len, nbr_fea_len,
-                                atom_fea_len=args.atom_fea_len,
-                                n_conv=args.n_conv,
-                                h_fea_len=args.h_fea_len,
-                                n_h=args.n_h,
-                                classification=True if args.task ==
-                                                       'classification' else False, 
-                                num_classes=args.num_classes)
-    if args.cuda:
-        model.cuda()
+        normalizers = dict()
+        for prop, value in TASK_SPECS.items():
+            if value['head'] in ['binary', 'multiclass']:
+                normalizer = NormalizerProp(torch.zeros(2))
+                normalizer.load_state_dict({'mean': 0., 'std': 1., 'bound': 0.,})
+            elif value['head'] in ['regression']:
+                normalizer = NormalizerProp(sample_target[prop], mask=sample_mask[prop])
+            else:
+                raise ValueError(f"[Normalizer] Unknown task {value['head']}")
+            normalizers[prop] = normalizer
 
-    # define loss func and optimizer
-    if args.task == 'classification':
-        criterion = nn.NLLLoss()
-    else:
-        criterion = nn.MSELoss()
-    if args.optim == 'SGD':
-        optimizer = optim.SGD(model.parameters(), args.lr,
-                              momentum=args.momentum,
-                              weight_decay=args.weight_decay)
-    elif args.optim == 'Adam':
-        optimizer = optim.Adam(model.parameters(), args.lr,
-                               weight_decay=args.weight_decay)
-    else:
-        raise NameError('Only SGD or Adam is allowed as --optim')
+        # ! clear dataloader cache
+        if args.clear_cache:
+            print("Dataset cache:", train_loader.dataset.__getitem__.cache_info())
+            print("Graph cache:", train_loader.dataset._GraphData__load_graph_dict.cache_info())
+            train_loader.dataset.__getitem__.cache_clear()
+            train_loader.dataset._GraphData__load_graph_dict.cache_clear()
+            print("Cleared dataset cache", train_loader.dataset.__getitem__.cache_info())
+            print("Cleared graph cache", train_loader.dataset._GraphData__load_graph_dict.cache_info())
 
-    # optionally resume from a checkpoint
-    if args.resume:
-        if os.path.isfile(args.resume):
-            print("=> loading checkpoint '{}'".format(args.resume))
-            checkpoint = torch.load(args.resume, weights_only=False)
-            args.start_epoch = checkpoint['epoch']
-            best_errors = checkpoint['best_mae_error']
-            model.load_state_dict(checkpoint['state_dict'])
-            optimizer.load_state_dict(checkpoint['optimizer'])
-            normalizer.load_state_dict(checkpoint['normalizer'])
-            print("=> loaded checkpoint '{}' (epoch {})"
-                  .format(args.resume, checkpoint['epoch']))
+    # # build model
+    # structures, _, _ = dataset[0]
+    # orig_atom_fea_len = structures[0].shape[-1]
+    # nbr_fea_len = structures[1].shape[-1]
+    # model = CrystalGraphConvNet(orig_atom_fea_len, nbr_fea_len,
+    #                             atom_fea_len=args.atom_fea_len,
+    #                             n_conv=args.n_conv,
+    #                             h_fea_len=args.h_fea_len,
+    #                             n_h=args.n_h,
+    #                             classification=True if args.task ==
+    #                                                    'classification' else False, 
+    #                             num_classes=args.num_classes)
+
+        # build model
+        print("Instantiating model")
+        structures, _, _, _ = dataset[0]
+        orig_atom_fea_len = structures[0].shape[-1]
+        nbr_fea_len = structures[1].shape[-1]
+        model = CrystalGraphConvNet(
+            orig_atom_fea_len, nbr_fea_len,
+            atom_fea_len=args.atom_fea_len,
+            n_conv=args.n_conv,
+            h_fea_len=args.h_fea_len,
+            n_h=args.n_h,
+            n_o=args.n_o,
+            task_specs=TASK_SPECS,
+        )
+
+        # ! if fine-tune, freeze lower encoder layers
+        if args.train in ['abs', 'plqy']:
+            assert args.finetune != '' or args.finetune_auto
+            assert args.finetune == '' or not args.finetune_auto
+
+            if args.finetune_auto:
+                prefix = 'pre' if args.data_options[0][5:8] == 'abs' else 'abs'
+                in_filename = f"{prefix}" \
+                + f"_{args.atom_fea_len}" \
+                + f"_{args.n_conv}" \
+                + f"_{args.h_fea_len}" \
+                + f"_{args.n_h}" \
+                + f"_{args.n_o}" \
+                + "_default_base.pth.tar"
+            else:
+                in_filename = args.finetune
+            in_filepath = f'./checkpoints/{in_filename}'
+
+            # load checkpoint encoder weights
+            if not os.path.isfile(in_filepath):
+                raise ValueError(f"=> no pretrained checkpoint found at '{in_filepath}'")
+            print(f"=> Loading pretrained checkpoint '{in_filepath}'")
+
+            # load checkpoint from file
+            checkpoint = torch.load(in_filepath, weights_only=True)
+
+            # isolate encoder state dict
+            if not any(k.startswith("encoder.") for k in checkpoint['state_dict']):
+                raise ValueError(f"Pretrained checkpoint model contains no encoder state_dict")
+            encoder_state_dict = {
+                k[len("encoder."):]: v
+                for k, v in checkpoint['state_dict'].items()
+                if k.startswith("encoder.")
+            }
+            print("Encoder state dict KEYS:")
+            print(encoder_state_dict.keys())
+
+            # load encoder with checkpoint weights
+            model.encoder.load_state_dict(
+                encoder_state_dict, 
+                strict=True
+            )
+            print(f"=> loaded checkpoint '{in_filepath}' encoder")
+            if args.freeze:
+                freeze_lower_encoder(model=model)
+
+    # if args.cuda:
+    #     model.cuda()
+                
+        # ! updated tensor cuda code
+        print(f"Moving model to {device}")
+        model = model.to(device)
+
+    # # define loss func and optimizer
+    # if args.task == 'classification':
+    #     criterion = nn.NLLLoss()
+    # else:
+    #     criterion = nn.MSELoss()
+    # if args.optim == 'SGD':
+    #     optimizer = optim.SGD(model.parameters(), args.lr,
+    #                           momentum=args.momentum,
+    #                           weight_decay=args.weight_decay)
+    # elif args.optim == 'Adam':
+    #     optimizer = optim.Adam(model.parameters(), args.lr,
+    #                            weight_decay=args.weight_decay)
+    # else:
+    #     raise NameError('Only SGD or Adam is allowed as --optim')
+        
+        # define loss func and optimizer
+        # ! CUSTOM LOSS FUNCTION 
+        print("Instantiating custom loss function")
+        criterion = MultiTaskLoss(device)
+                
+        if args.optim == 'SGD':
+            optimizer = optim.SGD(model.parameters(), args.lr,
+                                momentum=args.momentum,
+                                weight_decay=args.weight_decay)
+        elif args.optim == 'Adam':
+            optimizer = optim.AdamW(model.parameters(), args.lr,
+                                weight_decay=args.weight_decay)
         else:
-            print("=> no checkpoint found at '{}'".format(args.resume))
+            raise NameError('Only SGD or Adam is allowed as --optim')
 
-    scheduler = MultiStepLR(optimizer, milestones=args.lr_milestones,
-                            gamma=0.1)
+    # # optionally resume from a checkpoint
+    # if args.resume:
+    #     if os.path.isfile(args.resume):
+    #         print("=> loading checkpoint '{}'".format(args.resume))
+    #         checkpoint = torch.load(args.resume, weights_only=False)
+    #         args.start_epoch = checkpoint['epoch']
+    #         best_errors = checkpoint['best_mae_error']
+    #         model.load_state_dict(checkpoint['state_dict'])
+    #         optimizer.load_state_dict(checkpoint['optimizer'])
+    #         normalizer.load_state_dict(checkpoint['normalizer'])
+    #         print("=> loaded checkpoint '{}' (epoch {})"
+    #               .format(args.resume, checkpoint['epoch']))
+    #     else:
+    #         print("=> no checkpoint found at '{}'".format(args.resume))
+        
+        # optionally resume from a checkpoint
+        if not CROSS_VAL and args.resume:
+            if os.path.isfile(args.resume):
+                print("=> loading checkpoint '{}'".format(args.resume))
+                best_filename = f"out_{args.id}/model_best_{args.id}.pth.tar"
+                shutil.copyfile(args.resume, best_filename)
+                # ! TRUSTED SOURCE
+                checkpoint = torch.load(args.resume, weights_only=False)
+                args.start_epoch = max(args.start_epoch, checkpoint['epoch'])
+                best_errors = checkpoint['best_errors']
+                model.load_state_dict(checkpoint['state_dict'])
+                optimizer.load_state_dict(checkpoint['optimizer'])
+                # normalizer.load_state_dict(checkpoint['normalizer'])
+                for prop in normalizers.keys():
+                    normalizers[prop].load_state_dict(checkpoint['normalizer'][prop])
+                print("=> loaded checkpoint '{}' (epoch {})"
+                    .format(args.resume, checkpoint['epoch']))
+            else:
+                print("=> no checkpoint found at '{}'".format(args.resume))
 
-    for epoch in range(args.start_epoch, args.epochs):
-        # train for one epoch
-        train(train_loader, model, criterion, optimizer, epoch, normalizer)
-
-        # evaluate on validation set
-        mae_error = validate(val_loader, model, criterion, normalizer)
-
-        if mae_error != mae_error:
-            print('Exit due to NaN')
-            sys.exit(1)
-
-        scheduler.step()
-
-        # remember the best mae_eror and save checkpoint
-        if args.task == 'regression':
-            is_best = mae_error < best_errors
-            best_errors = min(mae_error, best_errors)
+    # scheduler = MultiStepLR(optimizer, milestones=args.lr_milestones,
+    #                         gamma=0.1)
+                
+        if args.scheduler == 'normal':
+            scheduler = MultiStepLR(optimizer, milestones=args.lr_milestones, gamma=0.1)
         else:
-            is_best = mae_error > best_errors
-            best_errors = max(mae_error, best_errors)
-        save_checkpoint({
-            'epoch': epoch + 1,
-            'state_dict': model.state_dict(),
-            'best_mae_error': best_errors,
-            'optimizer': optimizer.state_dict(),
-            'normalizer': normalizer.state_dict(),
-            'args': vars(args)
-        }, is_best)
+            scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10)
 
-    # test best model
-    print('---------Evaluate Model on Test Set---------------')
-    best_checkpoint = torch.load('model_best.pth.tar', weights_only=False)
-    model.load_state_dict(best_checkpoint['state_dict'])
-    validate(test_loader, model, criterion, normalizer, test=True)
+    # for epoch in range(args.start_epoch, args.epochs):
+    #     # train for one epoch
+    #     train(train_loader, model, criterion, optimizer, epoch, normalizer)
+
+    #     # evaluate on validation set
+    #     mae_error = validate(val_loader, model, criterion, normalizer)
+
+    #     if mae_error != mae_error:
+    #         print('Exit due to NaN')
+    #         sys.exit(1)
+
+    #     scheduler.step()
+
+    #     # remember the best mae_eror and save checkpoint
+    #     if args.task == 'regression':
+    #         is_best = mae_error < best_errors
+    #         best_errors = min(mae_error, best_errors)
+    #     else:
+    #         is_best = mae_error > best_errors
+    #         best_errors = max(mae_error, best_errors)
+    #     save_checkpoint({
+    #         'epoch': epoch + 1,
+    #         'state_dict': model.state_dict(),
+    #         'best_mae_error': best_errors,
+    #         'optimizer': optimizer.state_dict(),
+    #         'normalizer': normalizer.state_dict(),
+    #         'args': vars(args)
+    #     }, is_best)
+
+        t_start_train = perf_counter()
+        print("Starting training epochs")
+        for epoch in tqdm(range(args.start_epoch, args.epochs), desc='Epochs: ', disable=True):
+            t_start_epoch = perf_counter()
+
+            # train for one epoch
+            print(f"Training epoch {epoch}")
+            avg_batch_time = train(
+                train_loader, model, criterion, optimizer, 
+                epoch, normalizers, loss_t_epochs, loss_t_batches,
+            )
+            t_end_train = perf_counter()
+            if epoch == 0:
+                epoch_0_times.update(t_end_train - t_start_epoch)
+                epoch_0_batch_times.update(avg_batch_time)
+            else:
+                epoch_n_times.update(t_end_train - t_start_epoch)
+                epoch_n_batch_times.update(avg_batch_time)
+
+            # evaluate on validation set
+            print("\nValidating\n")
+            val_error, val_loss, _ = validate(
+                val_loader, model, criterion, normalizers, 
+                loss_v_epochs=loss_v_epochs,
+            )
+
+            if args.val_metric == 'error':
+                cur_errors = float(val_error)
+            else:
+                cur_errors = float(val_loss)
+
+            if cur_errors != cur_errors:
+                print('Exit due to NaN')
+                sys.exit(1)
+
+            if args.scheduler == 'normal':
+                scheduler.step()
+            else:
+                scheduler.step(cur_errors)
+
+            # remember the best error and save checkpoint
+            is_best = cur_errors <= best_errors
+            best_errors = min(cur_errors, best_errors)
+            save_checkpoint({
+                'epoch': epoch + 1,
+                'state_dict': model.state_dict(),
+                'best_errors': float(best_errors),
+                'optimizer': optimizer.state_dict(),
+                'normalizer': {prop: normalizers[prop].state_dict()
+                            for prop in normalizers.keys()},
+                'args': vars(args)
+            }, is_best, fold_it=fold_it)
+        
+        # plot/save train/val loss figures
+        save_loss_fig(
+            loss_t_epochs, 
+            loss_t_batches,
+            loss_v_epochs, 
+            fold_it,
+        )
+
+    # # test best model
+    # print('---------Evaluate Model on Test Set---------------')
+    # best_checkpoint = torch.load('model_best.pth.tar', weights_only=False)
+    # model.load_state_dict(best_checkpoint['state_dict'])
+    # validate(test_loader, model, criterion, normalizer, test=True)
+        
+        # test best model
+        print('---------------Evaluate Model on Test Set---------------')
+        # ! PyTorch 2.6 safety measure: only load model weights -> extra argument
+        if CROSS_VAL:
+            best_checkpoint_path = f"out_{args.id}/model_best_{args.id}_fold_{fold_it}.pth.tar"
+        else:
+            best_checkpoint_path = f'out_{args.id}/model_best_{args.id}.pth.tar'
+
+        best_checkpoint = torch.load(best_checkpoint_path, weights_only=False)
+        best_epochs.append(best_checkpoint['epoch'])
+        model.load_state_dict(best_checkpoint['state_dict'])
+
+        # ! run best model checkpoint on val and test set
+        val_error, val_loss, val_stat_dict = validate(
+            val_loader, model, criterion, normalizers, 
+            fold_it=fold_it,
+            val=True
+        )
+        test_error, test_loss, test_stat_dict = validate(
+            test_loader, model, criterion, normalizers, 
+            fold_it=fold_it,
+            test=True
+        )
+
+        # copy best model to ./checkpoints
+        out_filename = f"{args.data_options[0][5:8]}" \
+            + f"_{args.atom_fea_len}" \
+            + f"_{args.n_conv}" \
+            + f"_{args.h_fea_len}" \
+            + f"_{args.n_h}" \
+            + f"_{args.n_o}" \
+            + (f'_fold_{fold_it}' if CROSS_VAL else '') \
+            + "_default_base.pth.tar"
+        
+        out_filepath = open_write_file('checkpoints', out_filename)
+
+        if not CROSS_VAL or (CROSS_VAL and args.save_fold):
+            shutil.copyfile(best_checkpoint_path, out_filepath)
+            print(f"Saved best model to: {out_filepath}")
+
+        # saving val validation stats to total stats
+        total_val_losses.update(val_loss)
+        total_val_errors.update(val_error)
+        for prop, value in TASK_SPECS.items():
+            for stat, avg_meter in total_val_stats[prop].items():
+                avg_meter.update(val_stat_dict[prop][stat].avg)
+
+        # saving test validation stats to total stats
+        total_test_losses.update(test_loss)
+        total_test_errors.update(test_error)
+        for prop, value in TASK_SPECS.items():
+            for stat, avg_meter in total_test_stats[prop].items():
+                avg_meter.update(test_stat_dict[prop][stat].avg)
+        
+        t_end_train = perf_counter()
+        total_times.update(t_end_train - t_start_train)
+    
+    # ! save results
+    save_stats_as_csv(
+        best_epochs=best_epochs, 
+        total_loss=total_val_losses.avg, 
+        total_error=total_val_errors.avg,
+        stats_dict=total_val_stats,
+        test=False,
+    )
+    save_stats_as_csv(
+        best_epochs=best_epochs, 
+        total_loss=total_test_losses.avg, 
+        total_error=total_test_errors.avg,
+        stats_dict=total_test_stats,
+        test=True
+    )
+    save_times(
+        total_t=total_times.avg,
+        epoch_0_batch_avg_t=epoch_0_batch_times.avg,
+        epoch_0_t=epoch_0_times.avg, 
+        epoch_batch_avg_t=epoch_n_batch_times.avg, 
+        epoch_avg_t=epoch_n_times.avg,
+    )
 
 
-def train(train_loader, model, criterion, optimizer, epoch, normalizer):
+# def train(train_loader, model, criterion, optimizer, epoch, normalizer):
+#     batch_time = AverageMeter()
+#     data_time = AverageMeter()
+#     losses = AverageMeter()
+#     if args.task == 'regression':
+#         mae_errors = AverageMeter()
+#     else:
+#         accuracies = AverageMeter()
+#         precisions = AverageMeter()
+#         recalls = AverageMeter()
+#         fscores = AverageMeter()
+#         auc_scores = AverageMeter()
+
+#     # switch to train mode
+#     model.train()
+
+#     end = time.time()
+#     for i, (input, target, _) in enumerate(train_loader):
+#         # measure data loading time
+#         data_time.update(time.time() - end)
+
+#         if args.cuda:
+#             input_var = (Variable(input[0].cuda(non_blocking=True)),
+#                          Variable(input[1].cuda(non_blocking=True)),
+#                          input[2].cuda(non_blocking=True),
+#                          [crys_idx.cuda(non_blocking=True) for crys_idx in input[3]])
+#         else:
+#             input_var = (Variable(input[0]),
+#                          Variable(input[1]),
+#                          input[2],
+#                          input[3])
+#         # normalize target
+#         if args.task == 'regression':
+#             target_normed = normalizer.norm(target)
+#         else:
+#             target_normed = target.view(-1).long()
+#         if args.cuda:
+#             target_var = Variable(target_normed.cuda(non_blocking=True))
+#         else:
+#             target_var = Variable(target_normed)
+
+#         # compute output
+#         output = model(*input_var)
+#         loss = criterion(output, target_var)
+
+#         # measure accuracy and record loss
+#         if args.task == 'regression':
+#             mae_error = mae(normalizer.denorm(output.data.cpu()), target)
+#             losses.update(loss.data.cpu(), target.size(0))
+#             mae_errors.update(mae_error, target.size(0))
+#         else:
+#             accuracy, precision, recall, fscore, auc_score = \
+#                 class_eval(output.data.cpu(), target)
+#             losses.update(loss.data.cpu().item(), target.size(0))
+#             accuracies.update(accuracy, target.size(0))
+#             precisions.update(precision, target.size(0))
+#             recalls.update(recall, target.size(0))
+#             fscores.update(fscore, target.size(0))
+#             auc_scores.update(auc_score, target.size(0))
+
+#         # compute gradient and do SGD step
+#         optimizer.zero_grad()
+#         loss.backward()
+#         optimizer.step()
+
+#         # measure elapsed time
+#         batch_time.update(time.time() - end)
+#         end = time.time()
+
+#         if i % args.print_freq == 0:
+#             if args.task == 'regression':
+#                 print('Epoch: [{0}][{1}/{2}]\t'
+#                       'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+#                       'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
+#                       'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+#                       'MAE {mae_errors.val:.3f} ({mae_errors.avg:.3f})'.format(
+#                     epoch, i, len(train_loader), batch_time=batch_time,
+#                     data_time=data_time, loss=losses, mae_errors=mae_errors)
+#                 )
+#             else:
+#                 print('Epoch: [{0}][{1}/{2}]\t'
+#                       'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+#                       'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
+#                       'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+#                       'Accu {accu.val:.3f} ({accu.avg:.3f})\t'
+#                       'Precision {prec.val:.3f} ({prec.avg:.3f})\t'
+#                       'Recall {recall.val:.3f} ({recall.avg:.3f})\t'
+#                       'F1 {f1.val:.3f} ({f1.avg:.3f})\t'
+#                       'AUC {auc.val:.3f} ({auc.avg:.3f})'.format(
+#                     epoch, i, len(train_loader), batch_time=batch_time,
+#                     data_time=data_time, loss=losses, accu=accuracies,
+#                     prec=precisions, recall=recalls, f1=fscores,
+#                     auc=auc_scores)
+#                 )
+    
+
+def train(train_loader, model, criterion, optimizer, epoch, normalizers, loss_t_epochs, loss_t_batches):
     batch_time = AverageMeter()
     data_time = AverageMeter()
-    losses = AverageMeter()
-    if args.task == 'regression':
-        mae_errors = AverageMeter()
-    else:
-        accuracies = AverageMeter()
-        precisions = AverageMeter()
-        recalls = AverageMeter()
-        fscores = AverageMeter()
-        auc_scores = AverageMeter()
+    # ! stat trackers for each metric per head
+    losses = AverageMeter()     # total batch loss (from loss function)
+    stats = dict()
+    for prop, value in TASK_SPECS.items():
+        stats[prop] = dict()
+        stats[prop]['loss'] = AverageMeter()    # loss for each property (intermediate from loss function)
+        if value['head'] in ['binary', 'multiclass']:
+            stats[prop]['accuracies'] = AverageMeter()
+            stats[prop]['precisions'] = AverageMeter()
+            stats[prop]['recalls'] = AverageMeter()
+            stats[prop]['fscores'] = AverageMeter()
+            stats[prop]['auc_scores'] = AverageMeter()
+        elif value['head'] == 'regression':
+            stats[prop]['sq_errors'] = []
+            stats[prop]['valid_cnts'] = []
+        else:
+            raise ValueError(f"[TRAIN STATS] Unknown task {value['head']}")
 
     # switch to train mode
     model.train()
 
+    # ! set frozen layers to eval (undo model.train() for those layers)
+    if args.train in ['abs', 'plqy'] and args.freeze:
+        set_frozen_encoder_parts_to_eval(model)
+
     end = time.time()
-    for i, (input, target, _) in enumerate(train_loader):
+    batch_time_start = perf_counter()
+    epoch_batch_times = AverageMeter()
+
+    # for i, (input, target, _) in enumerate(train_loader):
+    for i, (
+        (atom_fea, nbr_fea, nbr_fea_idx, crys_idx), 
+        targets, mask, _
+    ) in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
+        
+        # ! EDTIED to use torch tensors
+        atom_fea = atom_fea.to(device, non_blocking=True)
+        nbr_fea = nbr_fea.to(device, non_blocking=True)
+        nbr_fea_idx = nbr_fea_idx.to(device, non_blocking=True)
 
-        if args.cuda:
-            input_var = (Variable(input[0].cuda(non_blocking=True)),
-                         Variable(input[1].cuda(non_blocking=True)),
-                         input[2].cuda(non_blocking=True),
-                         [crys_idx.cuda(non_blocking=True) for crys_idx in input[3]])
-        else:
-            input_var = (Variable(input[0]),
-                         Variable(input[1]),
-                         input[2],
-                         input[3])
+        crys_idx = [idx.to(device, non_blocking=True) for idx in crys_idx]
+
+        # ! updated variables to use torch Tensors & receive additional data
+        input_var = (
+            atom_fea, 
+            nbr_fea, 
+            nbr_fea_idx, 
+            crys_idx,
+        )
+    
         # normalize target
-        if args.task == 'regression':
-            target_normed = normalizer.norm(target)
-        else:
-            target_normed = target.view(-1).long()
-        if args.cuda:
-            target_var = Variable(target_normed.cuda(non_blocking=True))
-        else:
-            target_var = Variable(target_normed)
+        # ! target normalization applied to each property
+        targets_normed = {
+            prop: (normalizers[prop].norm(targets[prop])).to(device, non_blocking=True)
+            for prop in targets.keys()
+        }
 
         # compute output
-        output = model(*input_var)
-        loss = criterion(output, target_var)
+        output = model(*input_var)  # dictionary[prop]
+        loss, loss_dict = criterion(
+            input=output, 
+            target_dict=targets_normed, 
+            mask_dict=mask, 
+            task_specs=TASK_SPECS,
+        )
+
+        loss_t_batches.append(loss.detach().cpu().item())
 
         # measure accuracy and record loss
-        if args.task == 'regression':
-            mae_error = mae(normalizer.denorm(output.data.cpu()), target)
-            losses.update(loss.data.cpu(), target.size(0))
-            mae_errors.update(mae_error, target.size(0))
-        else:
-            accuracy, precision, recall, fscore, auc_score = \
-                class_eval(output.data.cpu(), target)
-            losses.update(loss.data.cpu().item(), target.size(0))
-            accuracies.update(accuracy, target.size(0))
-            precisions.update(precision, target.size(0))
-            recalls.update(recall, target.size(0))
-            fscores.update(fscore, target.size(0))
-            auc_scores.update(auc_score, target.size(0))
+        batch_cnt = len(mask[list(TASK_SPECS.keys())[0]])
+        losses.update(loss.detach().cpu().item(), n=batch_cnt)
+        for prop, value in TASK_SPECS.items():
+            task = value['head']
+            stats[prop]['loss'].update(loss_dict[prop]['loss'], int(mask[prop].sum().item()))
+            
+            valid = mask[prop].bool().view(-1)
+            pred_valid = output[prop].detach().cpu()[valid]
+            targ_valid = targets[prop][valid]
+
+            if task in ['binary', 'multiclass']:
+                accuracy, precision, recall, fscore, auc_score = \
+                    class_eval(pred_valid, targ_valid)
+                stats[prop]['accuracies'].update(accuracy, int(mask[prop].sum().item()))
+                stats[prop]['precisions'].update(precision, int(mask[prop].sum().item()))
+                stats[prop]['recalls'].update(recall, int(mask[prop].sum().item()))
+                stats[prop]['fscores'].update(fscore, int(mask[prop].sum().item()))
+                stats[prop]['auc_scores'].update(auc_score, int(mask[prop].sum().item()))
+            elif task == 'regression':
+                sq_err, valid_cnt = sum_sq_err(
+                    normalizers[prop].denorm(pred_valid), 
+                    targ_valid,
+                )
+                # stats[prop]['nmse_errors'].update(nmse_error, int(mask[prop].sum().item()))
+                stats[prop]['sq_errors'].append(sq_err)
+                stats[prop]['valid_cnts'].append(valid_cnt)
+            else:
+                raise ValueError(f"[STAT SAVE] Unknown task {value['head']}")
 
         # compute gradient and do SGD step
         optimizer.zero_grad()
@@ -435,206 +846,747 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizer):
         # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
+        batch_time_end = perf_counter()
+        epoch_batch_times.update(batch_time_end - batch_time_start)
 
+        # ! print stats for each property
         if i % args.print_freq == 0:
-            if args.task == 'regression':
-                print('Epoch: [{0}][{1}/{2}]\t'
-                      'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                      'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
-                      'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                      'MAE {mae_errors.val:.3f} ({mae_errors.avg:.3f})'.format(
-                    epoch, i, len(train_loader), batch_time=batch_time,
-                    data_time=data_time, loss=losses, mae_errors=mae_errors)
-                )
-            else:
-                print('Epoch: [{0}][{1}/{2}]\t'
-                      'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                      'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
-                      'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                      'Accu {accu.val:.3f} ({accu.avg:.3f})\t'
-                      'Precision {prec.val:.3f} ({prec.avg:.3f})\t'
-                      'Recall {recall.val:.3f} ({recall.avg:.3f})\t'
-                      'F1 {f1.val:.3f} ({f1.avg:.3f})\t'
-                      'AUC {auc.val:.3f} ({auc.avg:.3f})'.format(
-                    epoch, i, len(train_loader), batch_time=batch_time,
-                    data_time=data_time, loss=losses, accu=accuracies,
-                    prec=precisions, recall=recalls, f1=fscores,
-                    auc=auc_scores)
-                )
+            print('\nEpoch: [{0}][{1}/{2}]\tLoss {loss.val:.4f} ({loss.avg:.4f})'.format(
+                epoch, i, len(train_loader), loss=losses))
+            for prop, values in stats.items():
+                if TASK_SPECS[prop]['head'] in ['binary', 'multiclass']:
+                    print('Epoch: [{0}][{1}/{2}]\t'
+                        'PROP {prop}\t'
+                        'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                        'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
+                        'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                        'Accu {accu.val:.3f} ({accu.avg:.3f})\t'
+                        'Prec {prec.val:.3f} ({prec.avg:.3f})\t'
+                        'Recall {recall.val:.3f} ({recall.avg:.3f})\t'
+                        'F1 {f1.val:.3f} ({f1.avg:.3f})\t'
+                        'AUC {auc.val:.3f} ({auc.avg:.3f})'.format(
+                        epoch, i, len(train_loader), batch_time=batch_time, prop=prop,
+                        data_time=data_time, loss=values['loss'], accu=values['accuracies'],
+                        prec=values['precisions'], recall=values['recalls'], 
+                        f1=values['fscores'],auc=values['auc_scores'])
+                    )
+                elif TASK_SPECS[prop]['head'] == 'regression':
+                    # compute NRMSE for this batch (only for printing)
+                    rmse = (values['sq_errors'][-1] / values['valid_cnts'][-1]) ** 0.5
+                    nrmse = rmse / normalizers[prop].get_bound().item()
+
+                    rmse_total = (sum(values['sq_errors']) / sum(values['valid_cnts'])) ** 0.5
+                    nrmse_total = rmse_total / normalizers[prop].get_bound().item()
+
+                    print('Epoch: [{0}][{1}/{2}]\t'
+                        'PROP {prop}\t'
+                        'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                        'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
+                        'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                        'NRMSE {nrmse_errors:.3f} ({nrmse_avg:.3f})'.format(
+                        epoch, i, len(train_loader), batch_time=batch_time, prop=prop,
+                        data_time=data_time, loss=values['loss'], 
+                        nrmse_errors=nrmse, nrmse_avg=nrmse_total)
+                    )
+                else:
+                    raise ValueError(f"[STAT PRINT] Unrecognized task {TASK_SPECS[prop]['head']}")
+                
+        batch_time_start = perf_counter()
+
+    loss_t_epochs.append(losses.avg)
+    return epoch_batch_times.avg
 
 
-def validate(val_loader, model, criterion, normalizer, test=False):
+# def validate(val_loader, model, criterion, normalizer, test=False):
+#     batch_time = AverageMeter()
+#     losses = AverageMeter()
+#     if args.task == 'regression':
+#         mae_errors = AverageMeter()
+#     else:
+#         accuracies = AverageMeter()
+#         precisions = AverageMeter()
+#         recalls = AverageMeter()
+#         fscores = AverageMeter()
+#         auc_scores = AverageMeter()
+#     if test:
+#         test_targets = []
+#         test_preds = []
+#         test_probs = []
+#         test_cif_ids = []
+
+#     # switch to evaluate mode
+#     model.eval()
+
+#     end = time.time()
+#     for i, (input, target, batch_cif_ids) in enumerate(val_loader):
+#         if args.cuda:
+#             with torch.no_grad():
+#                 input_var = (Variable(input[0].cuda(non_blocking=True)),
+#                              Variable(input[1].cuda(non_blocking=True)),
+#                              input[2].cuda(non_blocking=True),
+#                              [crys_idx.cuda(non_blocking=True) for crys_idx in input[3]])
+#         else:
+#             with torch.no_grad():
+#                 input_var = (Variable(input[0]),
+#                              Variable(input[1]),
+#                              input[2],
+#                              input[3])
+#         if args.task == 'regression':
+#             target_normed = normalizer.norm(target)
+#         else:
+#             target_normed = target.view(-1).long()
+#         if args.cuda:
+#             with torch.no_grad():
+#                 target_var = Variable(target_normed.cuda(non_blocking=True))
+#         else:
+#             with torch.no_grad():
+#                 target_var = Variable(target_normed)
+
+#         # compute output
+#         output = model(*input_var)
+#         loss = criterion(output, target_var)
+
+#         # measure accuracy and record loss
+#         if args.task == 'regression':
+#             mae_error = mae(normalizer.denorm(output.data.cpu()), target)
+#             losses.update(loss.data.cpu().item(), target.size(0))
+#             mae_errors.update(mae_error, target.size(0))
+#             if test:
+#                 test_pred = normalizer.denorm(output.data.cpu())
+#                 test_target = target
+#                 test_preds += test_pred.view(-1).tolist()
+#                 test_targets += test_target.view(-1).tolist()
+#                 test_cif_ids += batch_cif_ids
+#         else:
+#             accuracy, precision, recall, fscore, auc_score = \
+#                 class_eval(output.data.cpu(), target)
+#             losses.update(loss.data.cpu().item(), target.size(0))
+#             accuracies.update(accuracy, target.size(0))
+#             precisions.update(precision, target.size(0))
+#             recalls.update(recall, target.size(0))
+#             fscores.update(fscore, target.size(0))
+#             auc_scores.update(auc_score, target.size(0))
+#             if test:
+#                 test_pred = torch.exp(output.data.cpu())
+#                 test_target = target
+                
+#                 # ! MODIFIED to account for multiclass
+#                 # assert test_pred.shape[1] == 2
+#                 assert test_pred.shape[1] == args.num_classes
+                
+#                 # test_preds += test_pred[:, 1].tolist()
+#                 pred_label = torch.argmax(test_pred, dim = 1)
+#                 test_preds += pred_label.tolist()
+#                 test_probs += test_pred.tolist()
+                
+#                 test_targets += test_target.view(-1).tolist()
+#                 test_cif_ids += batch_cif_ids
+
+#         # measure elapsed time
+#         batch_time.update(time.time() - end)
+#         end = time.time()
+
+#         if i % args.print_freq == 0:
+#             if args.task == 'regression':
+#                 print('Test: [{0}/{1}]\t'
+#                       'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+#                       'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+#                       'MAE {mae_errors.val:.3f} ({mae_errors.avg:.3f})'.format(
+#                     i, len(val_loader), batch_time=batch_time, loss=losses,
+#                     mae_errors=mae_errors))
+#             else:
+#                 print('Test: [{0}/{1}]\t'
+#                       'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+#                       'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+#                       'Accu {accu.val:.3f} ({accu.avg:.3f})\t'
+#                       'Precision {prec.val:.3f} ({prec.avg:.3f})\t'
+#                       'Recall {recall.val:.3f} ({recall.avg:.3f})\t'
+#                       'F1 {f1.val:.3f} ({f1.avg:.3f})\t'
+#                       'AUC {auc.val:.3f} ({auc.avg:.3f})'.format(
+#                     i, len(val_loader), batch_time=batch_time, loss=losses,
+#                     accu=accuracies, prec=precisions, recall=recalls,
+#                     f1=fscores, auc=auc_scores))
+
+#     print('Final C Test\t'
+#             'Loss ({loss.avg:.4f})\t'
+#             'Accu ({accu.avg:.3f})\t'
+#             'Precision ({prec.avg:.3f})\t'
+#             'Recall ({recall.avg:.3f})\t'
+#             'F1 ({f1.avg:.3f})\t'
+#             'AUC ({auc.avg:.3f})'.format(
+#         i, len(val_loader), batch_time=batch_time, loss=losses,
+#         accu=accuracies, prec=precisions, recall=recalls,
+#         f1=fscores, auc=auc_scores))
+    
+#     if test:
+#         star_label = '**'
+#         import csv
+#         # ! MODIFIED to write full multiclass predicted probabilities
+#         with open('test_results.csv', 'w') as f:
+#             writer = csv.writer(f)
+
+#             header = ['mp-id', 'target', 'predicted_class']
+#             header += [f'prob_class_{i}' for i in range(args.num_classes)]
+#             writer.writerow(header)
+
+#             for cif_id, target, pred, probs in zip(test_cif_ids, test_targets, test_preds, test_probs):
+#                 writer.writerow([cif_id, target, pred] + probs)
+#     else:
+#         star_label = '*'
+#     if args.task == 'regression':
+#         print(' {star} MAE {mae_errors.avg:.3f}'.format(star=star_label,
+#                                                         mae_errors=mae_errors))
+#         return mae_errors.avg
+#     else:
+#         print(' {star} AUC {auc.avg:.3f}'.format(star=star_label,
+#                                                  auc=auc_scores))
+#         return auc_scores.avg
+
+
+
+def validate(
+        val_loader, model, criterion, normalizers, 
+        loss_v_epochs=None, fold_it=0, 
+        val=False, test=False,
+):
+    assert not (val and test)
     batch_time = AverageMeter()
+    # ! stat trackers for each metric per head
     losses = AverageMeter()
-    if args.task == 'regression':
-        mae_errors = AverageMeter()
-    else:
-        accuracies = AverageMeter()
-        precisions = AverageMeter()
-        recalls = AverageMeter()
-        fscores = AverageMeter()
-        auc_scores = AverageMeter()
-    if test:
-        test_targets = []
-        test_preds = []
-        test_probs = []
-        test_cif_ids = []
+    stats = dict()
+    for prop, value in TASK_SPECS.items():
+        stats[prop] = dict()
+        stats[prop]['loss'] = AverageMeter()
+        if value['head'] in ['binary', 'multiclass']:
+            stats[prop]['accuracies'] = AverageMeter()
+            stats[prop]['precisions'] = AverageMeter()
+            stats[prop]['recalls'] = AverageMeter()
+            stats[prop]['fscores'] = AverageMeter()
+            stats[prop]['auc_scores'] = AverageMeter()
+        elif value['head'] == 'regression':
+            stats[prop]['sq_errors'] = []
+            stats[prop]['valid_cnts'] = []
+            stats[prop]['nrmse'] = AverageMeter()   # final NRMSE for this epoch val
+        else:
+            raise ValueError(f"[TRAIN STATS] Unknown task {value['head']}")
+    
+    if val or test:
+        test_stats = dict()
+        for prop, value in TASK_SPECS.items():
+            if value['head'] in ['binary', 'multiclass']:
+                prop_stats = {
+                    'test_targets': [], 
+                    'test_preds': [], 
+                    'test_probs': [], 
+                    'test_cif_ids':[],
+                    'test_masks': [],
+                }
+            elif value['head'] == 'regression':
+                prop_stats = {
+                    'test_targets': [], 
+                    'test_preds': [], 
+                    'test_cif_ids':[],
+                    'test_masks': [],
+                }
+            else:
+                raise ValueError(f"[TRAIN STATS] Unknown task {value['head']}")
+            test_stats[prop] = prop_stats
+        
+        score = dict()
+        all_outputs = {
+            prop: []
+            for prop, value in TASK_SPECS.items()
+            if value['head'] == 'regression'
+        }
+        all_targets = {
+            prop: []
+            for prop, value in TASK_SPECS.items()
+            if value['head'] == 'regression'
+        }
 
     # switch to evaluate mode
     model.eval()
 
-    end = time.time()
-    for i, (input, target, batch_cif_ids) in enumerate(val_loader):
-        if args.cuda:
-            with torch.no_grad():
-                input_var = (Variable(input[0].cuda(non_blocking=True)),
-                             Variable(input[1].cuda(non_blocking=True)),
-                             input[2].cuda(non_blocking=True),
-                             [crys_idx.cuda(non_blocking=True) for crys_idx in input[3]])
-        else:
-            with torch.no_grad():
-                input_var = (Variable(input[0]),
-                             Variable(input[1]),
-                             input[2],
-                             input[3])
-        if args.task == 'regression':
-            target_normed = normalizer.norm(target)
-        else:
-            target_normed = target.view(-1).long()
-        if args.cuda:
-            with torch.no_grad():
-                target_var = Variable(target_normed.cuda(non_blocking=True))
-        else:
-            with torch.no_grad():
-                target_var = Variable(target_normed)
-
-        # compute output
-        output = model(*input_var)
-        loss = criterion(output, target_var)
-
-        # measure accuracy and record loss
-        if args.task == 'regression':
-            mae_error = mae(normalizer.denorm(output.data.cpu()), target)
-            losses.update(loss.data.cpu().item(), target.size(0))
-            mae_errors.update(mae_error, target.size(0))
-            if test:
-                test_pred = normalizer.denorm(output.data.cpu())
-                test_target = target
-                test_preds += test_pred.view(-1).tolist()
-                test_targets += test_target.view(-1).tolist()
-                test_cif_ids += batch_cif_ids
-        else:
-            accuracy, precision, recall, fscore, auc_score = \
-                class_eval(output.data.cpu(), target)
-            losses.update(loss.data.cpu().item(), target.size(0))
-            accuracies.update(accuracy, target.size(0))
-            precisions.update(precision, target.size(0))
-            recalls.update(recall, target.size(0))
-            fscores.update(fscore, target.size(0))
-            auc_scores.update(auc_score, target.size(0))
-            if test:
-                test_pred = torch.exp(output.data.cpu())
-                test_target = target
-                
-                # ! MODIFIED to account for multiclass
-                # assert test_pred.shape[1] == 2
-                assert test_pred.shape[1] == args.num_classes
-                
-                # test_preds += test_pred[:, 1].tolist()
-                pred_label = torch.argmax(test_pred, dim = 1)
-                test_preds += pred_label.tolist()
-                test_probs += test_pred.tolist()
-                
-                test_targets += test_target.view(-1).tolist()
-                test_cif_ids += batch_cif_ids
-
-        # measure elapsed time
-        batch_time.update(time.time() - end)
+    with torch.inference_mode():
         end = time.time()
+        # for i, (input, target, batch_cif_ids) in enumerate(val_loader):
+        for i, (
+            (atom_fea, nbr_fea, nbr_fea_idx, crys_idx), 
+            targets, mask, batch_cif_ids
+        ) in tqdm(
+            enumerate(val_loader), 
+            desc=f"{'Test' if test else 'Val'}: ", 
+            total=len(val_loader),
+            disable=True,
+        ):
 
-        if i % args.print_freq == 0:
-            if args.task == 'regression':
-                print('Test: [{0}/{1}]\t'
-                      'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                      'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                      'MAE {mae_errors.val:.3f} ({mae_errors.avg:.3f})'.format(
-                    i, len(val_loader), batch_time=batch_time, loss=losses,
-                    mae_errors=mae_errors))
-            else:
-                print('Test: [{0}/{1}]\t'
-                      'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                      'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                      'Accu {accu.val:.3f} ({accu.avg:.3f})\t'
-                      'Precision {prec.val:.3f} ({prec.avg:.3f})\t'
-                      'Recall {recall.val:.3f} ({recall.avg:.3f})\t'
-                      'F1 {f1.val:.3f} ({f1.avg:.3f})\t'
-                      'AUC {auc.val:.3f} ({auc.avg:.3f})'.format(
-                    i, len(val_loader), batch_time=batch_time, loss=losses,
-                    accu=accuracies, prec=precisions, recall=recalls,
-                    f1=fscores, auc=auc_scores))
+            # ! EDTIED to use torch tensors
+            atom_fea = atom_fea.to(device, non_blocking=True)
+            nbr_fea = nbr_fea.to(device, non_blocking=True)
+            nbr_fea_idx = nbr_fea_idx.to(device, non_blocking=True)
 
-    print('Final C Test\t'
-            'Loss ({loss.avg:.4f})\t'
-            'Accu ({accu.avg:.3f})\t'
-            'Precision ({prec.avg:.3f})\t'
-            'Recall ({recall.avg:.3f})\t'
-            'F1 ({f1.avg:.3f})\t'
-            'AUC ({auc.avg:.3f})'.format(
-        i, len(val_loader), batch_time=batch_time, loss=losses,
-        accu=accuracies, prec=precisions, recall=recalls,
-        f1=fscores, auc=auc_scores))
+            crys_idx = [idx.to(device, non_blocking=True) for idx in crys_idx]
+
+            # ! updated variables to use torch Tensors & receive additional data
+            input_var = (
+                atom_fea, 
+                nbr_fea, 
+                nbr_fea_idx, 
+                crys_idx,
+            )
+
+            # ! target normalization applied to each property
+            targets_normed = {
+                key: (normalizers[key].norm(targets[key])).to(device, non_blocking=True)
+                for key in targets.keys()
+            }
+
+            # compute output
+            output = model(*input_var)
+            loss, loss_dict = criterion(
+                input=output, 
+                target_dict=targets_normed, 
+                mask_dict=mask, 
+                task_specs=TASK_SPECS,
+            )
+
+            # measure accuracy and record loss
+            batch_cnt = len(mask[list(TASK_SPECS.keys())[0]])
+            losses.update(loss.detach().cpu().item(), n=batch_cnt)
+            for prop, value in TASK_SPECS.items():
+                task = value['head']
+                stats[prop]['loss'].update(loss_dict[prop]['loss'], int(mask[prop].sum().item()))
+
+                valid = mask[prop].bool().view(-1)
+                pred_valid = output[prop].detach().cpu()[valid]
+                targ_valid = targets[prop].detach().cpu()[valid]
+                valid_cif_ids = [
+                    cif_id
+                    for cif_id, is_valid in zip(batch_cif_ids, valid)
+                    if is_valid
+                ]
+
+                if task in ['binary', 'multiclass']:
+                    accuracy, precision, recall, fscore, auc_score = \
+                        class_eval(pred_valid, targ_valid)
+                    stats[prop]['accuracies'].update(accuracy, int(mask[prop].sum().item()))
+                    stats[prop]['precisions'].update(precision, int(mask[prop].sum().item()))
+                    stats[prop]['recalls'].update(recall, int(mask[prop].sum().item()))
+                    stats[prop]['fscores'].update(fscore, int(mask[prop].sum().item()))
+                    stats[prop]['auc_scores'].update(auc_score, int(mask[prop].sum().item()))
+                    
+                    if val or test:
+                        # test_pred = torch.exp(output[prop].detach().cpu())
+                        test_pred = pred_valid
+                        test_target = targ_valid
+
+                        # if binary classification
+                        if TASK_SPECS[prop]['out_dim'] == 1:
+                            assert test_pred.ndim == 1
+                            test_pred = np.stack([1 - test_pred, test_pred], axis=1)
+                        else:
+                            assert test_pred.shape[1] == TASK_SPECS[prop]['out_dim']
+                        pred_label = np.argmax(test_pred, axis=1)
+                        test_stats[prop]['test_preds'] += pred_label.tolist()
+                        test_stats[prop]['test_probs'] += test_pred.tolist()
+                        test_stats[prop]['test_targets'] += test_target.view(-1).tolist()
+                        test_stats[prop]['test_cif_ids'] += valid_cif_ids
+                        test_stats[prop]['test_masks'] += mask[prop].view(-1).tolist()
+
+                
+                elif task == 'regression':
+                    test_pred = normalizers[prop].denorm(pred_valid)
+                    sq_err, valid_cnt = sum_sq_err(
+                        test_pred, 
+                        targ_valid,
+                    )
+                    # stats[prop]['sq_errors'].update(nrmse_error, int(mask[prop].sum().item()))
+                    stats[prop]['sq_errors'].append(sq_err)
+                    stats[prop]['valid_cnts'].append(valid_cnt)
+
+                    if val or test:
+                        test_stats[prop]['test_preds'] += test_pred.view(-1).tolist()
+                        test_stats[prop]['test_targets'] += targ_valid.view(-1).tolist()
+                        test_stats[prop]['test_cif_ids'] += valid_cif_ids
+                        test_stats[prop]['test_masks'] += mask[prop].view(-1).tolist()
+
+                        all_outputs[prop] += test_pred.view(-1).tolist()
+                        all_targets[prop] += targ_valid.view(-1).tolist()
+
+                else:
+                    raise ValueError(f"[STAT SAVE] Unknown task {value['head']}")
+
+            # measure elapsed time
+            batch_time.update(time.time() - end)
+            end = time.time()
+
+            # ! print stats for each property
+            if i % args.print_freq == 0:
+                print('Test: [{0}/{1}]\tLoss {loss.val:.4f} ({loss.avg:.4f})'.format(
+                    i, len(val_loader), loss=losses))
+                for prop, values in stats.items():
+                    if TASK_SPECS[prop]['head'] in ['binary', 'multiclass']:
+                        print('Test: [{0}/{1}]\t'
+                            'PROP {prop}\t'
+                            'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                            'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                            'Accu {accu.val:.3f} ({accu.avg:.3f})\t'
+                            'Prec {prec.val:.3f} ({prec.avg:.3f})\t'
+                            'Recall {recall.val:.3f} ({recall.avg:.3f})\t'
+                            'F1 {f1.val:.3f} ({f1.avg:.3f})\t'
+                            'AUC {auc.val:.3f} ({auc.avg:.3f})'.format(
+                            i, len(val_loader), batch_time=batch_time, prop=prop,
+                            loss=values['loss'], accu=values['accuracies'],
+                            prec=values['precisions'], recall=values['recalls'], 
+                            f1=values['fscores'],auc=values['auc_scores'])
+                        )
+                    elif TASK_SPECS[prop]['head'] == 'regression':
+                        # compute NRMSE for this batch (only for printing)
+                        rmse = (values['sq_errors'][-1] / values['valid_cnts'][-1]) ** 0.5
+                        nrmse = rmse / normalizers[prop].get_bound().item()
+
+                        rmse_total = (sum(values['sq_errors']) / sum(values['valid_cnts'])) ** 0.5
+                        nrmse_total = rmse_total / normalizers[prop].get_bound().item()
+
+                        print('Test: [{0}/{1}]\t'
+                            'PROP {prop}\t'
+                            'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                            'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                            'NRMSE {nrmse_errors:.3f} ({nrmse_avg:.3f})'.format(
+                            i, len(val_loader), batch_time=batch_time, prop=prop,
+                            loss=values['loss'], nrmse_errors=nrmse, nrmse_avg=nrmse_total)
+                        )
+                    else:
+                        raise ValueError(f"[STAT PRINT] Unrecognized task {TASK_SPECS[prop]['head']}")
+    # finished validation testing    
+                
+    # calculate NRMSE metrics, update AvgMeter only once
+    for prop, value in TASK_SPECS.items():
+        task = value['head']
+        if task != 'regression':
+            continue
+        rmse = (sum(stats[prop]['sq_errors']) / sum(stats[prop]['valid_cnts'])) ** 0.5
+        stats[prop]['nrmse'].update(rmse / normalizers[prop].get_bound().item())
     
+    if loss_v_epochs is not None:
+        loss_v_epochs.append(losses.avg)
+
+    if val or test:
+        filename = f"{'test_' if test else 'val_'}r2_scores{f'_fold_{fold_it}' if CROSS_VAL else ''}.txt"
+        with open(f"out_{args.id}/{filename}", 'w') as f:
+            for prop, value in TASK_SPECS.items():
+                if value['head'] != 'regression':
+                    continue
+
+                y_true = np.asarray(all_targets[prop], dtype=np.float64)
+                y_pred = np.asarray(all_outputs[prop], dtype=np.float64)
+
+                assert y_true.shape == y_pred.shape
+                assert np.isfinite(y_true).all()
+                assert np.isfinite(y_pred).all()
+
+                score = r2_score(y_true, y_pred)
+
+                # for target, prediction in zip(y_true, y_pred):
+                #     f.write(f"{prediction}\t\t{target}\n")
+                f.write(f"{prop} R^2: {score}\n")
+
+    print('Final Test\tLoss {loss.val:.4f} ({loss.avg:.4f})'.format(loss=losses))
+    for prop, values in stats.items():
+        if TASK_SPECS[prop]['head'] in ['binary', 'multiclass']:
+            print('Test: [{0}/{1}]\t'
+                'PROP {prop}\t'
+                'Loss {loss.avg:.4f}\t'
+                'Accu {accu.avg:.3f}\t'
+                'Prec {prec.avg:.3f}\t'
+                'Recall {recall.avg:.3f}\t'
+                'F1 {f1.avg:.3f}\t'
+                'AUC {auc.avg:.3f}'.format(
+                i, len(val_loader), batch_time=batch_time, prop=prop,
+                loss=values['loss'], accu=values['accuracies'],
+                prec=values['precisions'], recall=values['recalls'], 
+                f1=values['fscores'],auc=values['auc_scores'])
+            )
+        elif TASK_SPECS[prop]['head'] == 'regression':
+            print('Test: [{0}/{1}]\t'
+                'PROP {prop}\t'
+                'Time {batch_time.avg:.3f}\t'
+                'Loss {loss.avg:.4f}\t'
+                'NRMSE {nrmse_errors.avg:.3f}'.format(
+                i, len(val_loader), batch_time=batch_time, prop=prop,
+                loss=values['loss'], nrmse_errors=values['nrmse'])
+            )
+        else:
+            raise ValueError(f"[STAT PRINT] Unrecognized task {TASK_SPECS[prop]['head']}")
+
+    w_cls = 0.5
+    w_reg = 0.5
+    
+    cls_error = AverageMeter()
+    reg_error = AverageMeter()
+
+    for prop, values in stats.items():
+        if TASK_SPECS[prop]['head'] in ['binary', 'multiclass']:
+            cls_error.update(2 * (1 - values['auc_scores'].avg))
+        elif TASK_SPECS[prop]['head'] == 'regression':
+            reg_error.update(values['nrmse'].avg)
+        else:
+            raise ValueError(f"[VAL ERROR] Unrecognized task {TASK_SPECS[prop]['head']}")
+    
+    overall_error = float(
+        w_cls * float(cls_error.avg) 
+        + w_reg * float(reg_error.avg)
+    )
+
+    if not CROSS_VAL and (val or test):
+        # ! saving results for each prop
+        for prop, values in test_stats.items():
+            with open(f"out_{args.id}/{'test' if test else 'val'}_results_{args.id}_{prop}.csv", 'w', newline='', encoding='utf-8') as file_results:
+                writer = csv.writer(file_results)
+
+                if TASK_SPECS[prop]['head'] in ['binary', 'multiclass']:
+                    header = ['mp-id', 'mask', 'target', 'predicted_class']
+                    header += [f'prob_class_{i}' for i in range(len(values['test_probs'][0]))]
+                    writer.writerow(header)
+
+                    for cif_id, mask, target, pred, probs in zip(
+                        values['test_cif_ids'], 
+                        values['test_masks'],
+                        values['test_targets'], 
+                        values['test_preds'], 
+                        values['test_probs'],
+                    ):
+                        writer.writerow([cif_id, mask, target, pred] + probs)
+
+                elif TASK_SPECS[prop]['head'] == 'regression':
+                    header = ['mp-id', 'mask', 'target', 'predicted_value']
+                    writer.writerow(header)
+
+                    for cif_id, mask, target, pred in zip(
+                        values['test_cif_ids'], 
+                        values['test_masks'],
+                        values['test_targets'], 
+                        values['test_preds'], 
+                    ):
+                        writer.writerow([cif_id, mask, target, pred])
+                else:
+                    raise ValueError(f"[TEST CSV] Unrecognized task {TASK_SPECS[prop]['head']}")
+
+    print(f'\n Model -- \tVector: {args.vector}\tAtom Len: {args.atom_fea_len}\tConv Num: {args.n_conv}\tHidden Len: {args.h_fea_len}\tHidden Num: {args.n_h}')
+    print(f'\t\tHead Layer Num: {args.n_o}\tVec Len: {args.vec_fea_len}\tVec Layer Num: {args.n_vec}')
+    
+    print(' ** ERROR {error:.3f}'.format(error=overall_error))
+    return overall_error, losses.avg, stats
+
+
+def save_stats_as_csv(
+        best_epochs: list, 
+        total_loss, 
+        total_error,
+        stats_dict,
+        test=False,
+):
+    print(f"Saving {'test' if test else 'val'} results and stats as CSV")
     if test:
-        star_label = '**'
-        import csv
-        # ! MODIFIED to write full multiclass predicted probabilities
-        with open('test_results.csv', 'w') as f:
-            writer = csv.writer(f)
+        with open(f'out_{args.id}/params_{args.id}.txt', 'w') as f:
+            f.write(f'\nAtom Len:\t\t{args.atom_fea_len}\nConv Num:\t\t{args.n_conv}')
+            f.write(f'\nHidden Len:\t\t{args.h_fea_len}\nHidden Num:\t\t{args.n_h}\nHead Layer Num:\t{args.n_o}')
+            f.write(f"\nFreeze: {'Yes' if args.freeze else 'No'}")
+            f.write(f"\nVal Metric:\t\t{args.val_metric}")
+            f.write(f'\nBest Epochs:\t{", ".join(list(map(str, best_epochs)))}')
+    
+    # ! saving stats for each prop
+    with open(f"out_{args.id}/{'test' if test else 'val'}_stats_{args.id}.csv", 'w', newline='', encoding='utf-8') as file_stats:
+        writer = csv.writer(file_stats)
+        header = ['head', 'task', 'loss', 'nrmse', 'accuracy', 'precision', 'recall', 'f1', 'auroc']
+        writer.writerow(header)
+        writer.writerow(['total', total_error, total_loss, '', '', '', '', '', ''])
+                
+        for prop, values in stats_dict.items():
+            if TASK_SPECS[prop]['head'] in ['binary', 'multiclass']:
+                row = [
+                    prop, 
+                    TASK_SPECS[prop]['head'], 
+                    values['loss'].avg, 
+                    '', 
+                    values['accuracies'].avg, 
+                    values['precisions'].avg, 
+                    values['recalls'].avg, 
+                    values['fscores'].avg, 
+                    values['auc_scores'].avg
+                ]
+            elif TASK_SPECS[prop]['head'] == 'regression':
+                row = [
+                    prop, 
+                    TASK_SPECS[prop]['head'], 
+                    values['loss'].avg, 
+                    values['nrmse'].avg, 
+                    '', 
+                    '', 
+                    '', 
+                    '', 
+                    ''
+                ]
+            else:
+                raise ValueError(f"[STAT CSV] Unrecognized task {TASK_SPECS[prop]['head']}")
+            writer.writerow(row)
+    
 
-            header = ['mp-id', 'target', 'predicted_class']
-            header += [f'prob_class_{i}' for i in range(args.num_classes)]
-            writer.writerow(header)
+def time_to_str(time):
+    if time < 60:
+        return f"{time:.4f}s"
+    return f"{time / 3600:02.0f}:{time / 60:02.0f}:{time % 60:05.2f}"
+    
 
-            for cif_id, target, pred, probs in zip(test_cif_ids, test_targets, test_preds, test_probs):
-                writer.writerow([cif_id, target, pred] + probs)
-    else:
-        star_label = '*'
-    if args.task == 'regression':
-        print(' {star} MAE {mae_errors.avg:.3f}'.format(star=star_label,
-                                                        mae_errors=mae_errors))
-        return mae_errors.avg
-    else:
-        print(' {star} AUC {auc.avg:.3f}'.format(star=star_label,
-                                                 auc=auc_scores))
-        return auc_scores.avg
+def save_times(
+        total_t,
+        epoch_0_batch_avg_t,
+        epoch_0_t, 
+        epoch_batch_avg_t, 
+        epoch_avg_t
+):
+    open_write_file(f'out_{args.id}', '')
+    with open(f'out_{args.id}/times_{args.id}.txt', 'w') as f:
+        f.write(f'Total Time: {time_to_str(total_t)}\n')
+        f.write('\nEpoch 0\n')
+        f.write(f'Avg Batch Time: {time_to_str(epoch_0_batch_avg_t)}\n')
+        f.write(f'Total Epoch Time: {time_to_str(epoch_0_t)}\n')
+        f.write('\nOther Epochs\n')
+        f.write(f'Avg Batch Time: {time_to_str(epoch_batch_avg_t)}\n')
+        f.write(f'Avg Total Epoch Time: {time_to_str(epoch_avg_t)}\n')
 
 
-class Normalizer(object):
-    """Normalize a Tensor and restore it later. """
+def save_loss_fig(
+        loss_t_epochs, 
+        loss_t_batches,
+        loss_v_epochs, 
+        fold_it
+):
+    if len(loss_t_batches) == 0:
+        return
+    
+    with open(f"out_{args.id}/loss_train{f'_{fold_it}' if CROSS_VAL else ''}.txt", 'w') as f:
+        for num in loss_t_batches:
+            f.write(f"{num}\n")
 
-    def __init__(self, tensor):
-        """tensor is taken as a sample to calculate the mean and std"""
-        self.mean = torch.mean(tensor)
-        self.std = torch.std(tensor)
+    assert len(loss_t_epochs) == len(loss_v_epochs)
+    ratio = int(len(loss_t_batches) / len(loss_t_epochs))
+    batch_x = np.asarray(list(range(len(loss_t_batches)))) / ratio
+    epoch_x = np.asarray(list(range(len(loss_t_epochs))))
+
+    plt.clf()
+    plt.plot(batch_x, loss_t_batches, color='tab:blue', label='Training Loss (Batch)')
+    plt.plot(epoch_x, loss_t_epochs, color='tab:orange', label='Training Loss (Epoch)')
+    plt.plot(epoch_x, loss_v_epochs, color='tab:red', label='Val Loss')
+
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.title('Train/Val Loss Curve')
+    # plt.grid(True)
+    plt.legend()
+
+    # Display the plot
+    filename = f"out_{args.id}/loss_plot{f'_{fold_it}' if CROSS_VAL else ''}.png"
+    plt.savefig(filename)
+
+
+# class Normalizer(object):
+#     """Normalize a Tensor and restore it later. """
+
+#     def __init__(self, tensor):
+#         """tensor is taken as a sample to calculate the mean and std"""
+#         self.mean = torch.mean(tensor)
+#         self.std = torch.std(tensor)
+
+#     def norm(self, tensor):
+#         return (tensor - self.mean) / self.std
+
+#     def denorm(self, normed_tensor):
+#         return normed_tensor * self.std + self.mean
+
+#     def state_dict(self):
+#         return {'mean': self.mean,
+#                 'std': self.std}
+
+#     def load_state_dict(self, state_dict):
+#         self.mean = state_dict['mean']
+#         self.std = state_dict['std']
+
+
+class NormalizerProp(object):
+    """Normalize a Tensor for one property and restore it later. """
+
+    def __init__(self, tensor, mask=None):
+        """
+        tensor is taken as a sample to calculate the mean and std.
+        mask is applied for targets with invalid labels.
+        """
+        if mask is None:
+            self.mean = torch.mean(tensor)
+            self.std = torch.std(tensor)
+            self.min, self.max = torch.min(tensor), torch.max(tensor)
+            self.bound = self.max - self.min
+        else:
+            self.mean = torch.mean(tensor[mask].float())
+            self.std = torch.std(tensor[mask].float())
+            self.min, self.max = torch.min(tensor[mask].float()), torch.max(tensor[mask].float())
+            self.bound = self.max - self.min
+        # print('normalprop:', self.mean, self.std, self.min, self.max, self.bound)
 
     def norm(self, tensor):
         return (tensor - self.mean) / self.std
 
     def denorm(self, normed_tensor):
         return normed_tensor * self.std + self.mean
+    
+    def get_bound(self):
+        return self.bound
 
     def state_dict(self):
         return {'mean': self.mean,
-                'std': self.std}
+                'std': self.std,
+                'bound': self.bound}
 
     def load_state_dict(self, state_dict):
         self.mean = state_dict['mean']
         self.std = state_dict['std']
+        self.bound = state_dict['bound']
 
 
-def mae(prediction, target):
+# def mae(prediction, target):
+#     """
+#     Computes the mean absolute error between prediction and target
+
+#     Parameters
+#     ----------
+
+#     prediction: torch.Tensor (N, 1)
+#     target: torch.Tensor (N, 1)
+#     """
+#     return torch.mean(torch.abs(target - prediction))
+
+
+# def class_eval_DEPRECIATED(prediction, target):
+#     prediction = np.exp(prediction.numpy())
+#     target = target.numpy()
+#     pred_label = np.argmax(prediction, axis=1)
+#     target_label = np.squeeze(target)
+#     if not target_label.shape:
+#         target_label = np.asarray([target_label])
+#     if prediction.shape[1] == 2:
+#         precision, recall, fscore, _ = metrics.precision_recall_fscore_support(
+#             target_label, pred_label, average='binary')
+#         auc_score = metrics.roc_auc_score(target_label, prediction[:, 1])
+#         accuracy = metrics.accuracy_score(target_label, pred_label)
+#     else:
+#         raise NotImplementedError
+#     return accuracy, precision, recall, fscore, auc_score
+        
+
+def sum_sq_err(prediction, target):
     """
-    Computes the mean absolute error between prediction and target
+    Computes the sum of squared errors between prediction and target.
+    Should divide by count, square root and normalize after all nmse calculated and summmed. 
 
     Parameters
     ----------
@@ -642,56 +1594,58 @@ def mae(prediction, target):
     prediction: torch.Tensor (N, 1)
     target: torch.Tensor (N, 1)
     """
-    return torch.mean(torch.abs(target - prediction))
-
-
-def class_eval_DEPRECIATED(prediction, target):
-    prediction = np.exp(prediction.numpy())
-    target = target.numpy()
-    pred_label = np.argmax(prediction, axis=1)
-    target_label = np.squeeze(target)
-    if not target_label.shape:
-        target_label = np.asarray([target_label])
-    if prediction.shape[1] == 2:
-        precision, recall, fscore, _ = metrics.precision_recall_fscore_support(
-            target_label, pred_label, average='binary')
-        auc_score = metrics.roc_auc_score(target_label, prediction[:, 1])
-        accuracy = metrics.accuracy_score(target_label, pred_label)
-    else:
-        raise NotImplementedError
-    return accuracy, precision, recall, fscore, auc_score
+    diff = prediction - target
+    return diff.square().sum().item(), diff.numel()
 
 
 # ! Updated for multiclass classification
 def class_eval(prediction, target):
-    prediction = np.exp(prediction.numpy())
-    target = target.numpy()
+    with torch.no_grad():
+        target_label = target.detach().cpu().numpy()
+        target_label = np.squeeze(target)
 
-    pred_label = np.argmax(prediction, axis=1)
-    target_label = np.squeeze(target)
+        if not target_label.shape:
+            target_label = np.asarray([target_label])
 
-    if not target_label.shape:
-        target_label = np.asarray([target_label])
+        # binary case
+        if prediction.ndim == 1 or prediction.shape[-1] == 1:
+            logits = prediction.reshape(-1)
+            probs = torch.sigmoid(logits).detach().cpu().numpy()
+            pred_label = (probs >= 0.5).astype(int)
+            # if args.debug:
+            #     print("CLASS EVAL INPUT")
+            #     print("prediction:", prediction)
+            #     print("probs", probs)
+            #     print("pred", pred_label)
+            #     print("targ", target_label)
+            prediction = np.stack([1 - probs, probs], axis=1)
 
-    accuracy = metrics.accuracy_score(target_label, pred_label)
+            accuracy = metrics.accuracy_score(target_label, pred_label)
+            precision, recall, fscore, _ = metrics.precision_recall_fscore_support(
+                target_label, pred_label, average='binary', zero_division=0)
+            # if args.debug:
+            #     print("CLASS EVAL DEBUG")
+            #     print(precision, recall, fscore)
+            auc_score = metrics.roc_auc_score(target_label, probs)
 
-    if prediction.shape[1] == 2:
-        precision, recall, fscore, _ = metrics.precision_recall_fscore_support(
-            target_label, pred_label, average='binary')
-        auc_score = metrics.roc_auc_score(target_label, prediction[:, 1])
-    else:
-        # ! average macro (imbalanced?) vs micro (balanced?)
-        precision, recall, fscore, _ = metrics.precision_recall_fscore_support(
-            target_label, pred_label, average='macro', zero_division=0)
-        # ! multi_class ovr (balanced) vs ovo (imbalanced)
-        auc_score = metrics.roc_auc_score(
-                target_label,
-                prediction,
-                multi_class='ovo',
-                average='macro',
-                labels=list(range(args.num_classes))
-            )
-        # ! might raise error --> if so, then catch later
+        else:
+            prediction = torch.softmax(prediction, dim=-1).detach().cpu().numpy()
+            pred_label = np.argmax(prediction, axis=1)
+
+            accuracy = metrics.accuracy_score(target_label, pred_label)
+            # multiclass
+            # ! average macro (imbalanced?) vs micro (balanced?)
+            precision, recall, fscore, _ = metrics.precision_recall_fscore_support(
+                target_label, pred_label, average='macro', zero_division=0)
+            # ! multi_class ovr (balanced) vs ovo (imbalanced)
+            auc_score = metrics.roc_auc_score(
+                    target_label,
+                    prediction,
+                    multi_class='ovo',
+                    average='macro',
+                    labels=list(range(prediction.shape[1]))
+                )
+            # ! might raise error --> if so, then catch later
     return accuracy, precision, recall, fscore, auc_score
 
 
@@ -711,13 +1665,17 @@ class AverageMeter(object):
         self.val = val
         self.sum += val * n
         self.count += n
-        self.avg = self.sum / self.count
+        self.avg = self.sum / self.count if self.count != 0 else 0
 
 
-def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
+def save_checkpoint(state, is_best, fold_it, filename=f'out_{args.id}/checkpoint_{args.id}.pth.tar'):
     torch.save(state, filename)
     if is_best:
-        shutil.copyfile(filename, 'model_best.pth.tar')
+        if CROSS_VAL:
+            best_filename = f"out_{args.id}/model_best_{args.id}_fold_{fold_it}.pth.tar"
+        else:
+            best_filename = f"out_{args.id}/model_best_{args.id}.pth.tar"
+        shutil.copyfile(filename, best_filename)
 
 
 def adjust_learning_rate(optimizer, epoch, k):

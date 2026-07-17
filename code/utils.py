@@ -1,4 +1,5 @@
 import os
+import json
 import networkx as nx
 import matplotlib.pyplot as plt
 
@@ -12,15 +13,99 @@ CRYSTAL_SYSTEMS = [
     'triclinic', 
     'trigonal'
 ]
-# CRYSTAL_SYSTEMS = [
-#     'triclinic', 
-#     'monoclinic', 
-#     'trigonal', 
-#     'hexagonal', 
-#     'orthorhombic', 
-#     'tetragonal', 
-#     'cubic'
-# ]
+
+FIELDS = [
+    "material_id", 
+    "symmetry", 
+    "structure", 
+    'bandstructure', 
+    'band_gap', 
+    'efermi', 
+    'is_gap_direct',
+]
+
+PREDICT = [
+    'system',
+    'direct_gap',
+    'band_gap', 
+    'efermi', 
+    'is_gap_direct',
+]
+
+ABS_PREDICT = [
+    'integrated_absorption',
+    'integrated_absorption_visible',
+    'average_absorption_visible',
+]
+
+PLQY_PREDICT = [
+    'plqy'
+]
+
+TASK_SPECS = {
+    'system': {
+        'head': 'multiclass', 
+        'out_dim': 7,
+        'weight': 1, 
+    },
+    'direct_gap': {
+        'head': 'regression', 
+        'out_dim': 1,
+        'weight': 1, 
+    },
+    'band_gap': {
+        'head': 'regression', 
+        'out_dim': 1,
+        'weight': 1, 
+    },
+    'efermi': {
+        'head': 'regression', 
+        'out_dim': 1,
+        'weight': 1, 
+    },
+    'is_gap_direct': {
+        'head': 'binary', 
+        'out_dim': 1,
+        'weight': 1, 
+    },
+}
+
+ABS_TASK_SPECS = {
+    'integrated_absorption': {
+        'head': 'regression', 
+        'out_dim': 1,
+        'weight': 1, 
+    },
+    'integrated_absorption_visible': {
+        'head': 'regression', 
+        'out_dim': 1,
+        'weight': 1, 
+    },
+    'average_absorption_visible': {
+        'head': 'regression', 
+        'out_dim': 1,
+        'weight': 1, 
+    },
+}
+
+PLQY_TASK_SPECS = {
+    'plqy': {
+        'head': 'regression', 
+        'out_dim': 1, 
+        'weight': 1,
+    }
+}
+
+DIMENSION_CNT = 2
+
+
+def get_num_cpus(default=1):
+    if "SLURM_CPUS_PER_TASK" in os.environ:
+        return int(os.environ["SLURM_CPUS_PER_TASK"])
+    try:
+        return len(os.sched_getaffinity(0))
+    except Exception as e:
+        return default
 
 
 def open_write_file(dir_path, file_name):
@@ -42,3 +127,8 @@ def plot_nxgraph(graph: nx.DiGraph) -> None:
     
     # Display the plot
     plt.show()
+
+
+def get_max_dist(data_dir):
+    with open(f'{data_dir}/bounds.json', 'r') as f:
+        return json.load(f)['max_bond_dist']
