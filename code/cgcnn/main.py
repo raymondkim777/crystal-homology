@@ -6,7 +6,7 @@ import sys
 import time
 import csv
 import warnings
-from random import sample
+from random import seed, sample
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
@@ -167,6 +167,7 @@ def main():
 
     if args.seed:
         torch.manual_seed(42)
+        seed(42)
     print("GPU Available", args.cuda)
 
     if args.delete and args.resume == '':
@@ -233,22 +234,26 @@ def main():
     # ! ADJUST FOR FOLD ITERATIONS (should be one pass if fold = 0)
     # average results for all folds (or same as val results for fold = 0)
     best_epochs = []
-    total_losses = AverageMeter()
-    total_errors = AverageMeter()
-    total_stats = dict()
-    for prop, value in TASK_SPECS.items():
-        total_stats[prop] = dict()
-        total_stats[prop]['loss'] = AverageMeter()
-        if value['head'] in ['binary', 'multiclass']:
-            total_stats[prop]['accuracies'] = AverageMeter()
-            total_stats[prop]['precisions'] = AverageMeter()
-            total_stats[prop]['recalls'] = AverageMeter()
-            total_stats[prop]['fscores'] = AverageMeter()
-            total_stats[prop]['auc_scores'] = AverageMeter()
-        elif value['head'] == 'regression':
-            total_stats[prop]['nrmse'] = AverageMeter()
-        else:
-            raise ValueError(f"[TRAIN STATS] Unknown task {value['head']}")
+    total_val_losses = AverageMeter()
+    total_test_losses = AverageMeter()
+    total_val_errors = AverageMeter()
+    total_test_errors = AverageMeter()
+    total_val_stats = dict()
+    total_test_stats = dict()
+    for stat_dict in [total_val_stats, total_test_stats]:
+        for prop, value in TASK_SPECS.items():
+            stat_dict[prop] = dict()
+            stat_dict[prop]['loss'] = AverageMeter()
+            if value['head'] in ['binary', 'multiclass']:
+                stat_dict[prop]['accuracies'] = AverageMeter()
+                stat_dict[prop]['precisions'] = AverageMeter()
+                stat_dict[prop]['recalls'] = AverageMeter()
+                stat_dict[prop]['fscores'] = AverageMeter()
+                stat_dict[prop]['auc_scores'] = AverageMeter()
+            elif value['head'] == 'regression':
+                stat_dict[prop]['nrmse'] = AverageMeter()
+            else:
+                raise ValueError(f"[TRAIN STATS] Unknown task {value['head']}")
 
     # ! time logging for all folds
     total_times = AverageMeter()
@@ -294,7 +299,7 @@ def main():
         for prop, value in TASK_SPECS.items():
             if value['head'] in ['binary', 'multiclass']:
                 normalizer = NormalizerProp(torch.zeros(2))
-                normalizer.load_state_dict({'mean': 0., 'std': 1.})
+                normalizer.load_state_dict({'mean': 0., 'std': 1., 'bound': 0.,})
             elif value['head'] in ['regression']:
                 normalizer = NormalizerProp(sample_target[prop], mask=sample_mask[prop])
             else:
@@ -466,7 +471,7 @@ def main():
 
             # evaluate on validation set
             if args.debug:
-                print("Validating")
+                print("\nValidating\n")
             val_error, val_loss, _ = validate(
                 val_loader, model, criterion, normalizers, 
                 loss_v_epochs=loss_v_epochs,
@@ -521,12 +526,21 @@ def main():
         best_epochs.append(best_checkpoint['epoch'])
         model.load_state_dict(best_checkpoint['state_dict'])
 
-        test_error, test_loss, stat_dict = validate(
+        # ! run best model checkpoint on val and test set
+        val_error, val_loss, val_stat_dict = validate(
+            val_loader, model, criterion, normalizers, 
+            best_epoch=best_checkpoint['epoch'], 
+            fold_it=fold_it,
+            val=True
+        )
+
+        test_error, test_loss, test_stat_dict = validate(
             test_loader, model, criterion, normalizers, 
             best_epoch=best_checkpoint['epoch'], 
             fold_it=fold_it,
             test=True
         )
+        
 
         # copy best model to ./checkpoints
         if args.train == 'abs' and args.freeze_vectors in ['abs', 'both']:
@@ -557,12 +571,19 @@ def main():
             shutil.copyfile(best_checkpoint_path, out_filepath)
             print(f"Saved best model to: {out_filepath}")
 
-        # saving validation stats to total stats
-        total_losses.update(test_loss)
-        total_errors.update(test_error)
+        # saving val validation stats to total stats
+        total_val_losses.update(val_loss)
+        total_val_errors.update(val_error)
         for prop, value in TASK_SPECS.items():
-            for stat, avg_meter in total_stats[prop].items():
-                avg_meter.update(stat_dict[prop][stat].avg)
+            for stat, avg_meter in total_val_stats[prop].items():
+                avg_meter.update(val_stat_dict[prop][stat].avg)
+
+        # saving test validation stats to total stats
+        total_test_losses.update(test_loss)
+        total_test_errors.update(test_error)
+        for prop, value in TASK_SPECS.items():
+            for stat, avg_meter in total_test_stats[prop].items():
+                avg_meter.update(test_stat_dict[prop][stat].avg)
         
         t_end_train = perf_counter()
         total_times.update(t_end_train - t_start_train)
@@ -570,9 +591,17 @@ def main():
     # ! save results
     save_stats_as_csv(
         best_epochs=best_epochs, 
-        total_loss=total_losses.avg, 
-        total_error=total_errors.avg,
-        stats_dict=total_stats
+        total_loss=total_val_losses.avg, 
+        total_error=total_val_errors.avg,
+        stats_dict=total_val_stats,
+        test=False,
+    )
+    save_stats_as_csv(
+        best_epochs=best_epochs, 
+        total_loss=total_test_losses.avg, 
+        total_error=total_test_errors.avg,
+        stats_dict=total_test_stats,
+        test=True
     )
     save_times(
         total_t=total_times.avg,
@@ -756,9 +785,10 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers, loss_t_
 
 def validate(
         val_loader, model, criterion, normalizers, 
-        loss_v_epochs=None, 
-        best_epoch=0, fold_it=0, test=False
+        loss_v_epochs=None, best_epoch=0, fold_it=0, 
+        val=False, test=False,
 ):
+    assert not (val and test)
     batch_time = AverageMeter()
     # ! stat trackers for each metric per head
     losses = AverageMeter()
@@ -779,7 +809,7 @@ def validate(
         else:
             raise ValueError(f"[TRAIN STATS] Unknown task {value['head']}")
     
-    if test:
+    if val or test:
         test_stats = dict()
         for prop, value in TASK_SPECS.items():
             if value['head'] in ['binary', 'multiclass']:
@@ -800,8 +830,7 @@ def validate(
             else:
                 raise ValueError(f"[TRAIN STATS] Unknown task {value['head']}")
             test_stats[prop] = prop_stats
-
-    if test:
+        
         score = dict()
         all_outputs = {
             prop: []
@@ -817,164 +846,165 @@ def validate(
     # switch to evaluate mode
     model.eval()
 
-    end = time.time()
-    # for i, (input, target, batch_cif_ids) in enumerate(val_loader):
-    for i, (
-        (atom_fea, nbr_fea, nbr_fea_idx, crys_idx), 
-        vectorizations, diagrams, targets, mask, batch_cif_ids
-    ) in tqdm(
-        enumerate(val_loader), 
-        desc='Val: ', 
-        total=len(val_loader),
-        disable=args.debug or not test,
-    ):
+    with torch.inference_mode():
+        end = time.time()
+        # for i, (input, target, batch_cif_ids) in enumerate(val_loader):
+        for i, (
+            (atom_fea, nbr_fea, nbr_fea_idx, crys_idx), 
+            vectorizations, diagrams, targets, mask, batch_cif_ids
+        ) in tqdm(
+            enumerate(val_loader), 
+            desc=f"{'Test' if test else 'Val'}: ", 
+            total=len(val_loader),
+            disable=args.debug or not (val or test),
+        ):
 
-        # ! EDTIED to use torch tensors
-        atom_fea = atom_fea.to(device, non_blocking=True)
-        nbr_fea = nbr_fea.to(device, non_blocking=True)
-        nbr_fea_idx = nbr_fea_idx.to(device, non_blocking=True)
+            # ! EDTIED to use torch tensors
+            atom_fea = atom_fea.to(device, non_blocking=True)
+            nbr_fea = nbr_fea.to(device, non_blocking=True)
+            nbr_fea_idx = nbr_fea_idx.to(device, non_blocking=True)
 
-        crys_idx = [idx.to(device, non_blocking=True) for idx in crys_idx]
+            crys_idx = [idx.to(device, non_blocking=True) for idx in crys_idx]
 
-        vectorizations = vectorizations.to(device, non_blocking=True)
-        diagrams = [
-            diagram.to(device, non_blocking=True)
-            for diagram in diagrams
-        ]
-
-        # ! updated variables to use torch Tensors & receive additional data
-        input_var = (
-            atom_fea, 
-            nbr_fea, 
-            nbr_fea_idx, 
-            crys_idx,
-            vectorizations, 
-            diagrams
-        )
-
-        # ! target normalization applied to each property
-        targets_normed = {
-            key: (normalizers[key].norm(targets[key])).to(device, non_blocking=True)
-            for key in targets.keys()
-        }
-
-        # compute output
-        output = model(*input_var)
-        loss, loss_dict = criterion(
-            input=output, 
-            target_dict=targets_normed, 
-            mask_dict=mask, 
-            task_specs=TASK_SPECS,
-        )
-
-        # measure accuracy and record loss
-        batch_cnt = len(mask[list(TASK_SPECS.keys())[0]])
-        losses.update(loss.detach().cpu().item(), n=batch_cnt)
-        for prop, value in TASK_SPECS.items():
-            task = value['head']
-            stats[prop]['loss'].update(loss_dict[prop]['loss'], int(mask[prop].sum().item()))
-
-            valid = mask[prop].bool().view(-1)
-            pred_valid = output[prop].detach().cpu()[valid]
-            targ_valid = targets[prop].detach().cpu()[valid]
-            valid_cif_ids = [
-                cif_id
-                for cif_id, is_valid in zip(batch_cif_ids, valid)
-                if is_valid
+            vectorizations = vectorizations.to(device, non_blocking=True)
+            diagrams = [
+                diagram.to(device, non_blocking=True)
+                for diagram in diagrams
             ]
 
-            if task in ['binary', 'multiclass']:
-                accuracy, precision, recall, fscore, auc_score = \
-                    class_eval(pred_valid, targ_valid)
-                stats[prop]['accuracies'].update(accuracy, int(mask[prop].sum().item()))
-                stats[prop]['precisions'].update(precision, int(mask[prop].sum().item()))
-                stats[prop]['recalls'].update(recall, int(mask[prop].sum().item()))
-                stats[prop]['fscores'].update(fscore, int(mask[prop].sum().item()))
-                stats[prop]['auc_scores'].update(auc_score, int(mask[prop].sum().item()))
+            # ! updated variables to use torch Tensors & receive additional data
+            input_var = (
+                atom_fea, 
+                nbr_fea, 
+                nbr_fea_idx, 
+                crys_idx,
+                vectorizations, 
+                diagrams
+            )
+
+            # ! target normalization applied to each property
+            targets_normed = {
+                key: (normalizers[key].norm(targets[key])).to(device, non_blocking=True)
+                for key in targets.keys()
+            }
+
+            # compute output
+            output = model(*input_var)
+            loss, loss_dict = criterion(
+                input=output, 
+                target_dict=targets_normed, 
+                mask_dict=mask, 
+                task_specs=TASK_SPECS,
+            )
+
+            # measure accuracy and record loss
+            batch_cnt = len(mask[list(TASK_SPECS.keys())[0]])
+            losses.update(loss.detach().cpu().item(), n=batch_cnt)
+            for prop, value in TASK_SPECS.items():
+                task = value['head']
+                stats[prop]['loss'].update(loss_dict[prop]['loss'], int(mask[prop].sum().item()))
+
+                valid = mask[prop].bool().view(-1)
+                pred_valid = output[prop].detach().cpu()[valid]
+                targ_valid = targets[prop].detach().cpu()[valid]
+                valid_cif_ids = [
+                    cif_id
+                    for cif_id, is_valid in zip(batch_cif_ids, valid)
+                    if is_valid
+                ]
+
+                if task in ['binary', 'multiclass']:
+                    accuracy, precision, recall, fscore, auc_score = \
+                        class_eval(pred_valid, targ_valid)
+                    stats[prop]['accuracies'].update(accuracy, int(mask[prop].sum().item()))
+                    stats[prop]['precisions'].update(precision, int(mask[prop].sum().item()))
+                    stats[prop]['recalls'].update(recall, int(mask[prop].sum().item()))
+                    stats[prop]['fscores'].update(fscore, int(mask[prop].sum().item()))
+                    stats[prop]['auc_scores'].update(auc_score, int(mask[prop].sum().item()))
+                    
+                    if val or test:
+                        # test_pred = torch.exp(output[prop].detach().cpu())
+                        test_pred = pred_valid
+                        test_target = targ_valid
+
+                        # if binary classification
+                        if TASK_SPECS[prop]['out_dim'] == 1:
+                            assert test_pred.ndim == 1
+                            test_pred = np.stack([1 - test_pred, test_pred], axis=1)
+                        else:
+                            assert test_pred.shape[1] == TASK_SPECS[prop]['out_dim']
+                        pred_label = np.argmax(test_pred, axis=1)
+                        test_stats[prop]['test_preds'] += pred_label.tolist()
+                        test_stats[prop]['test_probs'] += test_pred.tolist()
+                        test_stats[prop]['test_targets'] += test_target.view(-1).tolist()
+                        test_stats[prop]['test_cif_ids'] += valid_cif_ids
+                        test_stats[prop]['test_masks'] += mask[prop].view(-1).tolist()
+
                 
-                if test:
-                    # test_pred = torch.exp(output[prop].detach().cpu())
-                    test_pred = pred_valid
-                    test_target = targ_valid
-
-                    # if binary classification
-                    if TASK_SPECS[prop]['out_dim'] == 1:
-                        assert test_pred.ndim == 1
-                        test_pred = np.stack([1 - test_pred, test_pred], axis=1)
-                    else:
-                        assert test_pred.shape[1] == TASK_SPECS[prop]['out_dim']
-                    pred_label = np.argmax(test_pred, axis=1)
-                    test_stats[prop]['test_preds'] += pred_label.tolist()
-                    test_stats[prop]['test_probs'] += test_pred.tolist()
-                    test_stats[prop]['test_targets'] += test_target.view(-1).tolist()
-                    test_stats[prop]['test_cif_ids'] += valid_cif_ids
-                    test_stats[prop]['test_masks'] += mask[prop].view(-1).tolist()
-
-            
-            elif task == 'regression':
-                test_pred = normalizers[prop].denorm(pred_valid)
-                sq_err, valid_cnt = sum_sq_err(
-                    test_pred, 
-                    targ_valid,
-                )
-                # stats[prop]['sq_errors'].update(nrmse_error, int(mask[prop].sum().item()))
-                stats[prop]['sq_errors'].append(sq_err)
-                stats[prop]['valid_cnts'].append(valid_cnt)
-
-                if test:
-                    test_stats[prop]['test_preds'] += test_pred.view(-1).tolist()
-                    test_stats[prop]['test_targets'] += targ_valid.view(-1).tolist()
-                    test_stats[prop]['test_cif_ids'] += valid_cif_ids
-                    test_stats[prop]['test_masks'] += mask[prop].view(-1).tolist()
-
-                    all_outputs[prop] += test_pred.view(-1).tolist()
-                    all_targets[prop] += targ_valid.view(-1).tolist()
-
-            else:
-                raise ValueError(f"[STAT SAVE] Unknown task {value['head']}")
-
-        # measure elapsed time
-        batch_time.update(time.time() - end)
-        end = time.time()
-
-        # ! print stats for each property
-        if args.debug and i % args.print_freq == 0:
-            print('Test: [{0}/{1}]\tLoss {loss.val:.4f} ({loss.avg:.4f})'.format(
-                i, len(val_loader), loss=losses))
-            for prop, values in stats.items():
-                if TASK_SPECS[prop]['head'] in ['binary', 'multiclass']:
-                    print('Test: [{0}/{1}]\t'
-                        'PROP {prop}\t'
-                        'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                        'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                        'Accu {accu.val:.3f} ({accu.avg:.3f})\t'
-                        'Prec {prec.val:.3f} ({prec.avg:.3f})\t'
-                        'Recall {recall.val:.3f} ({recall.avg:.3f})\t'
-                        'F1 {f1.val:.3f} ({f1.avg:.3f})\t'
-                        'AUC {auc.val:.3f} ({auc.avg:.3f})'.format(
-                        i, len(val_loader), batch_time=batch_time, prop=prop,
-                        loss=values['loss'], accu=values['accuracies'],
-                        prec=values['precisions'], recall=values['recalls'], 
-                        f1=values['fscores'],auc=values['auc_scores'])
+                elif task == 'regression':
+                    test_pred = normalizers[prop].denorm(pred_valid)
+                    sq_err, valid_cnt = sum_sq_err(
+                        test_pred, 
+                        targ_valid,
                     )
-                elif TASK_SPECS[prop]['head'] == 'regression':
-                    # compute NRMSE for this batch (only for printing)
-                    rmse = (values['sq_errors'][-1] / values['valid_cnts'][-1]) ** 0.5
-                    nrmse = rmse / normalizers[prop].get_bound().item()
+                    # stats[prop]['sq_errors'].update(nrmse_error, int(mask[prop].sum().item()))
+                    stats[prop]['sq_errors'].append(sq_err)
+                    stats[prop]['valid_cnts'].append(valid_cnt)
 
-                    rmse_total = (sum(values['sq_errors']) / sum(values['valid_cnts'])) ** 0.5
-                    nrmse_total = rmse_total / normalizers[prop].get_bound().item()
+                    if val or test:
+                        test_stats[prop]['test_preds'] += test_pred.view(-1).tolist()
+                        test_stats[prop]['test_targets'] += targ_valid.view(-1).tolist()
+                        test_stats[prop]['test_cif_ids'] += valid_cif_ids
+                        test_stats[prop]['test_masks'] += mask[prop].view(-1).tolist()
 
-                    print('Test: [{0}/{1}]\t'
-                        'PROP {prop}\t'
-                        'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                        'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                        'NRMSE {nrmse_errors:.3f} ({nrmse_avg:.3f})'.format(
-                        i, len(val_loader), batch_time=batch_time, prop=prop,
-                        loss=values['loss'], nrmse_errors=nrmse, nrmse_avg=nrmse_total)
-                    )
+                        all_outputs[prop] += test_pred.view(-1).tolist()
+                        all_targets[prop] += targ_valid.view(-1).tolist()
+
                 else:
-                    raise ValueError(f"[STAT PRINT] Unrecognized task {TASK_SPECS[prop]['head']}")
+                    raise ValueError(f"[STAT SAVE] Unknown task {value['head']}")
+
+            # measure elapsed time
+            batch_time.update(time.time() - end)
+            end = time.time()
+
+            # ! print stats for each property
+            if args.debug and i % args.print_freq == 0:
+                print('Test: [{0}/{1}]\tLoss {loss.val:.4f} ({loss.avg:.4f})'.format(
+                    i, len(val_loader), loss=losses))
+                for prop, values in stats.items():
+                    if TASK_SPECS[prop]['head'] in ['binary', 'multiclass']:
+                        print('Test: [{0}/{1}]\t'
+                            'PROP {prop}\t'
+                            'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                            'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                            'Accu {accu.val:.3f} ({accu.avg:.3f})\t'
+                            'Prec {prec.val:.3f} ({prec.avg:.3f})\t'
+                            'Recall {recall.val:.3f} ({recall.avg:.3f})\t'
+                            'F1 {f1.val:.3f} ({f1.avg:.3f})\t'
+                            'AUC {auc.val:.3f} ({auc.avg:.3f})'.format(
+                            i, len(val_loader), batch_time=batch_time, prop=prop,
+                            loss=values['loss'], accu=values['accuracies'],
+                            prec=values['precisions'], recall=values['recalls'], 
+                            f1=values['fscores'],auc=values['auc_scores'])
+                        )
+                    elif TASK_SPECS[prop]['head'] == 'regression':
+                        # compute NRMSE for this batch (only for printing)
+                        rmse = (values['sq_errors'][-1] / values['valid_cnts'][-1]) ** 0.5
+                        nrmse = rmse / normalizers[prop].get_bound().item()
+
+                        rmse_total = (sum(values['sq_errors']) / sum(values['valid_cnts'])) ** 0.5
+                        nrmse_total = rmse_total / normalizers[prop].get_bound().item()
+
+                        print('Test: [{0}/{1}]\t'
+                            'PROP {prop}\t'
+                            'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                            'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                            'NRMSE {nrmse_errors:.3f} ({nrmse_avg:.3f})'.format(
+                            i, len(val_loader), batch_time=batch_time, prop=prop,
+                            loss=values['loss'], nrmse_errors=nrmse, nrmse_avg=nrmse_total)
+                        )
+                    else:
+                        raise ValueError(f"[STAT PRINT] Unrecognized task {TASK_SPECS[prop]['head']}")
     # finished validation testing    
                 
     # calculate NRMSE metrics, update AvgMeter only once
@@ -988,8 +1018,8 @@ def validate(
     if loss_v_epochs is not None:
         loss_v_epochs.append(losses.avg)
 
-    if test:
-        filename = f"r2_scores{f'_fold_{fold_it}' if CROSS_VAL else ''}.txt"
+    if val or test:
+        filename = f"{'test_' if test else 'val_'}r2_scores{f'_fold_{fold_it}' if CROSS_VAL else ''}.txt"
         with open(f"out_{args.id}/{filename}", 'w') as f:
             for prop, value in TASK_SPECS.items():
                 if value['head'] != 'regression':
@@ -1056,17 +1086,10 @@ def validate(
         + w_reg * float(reg_error.avg)
     )
 
-    if not CROSS_VAL and test:
-        save_stats_as_csv(
-            best_epochs=[best_epoch], 
-            total_loss=losses.avg, 
-            total_error=overall_error,
-            stats_dict=stats,
-        )
-        
+    if not CROSS_VAL and (val or test):
         # ! saving results for each prop
         for prop, values in test_stats.items():
-            with open(f'out_{args.id}/test_results_{args.id}_{prop}.csv', 'w', newline='', encoding='utf-8') as file_results:
+            with open(f"out_{args.id}/{'test' if test else 'val'}_results_{args.id}_{prop}.csv", 'w', newline='', encoding='utf-8') as file_results:
                 writer = csv.writer(file_results)
 
                 if TASK_SPECS[prop]['head'] in ['binary', 'multiclass']:
@@ -1117,24 +1140,24 @@ def save_stats_as_csv(
         best_epochs: list, 
         total_loss, 
         total_error,
-        stats_dict
+        stats_dict,
+        test=False,
 ):
     if args.debug:
-        print("Saving test results and stats as CSV")
+        print(f"Saving {'test' if test else 'val'} results and stats as CSV")
+    if test:
+        with open(f'out_{args.id}/params_{args.id}.txt', 'w') as f:
+            f.write(f"Attributes:\t\t{'Yes' if args.attr else 'No'}")
+            f.write(f'\nSource:\t\t\t{args.vec_source}' if args.vector != 'none' else '' + f"\nVector:\t\t\t{args.vector}")
+            f.write(f'\nAtom Len:\t\t{args.atom_fea_len}\nConv Num:\t\t{args.n_conv}')
+            f.write(f'\nHidden Len:\t\t{args.h_fea_len}\nHidden Num:\t\t{args.n_h}\nHead Layer Num:\t{args.n_o}')
+            f.write(f'\nVec Len:\t\t{args.vec_fea_len}\nVec Layer Num:\t{args.n_vec}\nVec Out Num:\t{args.cat_fea_len}')
+            f.write(f"\nVec Freeze:\t\t{args.freeze_vectors}")
+            f.write(f"\nVal Metric:\t\t{args.val_metric}")
+            f.write(f'\nBest Epochs:\t{", ".join(list(map(str, best_epochs)))}')
     
-    with open(f'out_{args.id}/test_params_{args.id}.txt', 'w') as f:
-        f.write(f"Attributes:\t\t{'Yes' if args.attr else 'No'}")
-        f.write(f'\nSource:\t\t\t{args.vec_source}\nVector:\t\t\t{args.vector}')
-        f.write(f'\nAtom Len:\t\t{args.atom_fea_len}\nConv Num:\t\t{args.n_conv}')
-        f.write(f'\nHidden Len:\t\t{args.h_fea_len}\nHidden Num:\t\t{args.n_h}\nHead Layer Num:\t{args.n_o}')
-        f.write(f'\nVec Len:\t\t{args.vec_fea_len}\nVec Layer Num:\t{args.n_vec}\nVec Out Num:\t{args.cat_fea_len}')
-        f.write(f"\nVec Freeze:\t\t{args.freeze_vectors}")
-        f.write(f"\nVal Metric:\t\t{args.val_metric}")
-        f.write(f'\nBest Epochs:\t{", ".join(list(map(str, best_epochs)))}')
-    
-    import csv
     # ! saving stats for each prop
-    with open(f'out_{args.id}/test_stats_{args.id}.csv', 'w', newline='', encoding='utf-8') as file_stats:
+    with open(f"out_{args.id}/{'test' if test else 'val'}_stats_{args.id}.csv", 'w', newline='', encoding='utf-8') as file_stats:
         writer = csv.writer(file_stats)
         header = ['head', 'task', 'loss', 'nrmse', 'accuracy', 'precision', 'recall', 'f1', 'auroc']
         writer.writerow(header)
@@ -1260,11 +1283,13 @@ class NormalizerProp(object):
 
     def state_dict(self):
         return {'mean': self.mean,
-                'std': self.std}
+                'std': self.std,
+                'bound': self.bound}
 
     def load_state_dict(self, state_dict):
         self.mean = state_dict['mean']
         self.std = state_dict['std']
+        self.bound = state_dict['bound']
 
         
 

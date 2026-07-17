@@ -352,7 +352,6 @@ def main():
                 + f"_{args.h_fea_len}" \
                 + f"_{args.n_h}" \
                 + f"_{args.n_o}" \
-                + (f'_attr' if args.attr else '') \
                 + (f'_{args.vec_fea_len}_{args.cat_fea_len}_{args.n_vec}' if args.vector != 'none' else '') \
                 + (f'_image{args.vec_source[0]}' if args.vector == 'image' else '') \
                 + (f'_land{args.vec_source[0]}' if args.vector == 'landscape' else '') \
@@ -540,7 +539,6 @@ def main():
             + f"_{args.h_fea_len}" \
             + f"_{args.n_h}" \
             + f"_{args.n_o}" \
-            + (f'_attr' if args.attr else '') \
             + (f'_{args.vec_fea_len}_{args.cat_fea_len}_{args.n_vec}' if args.vector != 'none' else '') \
             + (f'_image{args.vec_source[0]}' if args.vector == 'image' else '') \
             + (f'_land{args.vec_source[0]}' if args.vector == 'landscape' else '') \
@@ -1121,7 +1119,7 @@ def save_stats_as_csv(
         print("Saving test results and stats as CSV")
     
     with open(f'out_{args.id}/test_params_{args.id}.txt', 'w') as f:
-        f.write(f"Attributes:\t\t{'Yes' if args.attr else 'No'}")
+        f.write(f"Attributes:\t\tNo")
         f.write(f'\nSource:\t\t\t{args.vec_source}\nVector:\t\t\t{args.vector}')
         f.write(f'\nAtom Len:\t\t{args.atom_fea_len}\nConv Num:\t\t{args.n_conv}')
         f.write(f'\nHidden Len:\t\t{args.h_fea_len}\nHidden Num:\t\t{args.n_h}\nHead Layer Num:\t{args.n_o}')
