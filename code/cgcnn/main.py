@@ -1318,7 +1318,7 @@ def sum_sq_err(prediction, target):
 def class_eval(prediction, target):
     with torch.no_grad():
         target_label = target.detach().cpu().numpy()
-        target_label = np.squeeze(target)
+        target_label = np.squeeze(target_label)
 
         if not target_label.shape:
             target_label = np.asarray([target_label])
