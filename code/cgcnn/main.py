@@ -85,6 +85,8 @@ parser.add_argument('--atom-fea-len', default=64, type=int, metavar='N',
                     help='number of hidden atom features in conv layers')
 parser.add_argument('--h-fea-len', default=128, type=int, metavar='N',
                     help='number of hidden features after pooling')
+parser.add_argument('--o-fea-len', default=64, type=int, metavar='N',
+                    help='number of hidden features in multitask head')
 parser.add_argument('--n-conv', default=3, type=int, metavar='N',
                     help='number of conv layers')
 parser.add_argument('--n-h', default=1, type=int, metavar='N',
@@ -103,6 +105,8 @@ parser.add_argument('--debug', action='store_true',
                     help='prints debug messages')
 parser.add_argument('--seed', action='store_true',
                     help='sets torch seed to 42')
+parser.add_argument('--seed-val', default=42, type=float,
+                    help='value of torch seed')
 parser.add_argument('--delete', action='store_true',
                     help='deletes generated training files before training')
 parser.add_argument('--warn', action='store_true',
@@ -167,7 +171,7 @@ def main():
 
     if args.seed:
         torch.manual_seed(42)
-        seed(42)
+        seed(args.seed_val)
     print("GPU Available", args.cuda)
 
     if args.delete and args.resume == '':
@@ -326,6 +330,7 @@ def main():
             atom_fea_len=args.atom_fea_len,
             n_conv=args.n_conv,
             h_fea_len=args.h_fea_len,
+            o_fea_len=args.o_fea_len,
             n_h=args.n_h,
             # ! vector layer arguments
             vec_fea_len=args.vec_fea_len, 
@@ -1148,7 +1153,8 @@ def save_stats_as_csv(
     if test:
         with open(f'out_{args.id}/params_{args.id}.txt', 'w') as f:
             f.write(f"Attributes:\t\t{'Yes' if args.attr else 'No'}")
-            f.write(f'\nSource:\t\t\t{args.vec_source}' if args.vector != 'none' else '' + f"\nVector:\t\t\t{args.vector}")
+            f.write(f'\nSource:\t\t\t{args.vec_source}' if args.vector != 'none' else '')
+            f.write(f"\nVector:\t\t\t{args.vector}")
             f.write(f'\nAtom Len:\t\t{args.atom_fea_len}\nConv Num:\t\t{args.n_conv}')
             f.write(f'\nHidden Len:\t\t{args.h_fea_len}\nHidden Num:\t\t{args.n_h}\nHead Layer Num:\t{args.n_o}')
             f.write(f'\nVec Len:\t\t{args.vec_fea_len}\nVec Layer Num:\t{args.n_vec}\nVec Out Num:\t{args.cat_fea_len}')

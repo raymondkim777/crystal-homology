@@ -267,11 +267,12 @@ class MLPHead(nn.Module):
     Small MLP prediction head for individual crystal properties. 
     Can modify hidden/output dimension, as well as layer depth. 
     '''
-    def __init__(self, hidden_dim, output_dim, layer_cnt=1, classification=False):
+    def __init__(self, input_dim, hidden_dim, output_dim, layer_cnt=1, classification=False):
         super().__init__()
         layers = []
         if classification:
             layers.append(nn.Dropout())
+        layers.append(nn.Linear(input_dim, hidden_dim))
         for _ in range(layer_cnt):
             layers.append(nn.Linear(hidden_dim, hidden_dim))
             layers.append(nn.Softplus())
@@ -289,7 +290,7 @@ class CrystalGraphConvNet(nn.Module):
     """
     def __init__(
             self, orig_atom_fea_len, nbr_fea_len,
-            atom_fea_len=64, n_conv=3, h_fea_len=128, n_h=1,
+            atom_fea_len=64, n_conv=3, h_fea_len=128, o_fea_len=64, n_h=1,
             vec_fea_len=256, cat_fea_len=64, n_vec=0, n_o=1,
             vec_source='graph', vector='none', ph_gate_init=0.1,
             dims=3, root_dir='data/graph_data', task_specs=None,
@@ -338,8 +339,9 @@ class CrystalGraphConvNet(nn.Module):
         self.heads = nn.ModuleDict()
         for task, item in task_specs.items():
             self.heads[task] = MLPHead(
-                h_fea_len, 
-                item['out_dim'], 
+                input_dim=h_fea_len, 
+                hidden_dim=o_fea_len,
+                output_dim=item['out_dim'], 
                 layer_cnt=n_o,
                 classification=item['head'] in ['multiclass', 'binary'],
             )
