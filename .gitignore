@@ -82,10 +82,8 @@ logs
 code/ignore*
 
 code/cgcnn/checkpoints
+code/cgcnn/data/our-data
 code/cgcnn/data/abs*
 code/cgcnn/data/pretrain*
 code/cgcnn/data/plqy*
-code/cgcnn/*.pth.tar
-code/cgcnn/test_results*.csv
-code/cgcnn/test_stats*.csv
-code/cgcnn/test_params*.txt
+code/cgcnn/out*

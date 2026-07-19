@@ -3,7 +3,7 @@ from __future__ import print_function, division
 import pickle
 import torch
 import torch.nn as nn
-import torchPersLay as tp
+# import torchPersLay as tp
 
 
 class ConvLayer(nn.Module):
@@ -144,34 +144,34 @@ class CrystalGraphEncoder(nn.Module):
                                      for _ in range(n_vec)])
         self.vec_pooling = nn.Linear(vec_fea_len * dims, vec_fea_len)
 
-        # ! perslay --> experiment with parameters
-        if self.vector == 'perslay':
-            self.weights = nn.ModuleList([
-                tp.PowerPerslayWeight(
-                    constant=1.0,   # learnable
-                    power=1.0
-                )
-                for _ in range(dims)
-            ])
-            # input (read from pickle)
-            ch = vec_source[0]
-            with open(f'{root_dir}/tasks/image_bounds_{ch}.pkl', 'rb') as file:
-                self.image_bnds = pickle.load(file)
-            self.phis = nn.ModuleList([
-                tp.GaussianPerslayPhi(
-                    image_size=(20, 20),
-                    image_bnds=self.image_bnds[i],
-                    variance=0.1,   # learnable
-                )
-                for i in range(dims)
-            ])
-            self.perm_op = torch.sum
-            self.rho = nn.Identity()
+        # # ! perslay --> experiment with parameters
+        # if self.vector == 'perslay':
+        #     self.weights = nn.ModuleList([
+        #         tp.PowerPerslayWeight(
+        #             constant=1.0,   # learnable
+        #             power=1.0
+        #         )
+        #         for _ in range(dims)
+        #     ])
+        #     # input (read from pickle)
+        #     ch = vec_source[0]
+        #     with open(f'{root_dir}/tasks/image_bounds_{ch}.pkl', 'rb') as file:
+        #         self.image_bnds = pickle.load(file)
+        #     self.phis = nn.ModuleList([
+        #         tp.GaussianPerslayPhi(
+        #             image_size=(20, 20),
+        #             image_bnds=self.image_bnds[i],
+        #             variance=0.1,   # learnable
+        #         )
+        #         for i in range(dims)
+        #     ])
+        #     self.perm_op = torch.sum
+        #     self.rho = nn.Identity()
 
-            self.perslays = nn.ModuleList([
-                tp.Perslay(weight=self.weights[i], phi=self.phis[i], perm_op=self.perm_op, rho=self.rho)
-                for i in range(dims)
-            ])
+        #     self.perslays = nn.ModuleList([
+        #         tp.Perslay(weight=self.weights[i], phi=self.phis[i], perm_op=self.perm_op, rho=self.rho)
+        #         for i in range(dims)
+        #     ])
     
     def forward(
             self, 

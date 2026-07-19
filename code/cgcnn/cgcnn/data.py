@@ -535,8 +535,8 @@ class GraphData(Dataset):
         nbr_fea_idx, nbr_fea = np.array(nbr_fea_idx), np.array(nbr_fea)
         nbr_fea = self.gdf.expand(nbr_fea)
 
-        atom_fea = torch.tensor(atom_fea)
-        nbr_fea = torch.tensor(nbr_fea)
+        atom_fea = torch.tensor(atom_fea, dtype=torch.float32)
+        nbr_fea = torch.tensor(nbr_fea, dtype=torch.float32)
         nbr_fea_idx = torch.tensor(nbr_fea_idx, dtype=torch.long)
 
         return atom_fea, nbr_fea, nbr_fea_idx
