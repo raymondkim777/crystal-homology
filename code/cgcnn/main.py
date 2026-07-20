@@ -149,6 +149,15 @@ parser.add_argument('--save-fold', action='store_true',
                     help="whether to save fold checkpoints")
 parser.add_argument('--drop-last', action='store_true',
                     help="whether to drop incomplete batches")
+parser.add_argument('--alpha', default=1.5, type=float,
+                    help='restoring force for GradNorm')
+parser.add_argument('--warmup', default=25, type=int,
+                    help='number of batches to average for initial L0')
+parser.add_argument('--grad-start', default=50, type=int,
+                    help='epoch # to activate GradNorm')
+parser.add_argument('--wlr', '--weight-learning-rate', default=0.0005, type=float,
+                    metavar='LR', help='initial GradNorm weight learning rate (default: '
+                                       '0.0001 to 0.0005)')
 
 
 args = parser.parse_args(sys.argv[1:])
@@ -364,6 +373,7 @@ def main():
                 + f"_{args.h_fea_len}" \
                 + f"_{args.n_h}" \
                 + f"_{args.n_o}" \
+                + "_grad" \
                 + (f'_attr' if args.attr else '') \
                 + (f'_{args.vec_fea_len}_{args.cat_fea_len}_{args.n_vec}' if args.vector != 'none' else '') \
                 + (f'_image{args.vec_source[0]}' if args.vector == 'image' else '') \
@@ -419,7 +429,8 @@ def main():
         
         gradnorm = GradNorm(
             task_specs=TASK_SPECS,
-            alpha=1.5,
+            alpha=args.alpha,
+            warmup_steps=args.warmup,
         ).to(device)
 
         if args.optim == 'SGD':
@@ -431,7 +442,7 @@ def main():
             )
             weight_optimizer = optim.SGD(
                 [gradnorm.task_weights],
-                lr=args.lr,
+                lr=args.wlr,
                 momentum=args.momentum,
                 weight_decay=0.0
             )
@@ -445,11 +456,16 @@ def main():
             )
             weight_optimizer = optim.AdamW(
                 [gradnorm.task_weights],
-                lr=args.lr,
+                lr=args.wlr,
                 weight_decay=0.0
             )
         else:
             raise NameError('Only SGD or Adam is allowed as --optim')
+        
+        if args.scheduler == 'normal':
+            scheduler = MultiStepLR(model_optimizer, milestones=args.lr_milestones, gamma=0.1)
+        else:
+            scheduler = ReduceLROnPlateau(model_optimizer, mode='min', factor=0.1, patience=10)
 
         # optionally resume from a checkpoint
         if not CROSS_VAL and args.resume:
@@ -465,6 +481,8 @@ def main():
                 # optimizer.load_state_dict(checkpoint['optimizer'])
                 model_optimizer.load_state_dict(checkpoint['model_optimizer'])
                 weight_optimizer.load_state_dict(checkpoint['weight_optimizer'])
+                gradnorm.load_state_dict(checkpoint['gradnorm'])
+                scheduler.load_state_dict(checkpoint['scheduler'])
                 # normalizer.load_state_dict(checkpoint['normalizer'])
                 for prop in normalizers.keys():
                     normalizers[prop].load_state_dict(checkpoint['normalizer'][prop])
@@ -472,11 +490,6 @@ def main():
                     .format(args.resume, checkpoint['epoch']))
             else:
                 print("=> no checkpoint found at '{}'".format(args.resume))
-
-        if args.scheduler == 'normal':
-            scheduler = MultiStepLR(model_optimizer, milestones=args.lr_milestones, gamma=0.1)
-        else:
-            scheduler = ReduceLROnPlateau(model_optimizer, mode='min', factor=0.1, patience=10)
 
         t_start_train = perf_counter()
         if args.debug:
@@ -504,7 +517,7 @@ def main():
             if args.debug:
                 print("\nValidating\n")
             val_error, val_loss, _ = validate(
-                val_loader, model, criterion, normalizers, 
+                val_loader, model, criterion, normalizers, gradnorm, 
                 loss_v_epochs=loss_v_epochs,
             )
 
@@ -532,6 +545,8 @@ def main():
                 # 'optimizer': optimizer.state_dict(),
                 'model_optimizer': model_optimizer.state_dict(),
                 'weight_optimizer': weight_optimizer.state_dict(),
+                'scheduler': scheduler.state_dict(),
+                'gradnorm': gradnorm.state_dict(),
                 'normalizer': {prop: normalizers[prop].state_dict()
                             for prop in normalizers.keys()},
                 'args': vars(args)
@@ -558,17 +573,18 @@ def main():
         best_checkpoint = torch.load(best_checkpoint_path, weights_only=False)
         best_epochs.append(best_checkpoint['epoch'])
         model.load_state_dict(best_checkpoint['state_dict'])
+        gradnorm.load_state_dict(best_checkpoint['gradnorm'])
 
         # ! run best model checkpoint on val and test set
         val_error, val_loss, val_stat_dict = validate(
-            val_loader, model, criterion, normalizers, 
+            val_loader, model, criterion, normalizers, gradnorm,
             best_epoch=best_checkpoint['epoch'], 
             fold_it=fold_it,
             val=True
         )
 
         test_error, test_loss, test_stat_dict = validate(
-            test_loader, model, criterion, normalizers, 
+            test_loader, model, criterion, normalizers, gradnorm, 
             best_epoch=best_checkpoint['epoch'], 
             fold_it=fold_it,
             test=True
@@ -589,6 +605,7 @@ def main():
             + f"_{args.h_fea_len}" \
             + f"_{args.n_h}" \
             + f"_{args.n_o}" \
+            + "_grad" \
             + (f'_attr' if args.attr else '') \
             + (f'_{args.vec_fea_len}_{args.cat_fea_len}_{args.n_vec}' if args.vector != 'none' else '') \
             + (f'_image{args.vec_source[0]}' if args.vector == 'image' else '') \
@@ -687,6 +704,10 @@ def train(
         (atom_fea, nbr_fea, nbr_fea_idx, crys_idx), 
         vectorizations, diagrams, targets, mask, _
     ) in enumerate(train_loader):
+        
+        # if args.debug:
+        #     print(f"Fetched batch {i} items")
+
         # measure data loading time
         data_time.update(time.time() - end)
         
@@ -729,26 +750,39 @@ def train(
             task_specs=TASK_SPECS,
         )
         
+        # if args.debug:
+        #     print(f"Computed model output and loss")
+
         # ! GRADNORM
+        gradnorm_active = epoch >= args.grad_start
+
         reference_params = tuple(
             model.encoder.final_shared_fc.parameters()
         )
         model_loss, gradnorm_loss = gradnorm(
             loss,
             reference_params,
+            active=gradnorm_active,
         )
 
+        # if args.debug:
+        #     print(f"Ran GradNorm forward pass")
+
+        model_loss_cpu = model_loss.detach().cpu().item()
+        task_w_cpu = gradnorm.task_weights.detach().cpu()
+
         # loss_t_batches.append(loss.detach().cpu().item())
-        loss_sum = sum([loss_val.detach().cpu().item() for loss_val in loss.values()])
-        loss_t_batches.append(loss_sum)
+        loss_t_batches.append(model_loss_cpu)
 
         # measure accuracy and record loss
         batch_cnt = len(mask[list(TASK_SPECS.keys())[0]])
-        losses.update(loss.detach().cpu().item(), n=batch_cnt)
-        for prop, value in TASK_SPECS.items():
+        losses.update(model_loss_cpu, n=batch_cnt)
+
+        for task_i, (prop, value) in enumerate(TASK_SPECS.items()):
             task = value['head']
             # stats[prop]['loss'].update(loss_dict[prop]['loss'], int(mask[prop].sum().item()))
-            stats[prop]['loss'].update(loss[prop].detach().cpu(), int(mask[prop].sum().item()))
+            weighted_prop_loss = task_w_cpu[task_i] * loss[prop].detach().cpu()
+            stats[prop]['loss'].update(weighted_prop_loss, int(mask[prop].sum().item()))
             
             valid = mask[prop].bool().view(-1)
             pred_valid = output[prop].detach().cpu()[valid]
@@ -772,6 +806,9 @@ def train(
                 stats[prop]['valid_cnts'].append(valid_cnt)
             else:
                 raise ValueError(f"[STAT SAVE] Unknown task {value['head']}")
+        
+        # if args.debug:
+        #     print(f"Computed train metrics")
 
         # compute gradient and do SGD step
         # ! GRADNORM
@@ -780,12 +817,17 @@ def train(
         weight_optimizer.zero_grad(set_to_none=True)
 
         model_loss.backward()
-        gradnorm_loss.backward()
+        if gradnorm_active and gradnorm_loss is not None:
+            gradnorm_loss.backward()
 
         # optimizer.step()
         model_optimizer.step()
-        weight_optimizer.step()
-        gradnorm.renormalize_weights()
+        if gradnorm_active and gradnorm_loss is not None:
+            weight_optimizer.step()
+            gradnorm.renormalize_weights()
+        
+        # if args.debug:
+        #     print(f"Performed opt step for model & weights")
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -842,7 +884,7 @@ def train(
             
 
 def validate(
-        val_loader, model, criterion, normalizers, 
+        val_loader, model, criterion, normalizers, gradnorm,
         loss_v_epochs=None, best_epoch=0, fold_it=0, 
         val=False, test=False,
 ):
@@ -948,23 +990,33 @@ def validate(
 
             # compute output
             output = model(*input_var)
-            loss, loss_dict = criterion(
+            loss = criterion(
                 input=output, 
                 target_dict=targets_normed, 
                 mask_dict=mask, 
                 task_specs=TASK_SPECS,
             )
+            loss_tensor = torch.stack([
+                loss[prop].detach()
+                for prop in TASK_SPECS.keys()
+            ])
+            # weighted_loss = (gradnorm.task_weights.detach() * loss_tensor).detach().cpu()
 
             # measure accuracy and record loss
             batch_cnt = len(mask[list(TASK_SPECS.keys())[0]])
-            losses.update(loss.detach().cpu().item(), n=batch_cnt)
-            for prop, value in TASK_SPECS.items():
+            losses.update(loss_tensor.detach().cpu().sum(), n=batch_cnt)
+
+            for task_i, (prop, value) in enumerate(TASK_SPECS.items()):
                 task = value['head']
-                stats[prop]['loss'].update(loss_dict[prop]['loss'], int(mask[prop].sum().item()))
+                # stats[prop]['loss'].update(loss_dict[prop]['loss'], int(mask[prop].sum().item()))
+                # stats[prop]['loss'].update(weighted_loss[task_i], int(mask[prop].sum().item()))
+                stats[prop]['loss'].update(loss_tensor[task_i], int(mask[prop].sum().item()))
 
                 valid = mask[prop].bool().view(-1)
-                pred_valid = output[prop].detach().cpu()[valid]
-                targ_valid = targets[prop].detach().cpu()[valid]
+                pred_raw = output[prop].detach().cpu()
+                targ_raw = targets[prop].detach().cpu()
+                pred_valid = pred_raw[valid]
+                targ_valid = targ_raw[valid]
                 valid_cif_ids = [
                     cif_id
                     for cif_id, is_valid in zip(batch_cif_ids, valid)
@@ -982,27 +1034,35 @@ def validate(
                     
                     if val or test:
                         # test_pred = torch.exp(output[prop].detach().cpu())
-                        test_pred = pred_valid
-                        test_target = targ_valid
-
+                        test_pred_logits = pred_raw
+                        test_target = targ_raw
+                        
                         # if binary classification
                         if TASK_SPECS[prop]['out_dim'] == 1:
-                            assert test_pred.ndim == 1
-                            test_pred = np.stack([1 - test_pred, test_pred], axis=1)
+                            logits = test_pred_logits.reshape(-1)
+                            pos_probs = torch.sigmoid(logits)
+
+                            test_probs = torch.stack([1 - pos_probs, pos_probs], dim=1)
+                            pred_label =  (
+                                pos_probs >= 0.5
+                            ).long()
                         else:
-                            assert test_pred.shape[1] == TASK_SPECS[prop]['out_dim']
-                        pred_label = np.argmax(test_pred, axis=1)
+                            test_probs = torch.softmax(
+                                test_pred_logits, dim=-1
+                            )
+                            pred_label = test_probs.argmax(dim=-1)
+
                         test_stats[prop]['test_preds'] += pred_label.tolist()
-                        test_stats[prop]['test_probs'] += test_pred.tolist()
+                        test_stats[prop]['test_probs'] += test_probs.tolist()
                         test_stats[prop]['test_targets'] += test_target.view(-1).tolist()
-                        test_stats[prop]['test_cif_ids'] += valid_cif_ids
+                        test_stats[prop]['test_cif_ids'] += batch_cif_ids
                         test_stats[prop]['test_masks'] += mask[prop].view(-1).tolist()
 
                 
                 elif task == 'regression':
-                    test_pred = normalizers[prop].denorm(pred_valid)
+                    test_pred_logits = normalizers[prop].denorm(pred_valid)
                     sq_err, valid_cnt = sum_sq_err(
-                        test_pred, 
+                        test_pred_logits, 
                         targ_valid,
                     )
                     # stats[prop]['sq_errors'].update(nrmse_error, int(mask[prop].sum().item()))
@@ -1010,12 +1070,12 @@ def validate(
                     stats[prop]['valid_cnts'].append(valid_cnt)
 
                     if val or test:
-                        test_stats[prop]['test_preds'] += test_pred.view(-1).tolist()
+                        test_stats[prop]['test_preds'] += test_pred_logits.view(-1).tolist()
                         test_stats[prop]['test_targets'] += targ_valid.view(-1).tolist()
                         test_stats[prop]['test_cif_ids'] += valid_cif_ids
                         test_stats[prop]['test_masks'] += mask[prop].view(-1).tolist()
 
-                        all_outputs[prop] += test_pred.view(-1).tolist()
+                        all_outputs[prop] += test_pred_logits.view(-1).tolist()
                         all_targets[prop] += targ_valid.view(-1).tolist()
 
                 else:
@@ -1064,6 +1124,10 @@ def validate(
                     else:
                         raise ValueError(f"[STAT PRINT] Unrecognized task {TASK_SPECS[prop]['head']}")
     # finished validation testing    
+    
+    # print GradNorm weights
+    if args.debug:
+        print(f"GradNorm weights: {gradnorm.task_weights.detach().cpu().tolist()}")
                 
     # calculate NRMSE metrics, update AvgMeter only once
     for prop, value in TASK_SPECS.items():
@@ -1369,6 +1433,7 @@ def sum_sq_err(prediction, target):
 
 # ! Updated for multiclass classification
 def class_eval(prediction, target):
+    # prediction is logits
     with torch.no_grad():
         target_label = target.detach().cpu().numpy()
         target_label = np.squeeze(target_label)

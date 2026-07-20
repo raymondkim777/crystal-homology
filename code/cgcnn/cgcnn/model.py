@@ -185,9 +185,11 @@ class CrystalGraphEncoder(nn.Module):
         conv_to_fc_input_len = atom_fea_len if self.vector == 'none' else atom_fea_len + cat_fea_len
         self.conv_to_fc = nn.Linear(conv_to_fc_input_len, h_fea_len)
         self.conv_to_fc_softplus = nn.Softplus()
+        self.final_shared_fc = self.conv_to_fc
         if n_h > 1:
             self.fcs = nn.ModuleList([nn.Linear(h_fea_len, h_fea_len) for _ in range(n_h-1)])
             self.softpluses = nn.ModuleList([nn.Softplus() for _ in range(n_h-1)])
+            self.final_shared_fc = self.fcs[-1]
         self.graph_norm = nn.LayerNorm(atom_fea_len)
         self.vec_norm = nn.LayerNorm(cat_fea_len)
 

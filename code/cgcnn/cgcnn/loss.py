@@ -10,7 +10,7 @@ class MultiTaskLoss(nn.Module):
         self.loss_bin = nn.BCEWithLogitsLoss(reduction='none')
         self.loss_bin_w = nn.BCEWithLogitsLoss(
             reduction='none', 
-            pos_weight=torch.tensor([4]).to(device)    # 6.94, computed from find_bounds.py --dist
+            pos_weight=torch.tensor([2]).to(device)    # 6.94, computed from find_bounds.py --dist
         )  
         self.loss_class = nn.CrossEntropyLoss(reduction='none')
         # self.loss_reg = nn.HuberLoss(reduction='none')
@@ -79,7 +79,7 @@ class MultiTaskLoss(nn.Module):
 
 class GradNorm(nn.Module):
 
-    def __init__(self, task_specs, alpha=1.5, warmup_steps=1):
+    def __init__(self, task_specs, alpha=1.5, warmup_steps=25):
         super().__init__()
 
         self.task_specs = task_specs
@@ -110,7 +110,7 @@ class GradNorm(nn.Module):
             torch.tensor(0, dtype=torch.long),
         )
 
-    def forward(self, losses, reference_params):
+    def forward(self, losses, reference_params, active=True):
         """
         Parameters
         ----------
@@ -132,8 +132,10 @@ class GradNorm(nn.Module):
             Backpropagate this only into task_weights.
         """
         # losses is dict of form losses[prop] = loss_value
-        losses = [loss_val for _, loss_val in self.task_specs.items()]
-        losses = torch.stack(list(losses))
+        losses = torch.stack([
+            losses[prop]
+            for prop in self.task_specs.keys()
+        ])
 
         if losses.ndim != 1:
             raise ValueError(
@@ -144,6 +146,12 @@ class GradNorm(nn.Module):
             raise ValueError(
                 f"Expected {self.task_num} losses, but received {losses.numel()}"
             )
+        
+        # skip if nonactive
+        if not active:
+            model_loss = losses.sum()
+            gradnorm_loss = self.task_weights.sum() * 0.0
+            return model_loss, gradnorm_loss
 
         reference_params = tuple(
             param
@@ -159,8 +167,8 @@ class GradNorm(nn.Module):
         # Store L_i(0) before the first parameter update.
         if not self.initial_losses_set.item():
             with torch.no_grad():
-                self.initial_losses.copy_(losses.detach())
-                self.initial_losses_set.fill_(True)
+                self.initial_loss_sum.add_(losses.detach())
+                self.initial_loss_count.add_(1)
 
                 if self.initial_loss_count.item() >= self.warmup_steps:
                     self.initial_losses.copy_(
