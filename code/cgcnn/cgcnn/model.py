@@ -157,7 +157,8 @@ class CrystalGraphEncoder(nn.Module):
     def __init__(
             self, orig_atom_fea_len, nbr_fea_len,
             atom_fea_len=64, n_conv=3, h_fea_len=128, n_h=1,
-            vec_fea_len=256, cat_fea_len=64, n_vec=0, ph_gate_init=0.1,
+            vec_fea_len=256, cat_fea_len=64, n_vec=0, 
+            ph_gate_init=0.1, gate_fea_len=64,
             # classification=False, num_classes=2,
             vec_source='graph', vector='none',
             dims=2, root_dir='data/graph_data'
@@ -210,6 +211,22 @@ class CrystalGraphEncoder(nn.Module):
             self.ph_gate_logit = nn.Parameter(
                 torch.tensor(ph_gate_logit_init, dtype=torch.float32)
             )
+            # ! vectorization adaptive gating
+            self.ph_gate_net = nn.Sequential(
+                nn.Linear(atom_fea_len + cat_fea_len, gate_fea_len),
+                nn.SiLU(),
+                nn.Linear(gate_fea_len, 1),
+            )
+            # initial values approximate ph_gate_logit_init
+            nn.init.normal_(
+                self.ph_gate_net[-1].weight,
+                mean=0.0,
+                std=1e-3,
+            )
+            nn.init.constant_(
+                self.ph_gate_net[-1].bias,
+                ph_gate_logit_init,
+            )
 
     def forward(
             self, 
@@ -229,7 +246,8 @@ class CrystalGraphEncoder(nn.Module):
             vec_fea = self.vec_norm(vec_fea)
             crys_fea = self.graph_norm(crys_fea)
             # concatenating processed vec to crystal features
-            ph_gate = torch.sigmoid(self.ph_gate_logit)
+            gate_input = torch.cat([crys_fea, vec_fea], dim=1)
+            ph_gate = torch.sigmoid(self.ph_gate_net(gate_input))
             crys_fea = torch.cat([crys_fea, ph_gate * vec_fea], dim=1)
 
         crys_fea = self.conv_to_fc(self.conv_to_fc_softplus(crys_fea))
