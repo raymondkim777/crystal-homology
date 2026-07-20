@@ -21,7 +21,7 @@ from torch.optim.lr_scheduler import MultiStepLR, ReduceLROnPlateau
 from sklearn.metrics import r2_score
 
 from time import perf_counter
-from cgcnn.loss import MultiTaskLoss
+from cgcnn.loss import MultiTaskLoss, GradNorm
 from cgcnn.data import GraphData
 from cgcnn.data import collate_pool, get_train_val_test_loader, \
     get_fold_indices, get_train_val_test_loader_from_folds
@@ -416,14 +416,38 @@ def main():
         if args.debug:
             print("Instantiating custom loss function")
         criterion = MultiTaskLoss(device)
-                
+        
+        gradnorm = GradNorm(
+            task_specs=TASK_SPECS,
+            alpha=1.5,
+        ).to(device)
+
         if args.optim == 'SGD':
-            optimizer = optim.SGD(model.parameters(), args.lr,
-                                momentum=args.momentum,
-                                weight_decay=args.weight_decay)
+            model_optimizer = optim.SGD(
+                model.parameters(), 
+                args.lr,
+                momentum=args.momentum,
+                weight_decay=args.weight_decay
+            )
+            weight_optimizer = optim.SGD(
+                [gradnorm.task_weights],
+                lr=args.lr,
+                momentum=args.momentum,
+                weight_decay=0.0
+            )
         elif args.optim == 'Adam':
-            optimizer = optim.AdamW(model.parameters(), args.lr,
-                                weight_decay=args.weight_decay)
+            # optimizer = optim.AdamW(model.parameters(), args.lr,
+            #                     weight_decay=args.weight_decay)
+            model_optimizer = optim.AdamW(
+                model.parameters(),
+                lr=args.lr,
+                weight_decay=args.weight_decay
+            )
+            weight_optimizer = optim.AdamW(
+                [gradnorm.task_weights],
+                lr=args.lr,
+                weight_decay=0.0
+            )
         else:
             raise NameError('Only SGD or Adam is allowed as --optim')
 
@@ -438,7 +462,9 @@ def main():
                 args.start_epoch = max(args.start_epoch, checkpoint['epoch'])
                 best_errors = checkpoint['best_errors']
                 model.load_state_dict(checkpoint['state_dict'])
-                optimizer.load_state_dict(checkpoint['optimizer'])
+                # optimizer.load_state_dict(checkpoint['optimizer'])
+                model_optimizer.load_state_dict(checkpoint['model_optimizer'])
+                weight_optimizer.load_state_dict(checkpoint['weight_optimizer'])
                 # normalizer.load_state_dict(checkpoint['normalizer'])
                 for prop in normalizers.keys():
                     normalizers[prop].load_state_dict(checkpoint['normalizer'][prop])
@@ -448,9 +474,9 @@ def main():
                 print("=> no checkpoint found at '{}'".format(args.resume))
 
         if args.scheduler == 'normal':
-            scheduler = MultiStepLR(optimizer, milestones=args.lr_milestones, gamma=0.1)
+            scheduler = MultiStepLR(model_optimizer, milestones=args.lr_milestones, gamma=0.1)
         else:
-            scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10)
+            scheduler = ReduceLROnPlateau(model_optimizer, mode='min', factor=0.1, patience=10)
 
         t_start_train = perf_counter()
         if args.debug:
@@ -462,7 +488,7 @@ def main():
             if args.debug:
                 print(f"Training epoch {epoch}")
             avg_batch_time = train(
-                train_loader, model, criterion, optimizer, 
+                train_loader, model, criterion, model_optimizer, weight_optimizer, gradnorm, 
                 epoch, normalizers, loss_t_epochs, loss_t_batches,
             )
 
@@ -503,7 +529,9 @@ def main():
                 'epoch': epoch + 1,
                 'state_dict': model.state_dict(),
                 'best_errors': float(best_errors),
-                'optimizer': optimizer.state_dict(),
+                # 'optimizer': optimizer.state_dict(),
+                'model_optimizer': model_optimizer.state_dict(),
+                'weight_optimizer': weight_optimizer.state_dict(),
                 'normalizer': {prop: normalizers[prop].state_dict()
                             for prop in normalizers.keys()},
                 'args': vars(args)
@@ -617,7 +645,11 @@ def main():
     )
 
 
-def train(train_loader, model, criterion, optimizer, epoch, normalizers, loss_t_epochs, loss_t_batches):
+def train(
+        train_loader, model, criterion, 
+        model_optimizer, weight_optimizer, gradnorm, 
+        epoch, normalizers, loss_t_epochs, loss_t_batches
+):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     # ! stat trackers for each metric per head
@@ -690,21 +722,33 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers, loss_t_
 
         # compute output
         output = model(*input_var)  # dictionary[prop]
-        loss, loss_dict = criterion(
+        loss = criterion(
             input=output, 
             target_dict=targets_normed, 
             mask_dict=mask, 
             task_specs=TASK_SPECS,
         )
+        
+        # ! GRADNORM
+        reference_params = tuple(
+            model.encoder.final_shared_fc.parameters()
+        )
+        model_loss, gradnorm_loss = gradnorm(
+            loss,
+            reference_params,
+        )
 
-        loss_t_batches.append(loss.detach().cpu().item())
+        # loss_t_batches.append(loss.detach().cpu().item())
+        loss_sum = sum([loss_val.detach().cpu().item() for loss_val in loss.values()])
+        loss_t_batches.append(loss_sum)
 
         # measure accuracy and record loss
         batch_cnt = len(mask[list(TASK_SPECS.keys())[0]])
         losses.update(loss.detach().cpu().item(), n=batch_cnt)
         for prop, value in TASK_SPECS.items():
             task = value['head']
-            stats[prop]['loss'].update(loss_dict[prop]['loss'], int(mask[prop].sum().item()))
+            # stats[prop]['loss'].update(loss_dict[prop]['loss'], int(mask[prop].sum().item()))
+            stats[prop]['loss'].update(loss[prop].detach().cpu(), int(mask[prop].sum().item()))
             
             valid = mask[prop].bool().view(-1)
             pred_valid = output[prop].detach().cpu()[valid]
@@ -730,9 +774,18 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers, loss_t_
                 raise ValueError(f"[STAT SAVE] Unknown task {value['head']}")
 
         # compute gradient and do SGD step
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        # ! GRADNORM
+        # optimizer.zero_grad()
+        model_optimizer.zero_grad(set_to_none=True)
+        weight_optimizer.zero_grad(set_to_none=True)
+
+        model_loss.backward()
+        gradnorm_loss.backward()
+
+        # optimizer.step()
+        model_optimizer.step()
+        weight_optimizer.step()
+        gradnorm.renormalize_weights()
 
         # measure elapsed time
         batch_time.update(time.time() - end)
