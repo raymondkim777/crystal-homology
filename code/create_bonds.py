@@ -242,8 +242,8 @@ def construct_crystalnn_graph(plqy=False, plqy_full=False) -> None:
         
         # save structures/graphs as pickles
         if not struct_exist:
-            structure_filepapth = open_write_file(STRUCTURE_DIRECTORY, f'{system}.pkl')
-            with open(structure_filepapth, 'wb') as f:
+            structure_filepath = open_write_file(STRUCTURE_DIRECTORY, f'{system}.pkl')
+            with open(structure_filepath, 'wb') as f:
                 pickle.dump(system_structures, f)
 
         multigraph_filepath = open_write_file(MULTIGRAPH_DIRECTORY, f'{system}.pkl')

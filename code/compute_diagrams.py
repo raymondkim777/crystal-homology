@@ -215,6 +215,8 @@ def compute_dist_mat_for_cif(args):
     # get distance matrix for each pair of frac. coordinates
     n = len(structure)
     dist_mat = np.zeros((n, n))
+    if n < 2:
+        return filename[:-4], dist_mat, 1
 
     max_dist = 0
     for i in range(n):
@@ -228,7 +230,8 @@ def compute_dist_mat_for_cif(args):
             max_dist = max(max_dist, dist)
     if max_dist == 0:
         max_dist = 1
-    return filename[:-4], dist_mat / max_dist   # normalized to 1
+
+    return filename[:-4], dist_mat / max_dist, max_dist   # normalized to 1
 
 
 def cif_to_dist_mat_norm(plqy=False, plqy_full=False):
@@ -254,7 +257,7 @@ def cif_to_dist_mat_norm(plqy=False, plqy_full=False):
         else:
             tasks = [(system, filename, None, plqy, plqy_full) for filename in cif_files]
 
-        uncompleted_files = set([filename[:-4] for filename in cif_files])
+        # uncompleted_files = set([filename[:-4] for filename in cif_files])
 
         with ProcessPoolExecutor(
             max_workers=n_workers,
@@ -268,10 +271,10 @@ def cif_to_dist_mat_norm(plqy=False, plqy_full=False):
                 total=len(futures),
                 desc=f"{system}: ",
             ):
-                crystal_id, dist_mat = future.result()
-                system_dist_mats[crystal_id] = dist_mat
-                uncompleted_files.remove(crystal_id)
-                print(uncompleted_files)
+                crystal_id, dist_mat, max_dist = future.result()
+                system_dist_mats[crystal_id] = (dist_mat, max_dist)
+                # uncompleted_files.remove(crystal_id)
+                # print(uncompleted_files)
 
         # with ProcessPoolExecutor(
         #     max_workers=n_workers, 
@@ -295,7 +298,7 @@ def compute_persistence_diagrams_point(plqy=False, plqy_full=False):
 
     rips = RipsPersistence(
         homology_dimensions=tuple(range(DIMENSION_CNT)),
-        threshold=0.5, 
+        threshold=0.6, 
         input_type='full distance matrix', 
         n_jobs=n_workers,
     )
@@ -304,7 +307,10 @@ def compute_persistence_diagrams_point(plqy=False, plqy_full=False):
     for system in CRYSTAL_SYSTEMS:
         print(f"Computing PD for {system}")
 
-        dist_mat_system = list(dist_dict[system].values())
+        # dist_dict[system][mp_id] is (norm_dist_mat, max_dist)
+        dist_mat_system = [item[0] for item in dist_dict[system].values()]
+        max_dists_system = [item[1] for item in dist_dict[system].values()]
+        # dist_mat_system = list(dist_dict[system].values())
         if len(dist_mat_system) == 0:
             print(f"No crystals for {system} system!")
             diagrams_with_id = dict()
@@ -317,25 +323,36 @@ def compute_persistence_diagrams_point(plqy=False, plqy_full=False):
         diagrams = rips.fit_transform(dist_mat_system)
         # [crystal1, crystal2, ...] where crystaln = [h0_diag, h1_diag, h2_diag]
 
-        diagrams_filtered = []
-        diag_select = DiagramSelector(
-            use=True, 
-            point_type='finite', 
-            limit=MAX_DIST,     # + 1??
-        )
-        for diag_crystal in diagrams:
-            diagrams_filtered.append(diag_select.fit_transform(diag_crystal))
+        # multiply back into original distance scale, turn np.infs into MAX_DIST + 1
+        assert len(diagrams) == len(max_dists_system)
+        for crystal_diag, max_dist in zip(diagrams, max_dists_system):
+            for dim in range(DIMENSION_CNT):
+                # if crystal has 1 site, then PD will have NaN --> turn into inf, then MAX_DIST + 1
+                # if max_dist == 0:
+                #     print("MAX DISTANCE IS 0")
+                crystal_diag[dim][np.isnan(crystal_diag[dim])] = np.inf
+                crystal_diag[dim] *= max_dist
+                crystal_diag[dim][np.isinf(crystal_diag[dim])] = MAX_DIST + 1
+
+        # diagrams_filtered = []
+        # diag_select = DiagramSelector(
+        #     use=True, 
+        #     point_type='finite', 
+        #     limit=MAX_DIST,     # + 1??
+        # )
+        # for diag_crystal in diagrams:
+        #     diagrams_filtered.append(diag_select.fit_transform(diag_crystal))
 
         # match diagrams to crystal id (format with multiple dimensions)
         keys = list(dist_dict[system].keys())
         diagrams_with_id = {
-            keys[i]: diagrams_filtered[i]
-            for i in range(len(diagrams_filtered))
+            keys[i]: diagrams[i]
+            for i in range(len(diagrams))
         }
 
         # print diagram info
-        print(f"diagram cnt: {len(diagrams_filtered)}")
-        point_diagram_list = diagrams_filtered[0]
+        print(f"diagram cnt: {len(diagrams)}")
+        point_diagram_list = diagrams[0]
         print("Persistence Diagram Shape for H0:", point_diagram_list[0].shape)
         print("Points (Birth, Death) for H0:\n", point_diagram_list[0])
     
@@ -382,9 +399,10 @@ def compute_persistence_diagrams_custom(plqy=False, plqy_full=False):
 
         # modify dist matrix s.t. graph edges have dist 0
         dist_mat_system = [
-            modify_dist_mat(dist_dict[system][id], graph_dict[system][id])
-            for id in dist_dict[system]
+            modify_dist_mat(item[0], graph_dict[system][id])
+            for id, item in dist_dict[system].items()
         ]
+        max_dists_system = [item[1] for item in dist_dict[system].values()]
         # dist_mat_system = list(map(modify_dist_mat, dist_dict[system].values(), graph_dict[system].values()))
 
         if len(dist_mat_system) == 0:
@@ -399,25 +417,32 @@ def compute_persistence_diagrams_custom(plqy=False, plqy_full=False):
         diagrams = rips.fit_transform(dist_mat_system)
         # [crystal1, crystal2, ...] where crystaln = [h0_diag, h1_diag, h2_diag]
 
-        diagrams_filtered = []
-        diag_select = DiagramSelector(
-            use=True, 
-            point_type='finite', 
-            limit=MAX_DIST,     # + 1??
-        )
-        for diag_crystal in diagrams:
-            diagrams_filtered.append(diag_select.fit_transform(diag_crystal))
+        # multiply back into original distance scale, turn np.infs into MAX_DIST + 1
+        assert len(diagrams) == len(max_dists_system)
+        for crystal_diag, max_dist in zip(diagrams, max_dists_system):
+            for dim in range(DIMENSION_CNT):
+                crystal_diag[dim] *= max_dist
+                crystal_diag[dim][np.isinf(crystal_diag[dim])] = MAX_DIST + 1
+
+        # diagrams_filtered = []
+        # diag_select = DiagramSelector(
+        #     use=True, 
+        #     point_type='finite', 
+        #     limit=MAX_DIST,     # + 1??
+        # )
+        # for diag_crystal in diagrams:
+        #     diagrams_filtered.append(diag_select.fit_transform(diag_crystal))
 
         # match diagrams to crystal id (format with multiple dimensions)
         keys = list(dist_dict[system].keys())
         diagrams_with_id = {
-            keys[i]: diagrams_filtered[i]
-            for i in range(len(diagrams_filtered))
+            keys[i]: diagrams[i]
+            for i in range(len(diagrams))
         }
 
         # print diagram info
-        print(f"diagram cnt: {len(diagrams_filtered)}")
-        point_diagram_list = diagrams_filtered[0]
+        print(f"diagram cnt: {len(diagrams)}")
+        point_diagram_list = diagrams[0]
         print("Persistence Diagram Shape for H0:", point_diagram_list[0].shape)
         print("Points (Birth, Death) for H0:\n", point_diagram_list[0])
     
@@ -452,7 +477,7 @@ if __name__ == "__main__":
     DIAGRAM_GRAPH_DIRECTORY = f"{DATA_DIRECTORY}/diagrams_g"
     DIAGRAM_POINT_DIRECTORY = f"{DATA_DIRECTORY}/diagrams_p"
     DIAGRAM_CUSTOM_DIRECTORY = f"{DATA_DIRECTORY}/diagrams_c"
-    MAX_DIST = get_max_dist(DATA_DIRECTORY)
+    MAX_DIST = get_max_dist("data/pretrain")
 
     LABEL = 'ABS' if args.abs else 'PLQY' if args.plqy else 'PLQY-FULL' if args.plqy_full else 'PRETRAIN'
 

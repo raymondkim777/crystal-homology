@@ -40,7 +40,7 @@ PREDICT = [
     'direct_gap',
     'band_gap', 
     'efermi', 
-    'is_gap_direct',
+    # 'is_gap_direct',
 ]
 
 ABS_PREDICT = [
@@ -89,11 +89,11 @@ TASK_SPECS = {
         'out_dim': 1,
         'weight': 1, 
     },
-    'is_gap_direct': {
-        'head': 'binary', 
-        'out_dim': 1,
-        'weight': 1, 
-    },
+    # 'is_gap_direct': {
+    #     'head': 'binary', 
+    #     'out_dim': 1,
+    #     'weight': 1, 
+    # },
 }
 
 ABS_TASK_SPECS = {
@@ -157,7 +157,7 @@ def open_write_file(dir_path, file_name):
     return file_path
 
 
-def plot_nxgraph(graph: nx.DiGraph) -> None:
+def plot_nxgraph(graph: nx.DiGraph, save=None) -> None:
     # Draw the graph with labels
     pos = nx.spring_layout(graph)
 
@@ -167,7 +167,10 @@ def plot_nxgraph(graph: nx.DiGraph) -> None:
     nx.draw_networkx_edge_labels(graph, pos, edge_labels=formatted_labels)
     
     # Display the plot
-    plt.show()
+    if save is None:
+        plt.show()
+    else:
+        plt.savefig(save)
 
 
 def get_max_dist(data_dir):

@@ -25,7 +25,6 @@ code/data/plqy-full/cif-raw
 code/data/plqy-full/cod-plqy
 
 # DATA ANALYSIS FILES
-
 code/data/pretrain/bounds.json
 code/data/pretrain/bid_true.txt
 code/data/pretrain/stats
@@ -51,7 +50,6 @@ code/data/plqy-full/struct-issues
 code/data/plqy-full/unordered.txt
 
 # DATA PRODUCT FILES
-
 code/data/pretrain/structs
 code/data/pretrain/diagrams*
 code/data/pretrain/images*
@@ -76,7 +74,9 @@ code/data/plqy-full/images*
 code/data/plqy-full/landscapes*
 code/data/plqy-full/image_bounds*.pkl
 
+# MISC FILES
 code/error.log
+code/example*
 logs
 
 code/ignore*

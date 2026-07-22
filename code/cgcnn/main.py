@@ -87,7 +87,7 @@ parser.add_argument('--h-fea-len', default=128, type=int, metavar='N',
                     help='number of hidden features after pooling')
 parser.add_argument('--o-fea-len', default=64, type=int, metavar='N',
                     help='number of hidden features in multitask head')
-parser.add_argument('--n-conv', default=3, type=int, metavar='N',
+parser.add_argument('--n-conv', default=4, type=int, metavar='N',
                     help='number of conv layers')
 parser.add_argument('--n-h', default=1, type=int, metavar='N',
                     help='number of hidden layers after pooling')
@@ -170,7 +170,7 @@ def main():
     global args, best_errors
 
     if args.seed:
-        torch.manual_seed(42)
+        torch.manual_seed(args.seed_val)
         seed(args.seed_val)
     print("GPU Available", args.cuda)
 
@@ -256,6 +256,7 @@ def main():
                 stat_dict[prop]['auc_scores'] = AverageMeter()
             elif value['head'] == 'regression':
                 stat_dict[prop]['nrmse'] = AverageMeter()
+                stat_dict[prop]['mae'] = AverageMeter()
             else:
                 raise ValueError(f"[TRAIN STATS] Unknown task {value['head']}")
 
@@ -359,16 +360,17 @@ def main():
                     freeze_label = ''
 
                 in_filename = f"{prefix}" \
+                + (f'_attr' if args.attr else '') \
                 + f"_{args.atom_fea_len}" \
                 + f"_{args.n_conv}" \
                 + f"_{args.h_fea_len}" \
+                + f"_{args.o_fea_len}" \
                 + f"_{args.n_h}" \
                 + f"_{args.n_o}" \
-                + (f'_attr' if args.attr else '') \
+                + (f'_{args.vec_source[0]}_image' if args.vector == 'image' else '') \
+                + (f'_{args.vec_source[0]}_land' if args.vector == 'landscape' else '') \
+                + (f'_{args.vec_source[0]}_pers' if args.vector == 'perslay' else '') \
                 + (f'_{args.vec_fea_len}_{args.cat_fea_len}_{args.n_vec}' if args.vector != 'none' else '') \
-                + (f'_image{args.vec_source[0]}' if args.vector == 'image' else '') \
-                + (f'_land{args.vec_source[0]}' if args.vector == 'landscape' else '') \
-                + (f'_pers{args.vec_source[0]}' if args.vector == 'perslay' else '') \
                 + freeze_label \
                 + ".pth.tar"
             else:
@@ -556,16 +558,17 @@ def main():
             freeze_label = ''
 
         out_filename = f"{args.data_options[0][5:8]}" \
+            + (f'_attr' if args.attr else '') \
             + f"_{args.atom_fea_len}" \
             + f"_{args.n_conv}" \
             + f"_{args.h_fea_len}" \
+            + f"_{args.o_fea_len}" \
             + f"_{args.n_h}" \
             + f"_{args.n_o}" \
-            + (f'_attr' if args.attr else '') \
+            + (f'_{args.vec_source[0]}_image' if args.vector == 'image' else '') \
+            + (f'{args.vec_source[0]}_land' if args.vector == 'landscape' else '') \
+            + (f'{args.vec_source[0]}_pers' if args.vector == 'perslay' else '') \
             + (f'_{args.vec_fea_len}_{args.cat_fea_len}_{args.n_vec}' if args.vector != 'none' else '') \
-            + (f'_image{args.vec_source[0]}' if args.vector == 'image' else '') \
-            + (f'_land{args.vec_source[0]}' if args.vector == 'landscape' else '') \
-            + (f'_pers{args.vec_source[0]}' if args.vector == 'perslay' else '') \
             + freeze_label \
             + (f'_fold_{fold_it}' if CROSS_VAL else '') \
             + ".pth.tar"
@@ -809,8 +812,10 @@ def validate(
             stats[prop]['auc_scores'] = AverageMeter()
         elif value['head'] == 'regression':
             stats[prop]['sq_errors'] = []
+            stats[prop]['abs_errors'] = []
             stats[prop]['valid_cnts'] = []
             stats[prop]['nrmse'] = AverageMeter()   # final NRMSE for this epoch val
+            stats[prop]['mae'] = AverageMeter()   # final NRMSE for this epoch val
         else:
             raise ValueError(f"[TRAIN STATS] Unknown task {value['head']}")
     
@@ -910,8 +915,10 @@ def validate(
                 stats[prop]['loss'].update(loss_dict[prop]['loss'], int(mask[prop].sum().item()))
 
                 valid = mask[prop].bool().view(-1)
-                pred_valid = output[prop].detach().cpu()[valid]
-                targ_valid = targets[prop].detach().cpu()[valid]
+                pred_raw = output[prop].detach().cpu()
+                targ_raw = targets[prop].detach().cpu()
+                pred_valid = pred_raw[valid]
+                targ_valid = targ_raw[valid]
                 valid_cif_ids = [
                     cif_id
                     for cif_id, is_valid in zip(batch_cif_ids, valid)
@@ -929,32 +936,39 @@ def validate(
                     
                     if val or test:
                         # test_pred = torch.exp(output[prop].detach().cpu())
-                        test_pred = pred_valid
-                        test_target = targ_valid
-
+                        test_pred_logits = pred_raw
+                        test_target = targ_raw
+                        
                         # if binary classification
                         if TASK_SPECS[prop]['out_dim'] == 1:
-                            assert test_pred.ndim == 1
-                            test_pred = np.stack([1 - test_pred, test_pred], axis=1)
+                            logits = test_pred_logits.reshape(-1)
+                            pos_probs = torch.sigmoid(logits)
+
+                            test_probs = torch.stack([1 - pos_probs, pos_probs], dim=1)
+                            pred_label =  (
+                                pos_probs >= 0.5
+                            ).long()
                         else:
-                            assert test_pred.shape[1] == TASK_SPECS[prop]['out_dim']
-                        pred_label = np.argmax(test_pred, axis=1)
+                            test_probs = torch.softmax(
+                                test_pred_logits, dim=-1
+                            )
+                            pred_label = test_probs.argmax(dim=-1)
+
                         test_stats[prop]['test_preds'] += pred_label.tolist()
-                        test_stats[prop]['test_probs'] += test_pred.tolist()
+                        test_stats[prop]['test_probs'] += test_probs.tolist()
                         test_stats[prop]['test_targets'] += test_target.view(-1).tolist()
-                        test_stats[prop]['test_cif_ids'] += valid_cif_ids
+                        test_stats[prop]['test_cif_ids'] += batch_cif_ids
                         test_stats[prop]['test_masks'] += mask[prop].view(-1).tolist()
 
                 
                 elif task == 'regression':
                     test_pred = normalizers[prop].denorm(pred_valid)
-                    sq_err, valid_cnt = sum_sq_err(
-                        test_pred, 
-                        targ_valid,
-                    )
+                    sq_err, valid_cnt = sum_sq_err(test_pred, targ_valid)
+                    abs_err, _ = abs(test_pred, targ_valid)
                     # stats[prop]['sq_errors'].update(nrmse_error, int(mask[prop].sum().item()))
                     stats[prop]['sq_errors'].append(sq_err)
                     stats[prop]['valid_cnts'].append(valid_cnt)
+                    stats[prop]['abs_errors'].append(abs_err)
 
                     if val or test:
                         test_stats[prop]['test_preds'] += test_pred.view(-1).tolist()
@@ -1000,25 +1014,33 @@ def validate(
                         rmse_total = (sum(values['sq_errors']) / sum(values['valid_cnts'])) ** 0.5
                         nrmse_total = rmse_total / normalizers[prop].get_bound().item()
 
+                        mae = (values['abs_errors'][-1] / values['valid_cnts'][-1])
+                        mae_total = sum(values['abs_errors']) / sum(values['valid_cnts'])
+
                         print('Test: [{0}/{1}]\t'
                             'PROP {prop}\t'
                             'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                             'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                            'NRMSE {nrmse_errors:.3f} ({nrmse_avg:.3f})'.format(
+                            'NRMSE {nrmse_errors:.3f} ({nrmse_avg:.3f})\t'
+                            'MAE {mae_errors:.3f} ({mae_avg:.3f})'.format(
                             i, len(val_loader), batch_time=batch_time, prop=prop,
-                            loss=values['loss'], nrmse_errors=nrmse, nrmse_avg=nrmse_total)
+                            loss=values['loss'], nrmse_errors=nrmse, nrmse_avg=nrmse_total,
+                            mae_errors=mae, mae_avg=mae_total)
                         )
                     else:
                         raise ValueError(f"[STAT PRINT] Unrecognized task {TASK_SPECS[prop]['head']}")
     # finished validation testing    
                 
-    # calculate NRMSE metrics, update AvgMeter only once
+    # calculate NRMSE/MAE metrics, update AvgMeter only once
     for prop, value in TASK_SPECS.items():
         task = value['head']
         if task != 'regression':
             continue
         rmse = (sum(stats[prop]['sq_errors']) / sum(stats[prop]['valid_cnts'])) ** 0.5
         stats[prop]['nrmse'].update(rmse / normalizers[prop].get_bound().item())
+
+        mae = sum(stats[prop]['abs_errors']) / sum(stats[prop]['valid_cnts'])
+        stats[prop]['mae'].update(mae)
     
     if loss_v_epochs is not None:
         loss_v_epochs.append(losses.avg)
@@ -1065,9 +1087,11 @@ def validate(
                     'PROP {prop}\t'
                     'Time {batch_time.avg:.3f}\t'
                     'Loss {loss.avg:.4f}\t'
-                    'NRMSE {nrmse_errors.avg:.3f}'.format(
+                    'NRMSE {nrmse_errors.avg:.3f}\t'
+                    'MAE {mae_errors.avg:.3f}'.format(
                     i, len(val_loader), batch_time=batch_time, prop=prop,
-                    loss=values['loss'], nrmse_errors=values['nrmse'])
+                    loss=values['loss'], nrmse_errors=values['nrmse'],
+                    mae_errors=values['mae'])
                 )
             else:
                 raise ValueError(f"[STAT PRINT] Unrecognized task {TASK_SPECS[prop]['head']}")
@@ -1165,9 +1189,9 @@ def save_stats_as_csv(
     # ! saving stats for each prop
     with open(f"out_{args.id}/{'test' if test else 'val'}_stats_{args.id}.csv", 'w', newline='', encoding='utf-8') as file_stats:
         writer = csv.writer(file_stats)
-        header = ['head', 'task', 'loss', 'nrmse', 'accuracy', 'precision', 'recall', 'f1', 'auroc']
+        header = ['head', 'task', 'loss', 'nrmse', 'mae', 'accuracy', 'precision', 'recall', 'f1', 'auroc']
         writer.writerow(header)
-        writer.writerow(['total', total_error, total_loss, '', '', '', '', '', ''])
+        writer.writerow(['total', total_error, total_loss, '', '', '', '', '', '', ''])
                 
         for prop, values in stats_dict.items():
             if TASK_SPECS[prop]['head'] in ['binary', 'multiclass']:
@@ -1175,6 +1199,7 @@ def save_stats_as_csv(
                     prop, 
                     TASK_SPECS[prop]['head'], 
                     values['loss'].avg, 
+                    '', 
                     '', 
                     values['accuracies'].avg, 
                     values['precisions'].avg, 
@@ -1188,6 +1213,7 @@ def save_stats_as_csv(
                     TASK_SPECS[prop]['head'], 
                     values['loss'].avg, 
                     values['nrmse'].avg, 
+                    values['mae'].avg,
                     '', 
                     '', 
                     '', 
@@ -1298,6 +1324,20 @@ class NormalizerProp(object):
         self.bound = state_dict['bound']
 
         
+def abs(prediction, target):
+    """
+    Computes the mean absolute error between prediction and target
+
+    Parameters
+    ----------
+
+    prediction: torch.Tensor (N, 1)
+    target: torch.Tensor (N, 1)
+    """
+    # return torch.mean(torch.abs(target - prediction))
+    diff = torch.abs(target - prediction)
+    return diff.sum().item(), diff.numel()
+
 
 def sum_sq_err(prediction, target):
     """
