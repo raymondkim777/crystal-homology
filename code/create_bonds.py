@@ -10,7 +10,7 @@ from pymatgen.io.cif import CifParser
 from pymatgen.analysis.local_env import CrystalNN
 from pymatgen.core.periodic_table import Element
 from pymatgen.core.composition import Composition
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from find_hch import make_structure_ordered
 from utils import CRYSTAL_SYSTEMS, get_num_cpus, open_write_file
@@ -94,6 +94,9 @@ def get_structures_from_cif_plqy_full(filepath: str) -> list:
 
 
 def process_one_cif(args):
+    # nx_multigraph: multidigraph  -->  CGCNN input
+    # nx_graph: directed graph (not multi)  -->  PH input
+
     # accept one tuple for multiprocessing
     system, filename, structure, plqy, plqy_full = args
 
@@ -174,7 +177,8 @@ def process_one_cif(args):
     # remove to_jimage attribute
     for u, v, data in nx_graph.edges(data=True):
         data.pop("to_jimage", None)
-    
+
+    # nx_graph = nx_graph.to_undirected()
     crystal_id = filename[:-4]
 
     return crystal_id, structure, nx_multigraph, nx_graph
@@ -231,9 +235,18 @@ def construct_crystalnn_graph(plqy=False, plqy_full=False) -> None:
             initializer=init_crystalnn, 
             initargs=(crystalnn, crystalnn_large),
         ) as executor:
-            results = executor.map(process_one_cif, tasks, chunksize=8)
-
-            for crystal_id, structure, nx_multigraph, nx_graph in tqdm(results, total=len(tasks)):
+            futures = [
+                executor.submit(process_one_cif, task)
+                for task in tasks
+            ]
+            for future in tqdm(
+                as_completed(futures),
+                total=len(futures),
+                desc=f'{system}: ',
+            ):
+                crystal_id, structure, nx_multigraph, nx_graph = future.result()
+            # results = executor.map(process_one_cif, tasks, chunksize=8)
+            # for crystal_id, structure, nx_multigraph, nx_graph in tqdm(results, total=len(tasks)):
                 system_structures[crystal_id] = structure
                 system_multigraphs[crystal_id] = nx_multigraph
                 system_graphs[crystal_id] = nx_graph

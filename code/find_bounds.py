@@ -3,6 +3,7 @@ import pickle
 import json
 import csv
 import numpy as np
+from collections import Counter
 
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -47,14 +48,24 @@ def find_graph_bounds():
     graph_dict = unpack_all_graphs(undirected=False)
 
     # computing bounds
+    neighbor_cnt = Counter()
     max_num_nbr = 0
+    avg_num_nbr = 0
+    total_atom_cnt = 0
     max_bond_dist = 0
+    total_edge_cnt = 0
 
     print("Computing bounds...")
     for key, graph in tqdm(graph_dict.items()):
-        # max_degree = max(d for _, d in graph.out_degree())  # for digraphss
+        # max_degree = max(d for _, d in graph.out_degree())  # for digraphs
         max_degree = max(d for _, d in graph.degree())
         max_num_nbr = max(max_num_nbr, max_degree)
+        for _, d in graph.degree():     # loops through every node
+            neighbor_cnt[d] += 1
+            avg_num_nbr += d
+            total_atom_cnt += 1
+
+        total_edge_cnt += len(graph.edges())
 
         weights = [0] + [data['weight'] for _, _, data in graph.edges(data=True)]
         if len(weights) == 0:
@@ -62,9 +73,14 @@ def find_graph_bounds():
             pass
         max_dist = max(weights)
         max_bond_dist = max(max_bond_dist, max_dist)
-
+    
     print("Maximum Neighbor Cnt:", max_num_nbr)
     print("Maximum Bond Distance:", max_bond_dist)
+    print("Average Nbr Cnt:", f"{avg_num_nbr / total_atom_cnt:.3f}")
+    for nbr_cnt, cnt in sorted(neighbor_cnt.items()):
+        print(f"Nbr #{nbr_cnt}: {cnt}")
+    print("Average Node Cnt:", f"{total_atom_cnt / len(graph_dict):.3f}")
+    print("Average Edge Cnt:", f"{total_edge_cnt / len(graph_dict):.3f}")
 
     # save values
     val_json = {

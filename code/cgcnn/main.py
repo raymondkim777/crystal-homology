@@ -105,7 +105,7 @@ parser.add_argument('--debug', action='store_true',
                     help='prints debug messages')
 parser.add_argument('--seed', action='store_true',
                     help='sets torch seed to 42')
-parser.add_argument('--seed-val', default=42, type=float,
+parser.add_argument('--seed-val', default=42, type=int,
                     help='value of torch seed')
 parser.add_argument('--delete', action='store_true',
                     help='deletes generated training files before training')
@@ -172,6 +172,16 @@ def main():
     if args.seed:
         torch.manual_seed(args.seed_val)
         seed(args.seed_val)
+        np.random.seed(args.seed_val)
+
+        # if torch.cuda.is_available():
+        #     torch.cuda.manual_seed(args.seed_val)
+        #     torch.cuda.manual_seed_all(args.seed_val)
+
+        # torch.backends.cudnn.benchmark = False
+        # torch.backends.cudnn.deterministic = True
+        # torch.use_deterministic_algorithms(True)
+        
     print("GPU Available", args.cuda)
 
     if args.delete and args.resume == '':
@@ -566,8 +576,8 @@ def main():
             + f"_{args.n_h}" \
             + f"_{args.n_o}" \
             + (f'_{args.vec_source[0]}_image' if args.vector == 'image' else '') \
-            + (f'{args.vec_source[0]}_land' if args.vector == 'landscape' else '') \
-            + (f'{args.vec_source[0]}_pers' if args.vector == 'perslay' else '') \
+            + (f'_{args.vec_source[0]}_land' if args.vector == 'landscape' else '') \
+            + (f'_{args.vec_source[0]}_pers' if args.vector == 'perslay' else '') \
             + (f'_{args.vec_fea_len}_{args.cat_fea_len}_{args.n_vec}' if args.vector != 'none' else '') \
             + freeze_label \
             + (f'_fold_{fold_it}' if CROSS_VAL else '') \

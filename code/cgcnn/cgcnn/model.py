@@ -95,7 +95,7 @@ class VecEmbedder(nn.Module):
             nn.LayerNorm(self.vector_len * dims),               # normalize
             nn.Linear(self.vector_len * dims, vec_fea_len),     # reduce to hidden dim
             nn.GELU(),                                          # activation
-            nn.Dropout(0.1),                                    # dropout
+            nn.Dropout(0.3),                                    # dropout
         )
         # linear processing (modular, default 0)
         self.vec_fcs = nn.ModuleList([nn.Linear(vec_fea_len, vec_fea_len) for _ in range(n_vec)])
@@ -120,11 +120,8 @@ class VecEmbedder(nn.Module):
                 )
                 for i in range(dims)
             ])
-            def perm_op(tensor, dim=1):
-                tensor = torch.sum(tensor, dim=dim)
-                return F.normalize(tensor, p=2, dim=dim)
             
-            self.perm_op = perm_op
+            self.perm_op = torch.sum
             self.rho = tpm.FlattenRho()
 
             self.perslays = nn.ModuleList([
@@ -168,6 +165,8 @@ class CrystalGraphEncoder(nn.Module):
         self.vector = vector
         if self.vector == 'none':
             self.vector_len = 0
+        # else:
+        #     self.vector_len = 400
         elif self.vector == 'image':
             self.vector_len = 400
         elif self.vector == 'landscape':

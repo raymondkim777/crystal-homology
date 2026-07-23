@@ -81,6 +81,7 @@ def compute_persistence_diagrams_graph() -> None:
     flagser = FlagserPersistence(
         homology_dimensions=tuple(range(DIMENSION_CNT)),
         directed=True,
+        # directed=False,
         filtration='max', 
         coeff=2, 
         max_edge_weight=MAX_DIST,
@@ -388,7 +389,7 @@ def compute_persistence_diagrams_custom(plqy=False, plqy_full=False):
 
     rips = RipsPersistence(
         homology_dimensions=tuple(range(DIMENSION_CNT)),
-        threshold=0.5, 
+        threshold=0.6, 
         input_type='full distance matrix', 
         n_jobs=n_workers,
     )
