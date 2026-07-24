@@ -564,17 +564,20 @@ class GraphData(Dataset):
         
         atom_fea, nbr_fea, nbr_fea_idx = self._get_atom_and_nbr_fea(cif_id)
 
-        # ! vectorization & normalization (optional)
-        if self.vector == 'none':
-            vectorizations = np.array([])
-            diagrams = [torch.tensor([]) for _ in range(self.dim_cnt)]
-        elif self.vector in ['image', 'landscape']:
-            vectorizations = np.hstack([self.vector_dict[f'mp-{cif_id}'][dim] for dim in range(self.dim_cnt)])
-            diagrams = [torch.tensor([]) for _ in range(self.dim_cnt)]
-        elif self.vector == 'perslay':
-            # ! if perslay, then we pass in diagrams (each should be tensor)
-            vectorizations = np.array([])
-            diagrams = [torch.tensor(self.vector_dict[f'mp-{cif_id}'][dim]) for dim in range(self.dim_cnt)]  # list of np.ndarrays
+        vectorizations = np.array([])
+        diagrams = [torch.tensor([]) for _ in range(self.dim_cnt)]
+
+        # # ! vectorization & normalization (optional)
+        # if self.vector == 'none':
+        #     vectorizations = np.array([])
+        #     diagrams = [torch.tensor([]) for _ in range(self.dim_cnt)]
+        # elif self.vector in ['image', 'landscape']:
+        #     vectorizations = np.hstack([self.vector_dict[f'mp-{cif_id}'][dim] for dim in range(self.dim_cnt)])
+        #     diagrams = [torch.tensor([]) for _ in range(self.dim_cnt)]
+        # elif self.vector == 'perslay':
+        #     # ! if perslay, then we pass in diagrams (each should be tensor)
+        #     vectorizations = np.array([])
+        #     diagrams = [torch.tensor(self.vector_dict[f'mp-{cif_id}'][dim]) for dim in range(self.dim_cnt)]  # list of np.ndarrays
 
         
         # atom_fea = torch.Tensor(atom_fea)
@@ -583,105 +586,6 @@ class GraphData(Dataset):
         # target = torch.Tensor([float(target)])
 
         vectorizations = torch.tensor(vectorizations)
-        return (atom_fea, nbr_fea, nbr_fea_idx), vectorizations, diagrams, targets, mask, cif_id
-
-
-        ########################
-        # graph_dict format:
-        # {
-        #     graph: <graph (undirected)>, 
-        #     system: <system>,
-        #     ... (additional properties to be added)
-        # }
-        ########################
-
-        # atom features (node features)
-        if type(graph.nodes[0]['species']) == int:
-            feature_list = [
-                self.ari.get_atom_fea(graph.nodes[node]['species']) # species number
-                for node in graph.nodes
-            ]
-        # fractional atom site --> add relative amounts of each atom in list
-        elif type(graph.nodes[0]['species']) == dict:
-            feature_list = [
-                np.sum((
-                    sp_w * self.ari.get_atom_fea(sp_n) 
-                    for sp_n, sp_w in graph.nodes[node]['species'].items()
-                ), axis=0)
-                    # self.ari.get_atom_fea(graph.nodes[node]['species']) # species number
-                    # for node in graph.nodes
-                for node in graph.nodes
-            ]
-        else:
-            raise TypeError(f"[DATA Atom Feature] Incorrect node species data type")
-
-        # add fractional coordinates as periodic coordinates
-        periodic_coords = [
-            np.hstack([
-                [np.cos(2 * np.pi * val), np.sin(2 * np.pi * val)]
-                for val in graph.nodes[node]['coords']
-            ])
-            for node in graph.nodes
-        ]
-        atom_fea = np.hstack((feature_list, periodic_coords))
-
-        # neighbor features (edge attributes)
-        nbr_fea_idx, nbr_fea = [], []
-        adj_dict = nx.to_dict_of_dicts(graph)
-        for u in adj_dict.keys():
-            nbr_list = []
-            dist = []
-            for v in adj_dict[u].keys():
-                for k in adj_dict[u][v].keys():
-                    # u v k --> node1, node2, key
-                    nbr_list.append(v)
-                    dist.append(adj_dict[u][v][k]['weight'])
-            nbr_fea_idx.append(nbr_list + [0] * (self.max_num_nbr - len(nbr_list)))
-            nbr_fea.append(dist + [0] * (self.max_num_nbr - len(nbr_list)))
-        
-        nbr_fea_idx, nbr_fea = np.array(nbr_fea_idx), np.array(nbr_fea)
-        nbr_fea = self.gdf.expand(nbr_fea)
-
-        # increase nbr_fea_len by 3 to hold cartesian displacement vectors
-        padding = ((0, 0), (0, 0), (0, 3))
-        nbr_fea = np.pad(nbr_fea, pad_width=padding, mode='constant', constant_values=0)
-
-        # add to_jimage as cartesian displacement vector
-        for u in adj_dict.keys():
-            cart_vectors = []
-            for v in adj_dict[u].keys():
-                for k in adj_dict[u][v].keys():
-                    to_jimage = np.asarray(adj_dict[u][v][k]['to_jimage'])
-                    coord_start = graph.nodes[u]['coords']
-                    coord_end = graph.nodes[v]['coords']
-                    matrix = graph_dict['lattice_matrix']
-
-                    cart_vector = self.__cart_vector(coord_start, coord_end, to_jimage, matrix)
-
-                    cart_vectors.append(cart_vector)
-            cart_vectors = np.asarray(cart_vectors)
-            nbr_fea[u, :cart_vectors.shape[0], -3:] = cart_vectors
-
-        # ! vectorization & normalization (optional)
-        if self.vector == 'none':
-            vectorizations = np.array([])
-            diagrams = [torch.Tensor([]) for _ in range(self.dim_cnt)]
-        elif self.vector in ['image', 'landscape']:
-            vectorizations = np.hstack([self.vector_dict[f'mp-{cif_id}'][dim] for dim in range(self.dim_cnt)])
-            # # normalize vectors (optional, ineffective)
-            # if np.sum(vectorizations) != 0:
-            #     vec_norm = np.linalg.norm(vectorizations)
-            #     vectorizations = vectorizations / vec_norm
-            diagrams = [torch.Tensor([]) for _ in range(self.dim_cnt)]
-        elif self.vector == 'perslay':
-            # ! if perslay, then we pass in diagrams (each should be tensor)
-            vectorizations = np.array([])
-            diagrams = [torch.Tensor(self.vector_dict[f'mp-{cif_id}'][dim]) for dim in range(self.dim_cnt)]  # list of np.ndarrays
-
-        atom_fea = torch.Tensor(atom_fea)
-        nbr_fea = torch.Tensor(nbr_fea)
-        nbr_fea_idx = torch.LongTensor(nbr_fea_idx)
-        vectorizations = torch.Tensor(vectorizations)
         return (atom_fea, nbr_fea, nbr_fea_idx), vectorizations, diagrams, targets, mask, cif_id
     
 

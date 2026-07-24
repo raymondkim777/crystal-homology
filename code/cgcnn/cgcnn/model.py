@@ -234,16 +234,36 @@ class CrystalGraphEncoder(nn.Module):
         return torch.cat(summed_fea, dim=0)
 
 
+# class MLPHead(nn.Module):
+#     '''
+#     Small MLP prediction head for individual crystal properties. 
+#     Can modify hidden/output dimension, as well as layer depth. 
+#     '''
+#     def __init__(self, hidden_dim, output_dim, layer_cnt=1, classification=False):
+#         super().__init__()
+#         layers = []
+#         if classification:
+#             layers.append(nn.Dropout())
+#         for _ in range(layer_cnt):
+#             layers.append(nn.Linear(hidden_dim, hidden_dim))
+#             layers.append(nn.Softplus())
+#         layers.append(nn.Linear(hidden_dim, output_dim))
+#         self.model = nn.Sequential(*layers)
+
+#     def forward(self, input):
+#         return self.model(input)
+
 class MLPHead(nn.Module):
     '''
     Small MLP prediction head for individual crystal properties. 
     Can modify hidden/output dimension, as well as layer depth. 
     '''
-    def __init__(self, hidden_dim, output_dim, layer_cnt=1, classification=False):
+    def __init__(self, input_dim=128, hidden_dim=64, output_dim=1, layer_cnt=1, classification=False):
         super().__init__()
         layers = []
         if classification:
             layers.append(nn.Dropout())
+        layers.append(nn.Linear(input_dim, hidden_dim))
         for _ in range(layer_cnt):
             layers.append(nn.Linear(hidden_dim, hidden_dim))
             layers.append(nn.Softplus())
@@ -302,8 +322,8 @@ class CrystalGraphConvNet(nn.Module):
         self.heads = nn.ModuleDict()
         for task, item in task_specs.items():
             self.heads[task] = MLPHead(
-                h_fea_len, 
-                item['out_dim'], 
+                input_dim=h_fea_len, 
+                output_dim=item['out_dim'], 
                 layer_cnt=n_o,
                 classification=item['head'] in ['multiclass', 'binary'],
             )

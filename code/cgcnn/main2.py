@@ -18,6 +18,7 @@ from torch.utils.data import Subset
 from torch.autograd import Variable
 from torch.optim.lr_scheduler import MultiStepLR, ReduceLROnPlateau
 
+from time import perf_counter
 from cgcnn.loss import MultiTaskLoss
 from cgcnn.data import GraphData
 from cgcnn.data import collate_pool, get_train_val_test_loader, \
@@ -98,7 +99,7 @@ parser.add_argument('--debug', action='store_true',
                     help='prints debug messages')
 parser.add_argument('--seed', action='store_true',
                     help='sets torch seed to 42')
-parser.add_argument('--seed-val', default=42, type=float,
+parser.add_argument('--seed-val', default=42, type=int,
                     help='seed value, default 42')
 # parser.add_argument('--num-classes', default=2, type=int)
 parser.add_argument('--delete', action='store_true',
@@ -155,6 +156,8 @@ def main():
     if args.seed:
         torch.manual_seed(args.seed_val)
         seed(args.seed_val)
+        np.random.seed(args.seed_val)
+    
     print("GPU Available", args.cuda)
 
     if args.delete and args.resume == '':
@@ -268,8 +271,16 @@ def main():
             total_stats[prop]['auc_scores'] = AverageMeter()
         elif value['head'] == 'regression':
             total_stats[prop]['nrmse_errors'] = AverageMeter()
+            total_stats[prop]['mae_errors'] = AverageMeter()
         else:
             raise ValueError(f"[TRAIN STATS] Unknown task {value['head']}")
+
+    # ! time logging for all folds
+    total_times = AverageMeter()
+    epoch_0_batch_times = AverageMeter()
+    epoch_0_times = AverageMeter()
+    epoch_n_batch_times = AverageMeter()
+    epoch_n_times = AverageMeter()
 
     # k-fold cross validation
     fold_num = args.fold if CROSS_VAL else 1
@@ -423,13 +434,24 @@ def main():
         else:
             scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10)
 
+        t_start_train = perf_counter()
         if args.debug:
             print("Starting training epochs")
         for epoch in tqdm(range(args.start_epoch, args.epochs), desc='Epochs: ', disable=args.debug):
+            t_start_epoch = perf_counter()
+            
             # train for one epoch
             if args.debug:
                 print(f"Training epoch {epoch}")
-            train(train_loader, model, criterion, optimizer, epoch, normalizers)
+            avg_batch_time = train(train_loader, model, criterion, optimizer, epoch, normalizers)
+
+            t_end_train = perf_counter()
+            if epoch == 0:
+                epoch_0_times.update(t_end_train - t_start_epoch)
+                epoch_0_batch_times.update(avg_batch_time)
+            else:
+                epoch_n_times.update(t_end_train - t_start_epoch)
+                epoch_n_batch_times.update(avg_batch_time)
 
             # evaluate on validation set
             if args.debug:
@@ -488,6 +510,9 @@ def main():
         for prop, value in TASK_SPECS.items():
             for stat, avg_meter in total_stats[prop].items():
                 avg_meter.update(stat_dict[prop][stat].avg)
+
+        t_end_train = perf_counter()
+        total_times.update(t_end_train - t_start_train)
     
     # ! save results
     save_stats_as_csv(
@@ -495,6 +520,13 @@ def main():
         total_loss=total_losses.avg, 
         total_error=total_errors.avg,
         stats_dict=total_stats
+    )
+    save_times(
+        total_t=total_times.avg,
+        epoch_0_batch_avg_t=epoch_0_batch_times.avg,
+        epoch_0_t=epoch_0_times.avg, 
+        epoch_batch_avg_t=epoch_n_batch_times.avg, 
+        epoch_avg_t=epoch_n_times.avg,
     )
 
 
@@ -514,9 +546,9 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers):
             stats[prop]['fscores'] = AverageMeter()
             stats[prop]['auc_scores'] = AverageMeter()
         elif value['head'] == 'regression':
-            # stats[prop]['nrmse_errors'] = AverageMeter()
-            stats[prop]['sq_errors'] = []
-            stats[prop]['valid_cnts'] = []
+            stats[prop]['nrmse_errors'] = AverageMeter()
+            # stats[prop]['sq_errors'] = []
+            # stats[prop]['valid_cnts'] = []
         else:
             raise ValueError(f"[TRAIN STATS] Unknown task {value['head']}")
 
@@ -528,6 +560,9 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers):
         set_frozen_encoder_parts_to_eval(model)
 
     end = time.time()
+    batch_time_start = perf_counter()
+    epoch_batch_times = AverageMeter()
+
     # for i, (input, target, _) in enumerate(train_loader):
     for i, (
         (atom_fea, nbr_fea, nbr_fea_idx, crys_idx), 
@@ -595,18 +630,18 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers):
                 stats[prop]['fscores'].update(fscore, int(mask[prop].sum().item()))
                 stats[prop]['auc_scores'].update(auc_score, int(mask[prop].sum().item()))
             elif task == 'regression':
-                # nrmse_error = nrmse(
-                #     normalizers[prop].denorm(pred_valid), 
-                #     targ_valid,
-                #     normalizers[prop]
-                # )
-                sq_err, valid_cnt = sum_sq_err(
+                nrmse_error = nrmse_func(
                     normalizers[prop].denorm(pred_valid), 
                     targ_valid,
+                    normalizers[prop]
                 )
-                # stats[prop]['nrmse_errors'].update(nrmse_error, int(mask[prop].sum().item()))
-                stats[prop]['sq_errors'].append(sq_err)
-                stats[prop]['valid_cnts'].append(valid_cnt)
+                # sq_err, valid_cnt = sum_sq_err(
+                #     normalizers[prop].denorm(pred_valid), 
+                #     targ_valid,
+                # )
+                stats[prop]['nrmse_errors'].update(nrmse_error, int(mask[prop].sum().item()))
+                # stats[prop]['sq_errors'].append(sq_err)
+                # stats[prop]['valid_cnts'].append(valid_cnt)
             else:
                 raise ValueError(f"[STAT SAVE] Unknown task {value['head']}")
 
@@ -618,6 +653,8 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers):
         # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
+        batch_time_end = perf_counter()
+        epoch_batch_times.update(batch_time_end - batch_time_start)
 
         # ! print stats for each property
         if args.debug and i % args.print_freq == 0:
@@ -641,26 +678,40 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers):
                         f1=values['fscores'],auc=values['auc_scores'])
                     )
                 elif TASK_SPECS[prop]['head'] == 'regression':
-                    # compute NRMSE for this batch (only for printing)
-                    rmse = (values['sq_errors'][-1] / values['valid_cnts'][-1]) ** 0.5
-                    nrmse = rmse / normalizers[prop].get_bound().item()
+                    # # compute NRMSE for this batch (only for printing)
+                    # rmse = (values['sq_errors'][-1] / values['valid_cnts'][-1]) ** 0.5
+                    # nrmse = rmse / normalizers[prop].get_bound().item()
 
-                    rmse_total = (sum(values['sq_errors']) / sum(values['valid_cnts'])) ** 0.5
-                    nrmse_total = rmse_total / normalizers[prop].get_bound().item()
+                    # rmse_total = (sum(values['sq_errors']) / sum(values['valid_cnts'])) ** 0.5
+                    # nrmse_total = rmse_total / normalizers[prop].get_bound().item()
 
                     print('Epoch: [{0}][{1}/{2}]\t'
                         'PROP {prop}\t'
                         'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                         'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
                         'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                        'NRMSE {nrmse_errors:.3f} ({nrmse_avg:.3f})'.format(
+                        'NRMSE {nrmse_errors.val:.3f} ({nrmse_errors.avg:.3f})'.format(
                         epoch, i, len(train_loader), batch_time=batch_time, prop=prop,
                         data_time=data_time, loss=values['loss'], 
-                        nrmse_errors=nrmse, nrmse_avg=nrmse_total)
+                        nrmse_errors=values['nrmse_errors'])
                     )
+
+                    # print('Epoch: [{0}][{1}/{2}]\t'
+                    #     'PROP {prop}\t'
+                    #     'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                    #     'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
+                    #     'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                    #     'NRMSE {nrmse_errors:.3f} ({nrmse_avg:.3f})'.format(
+                    #     epoch, i, len(train_loader), batch_time=batch_time, prop=prop,
+                    #     data_time=data_time, loss=values['loss'], 
+                    #     nrmse_errors=nrmse, nrmse_avg=nrmse_total)
+                    # )
                 else:
                     raise ValueError(f"[STAT PRINT] Unrecognized task {TASK_SPECS[prop]['head']}")
-            
+        
+        batch_time_start = perf_counter()
+    return epoch_batch_times.avg
+
 
 def validate(val_loader, model, criterion, normalizers, best_epoch=0, test=False):
     batch_time = AverageMeter()
@@ -677,9 +728,10 @@ def validate(val_loader, model, criterion, normalizers, best_epoch=0, test=False
             stats[prop]['fscores'] = AverageMeter()
             stats[prop]['auc_scores'] = AverageMeter()
         elif value['head'] == 'regression':
-            stats[prop]['sq_errors'] = []
-            stats[prop]['valid_cnts'] = []
+            # stats[prop]['sq_errors'] = []
+            # stats[prop]['valid_cnts'] = []
             stats[prop]['nrmse_errors'] = AverageMeter()
+            stats[prop]['mae_errors'] = AverageMeter()
         else:
             raise ValueError(f"[TRAIN STATS] Unknown task {value['head']}")
     
@@ -797,19 +849,24 @@ def validate(val_loader, model, criterion, normalizers, best_epoch=0, test=False
 
             
             elif task == 'regression':
-                # nrmse_error = nrmse(
-                #     normalizers[prop].denorm(pred_valid), 
-                #     targ_valid,
-                #     normalizers[prop]
-                # )
-                test_pred = normalizers[prop].denorm(pred_valid)
-                sq_err, valid_cnt = sum_sq_err(
-                    test_pred, 
+                nrmse_error = nrmse_func(
+                    normalizers[prop].denorm(pred_valid), 
+                    targ_valid,
+                    normalizers[prop]
+                )
+                mae_error = mae(
+                    normalizers[prop].denorm(pred_valid), 
                     targ_valid,
                 )
-                # stats[prop]['nrmse_errors'].update(nrmse_error, int(mask[prop].sum().item()))
-                stats[prop]['sq_errors'].append(sq_err)
-                stats[prop]['valid_cnts'].append(valid_cnt)
+                test_pred = normalizers[prop].denorm(pred_valid)
+                # sq_err, valid_cnt = sum_sq_err(
+                #     test_pred, 
+                #     targ_valid,
+                # )
+                stats[prop]['nrmse_errors'].update(nrmse_error, int(mask[prop].sum().item()))
+                stats[prop]['mae_errors'].update(mae_error, int(mask[prop].sum().item()))
+                # stats[prop]['sq_errors'].append(sq_err)
+                # stats[prop]['valid_cnts'].append(valid_cnt)
 
                 if test:
                     test_pred = normalizers[prop].denorm(output[prop].detach().cpu())
@@ -847,33 +904,42 @@ def validate(val_loader, model, criterion, normalizers, best_epoch=0, test=False
                         f1=values['fscores'],auc=values['auc_scores'])
                     )
                 elif TASK_SPECS[prop]['head'] == 'regression':
-                    # compute NRMSE for this batch (only for printing)
-                    rmse = (values['sq_errors'][-1] / values['valid_cnts'][-1]) ** 0.5
-                    nrmse = rmse / normalizers[prop].get_bound().item()
+                    # # compute NRMSE for this batch (only for printing)
+                    # rmse = (values['sq_errors'][-1] / values['valid_cnts'][-1]) ** 0.5
+                    # nrmse = rmse / normalizers[prop].get_bound().item()
 
-                    rmse_total = (sum(values['sq_errors']) / sum(values['valid_cnts'])) ** 0.5
-                    nrmse_total = rmse_total / normalizers[prop].get_bound().item()
+                    # rmse_total = (sum(values['sq_errors']) / sum(values['valid_cnts'])) ** 0.5
+                    # nrmse_total = rmse_total / normalizers[prop].get_bound().item()
 
                     print('Test: [{0}/{1}]\t'
                         'PROP {prop}\t'
                         'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                         'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                        'NRMSE {nrmse_errors:.3f} ({nrmse_avg:.3f})'.format(
+                        'NRMSE {nrmse_errors.val:.3f} ({nrmse_errors.avg:.3f})'.format(
                         i, len(val_loader), batch_time=batch_time, prop=prop,
-                        loss=values['loss'], nrmse_errors=nrmse, nrmse_avg=nrmse_total)
+                        loss=values['loss'], nrmse_errors=values['nrmse_errors'])
                     )
+                    
+                    # print('Test: [{0}/{1}]\t'
+                    #     'PROP {prop}\t'
+                    #     'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                    #     'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                    #     'NRMSE {nrmse_errors:.3f} ({nrmse_avg:.3f})'.format(
+                    #     i, len(val_loader), batch_time=batch_time, prop=prop,
+                    #     loss=values['loss'], nrmse_errors=nrmse, nrmse_avg=nrmse_total)
+                    # )
                 else:
                     raise ValueError(f"[STAT PRINT] Unrecognized task {TASK_SPECS[prop]['head']}")
     
     # finished validation testing
                 
-    # calculate NRMSE metrics, update AvgMeter only once
-    for prop, value in TASK_SPECS.items():
-        task = value['head']
-        if task != 'regression':
-            continue
-        rmse = (sum(stats[prop]['sq_errors']) / sum(stats[prop]['valid_cnts'])) ** 0.5
-        stats[prop]['nrmse_errors'].update(rmse / normalizers[prop].get_bound().item())
+    # # calculate NRMSE metrics, update AvgMeter only once
+    # for prop, value in TASK_SPECS.items():
+    #     task = value['head']
+    #     if task != 'regression':
+    #         continue
+    #     rmse = (sum(stats[prop]['sq_errors']) / sum(stats[prop]['valid_cnts'])) ** 0.5
+    #     stats[prop]['nrmse_errors'].update(rmse / normalizers[prop].get_bound().item())
 
     if args.debug:
         print('Final Test\tLoss {loss.val:.4f} ({loss.avg:.4f})'.format(loss=losses))
@@ -977,6 +1043,32 @@ def open_write_file(dir_path, file_name):
     return file_path
 
 
+def time_to_str(time):
+    if time < 60:
+        return f"{time:.4f}s"
+    return f"{time / 3600:02.0f}:{time / 60:02.0f}:{time % 60:05.2f}"
+
+
+def save_times(
+        total_t,
+        epoch_0_batch_avg_t,
+        epoch_0_t, 
+        epoch_batch_avg_t, 
+        epoch_avg_t
+):
+    open_write_file(f'out_{args.id}', '')
+    with open(f'out_{args.id}/times_{args.id}.txt', 'w') as f:
+        f.write(f'Total Time: {time_to_str(total_t)}\n')
+        f.write('\nEpoch 0\n')
+        f.write(f'Avg Batch Time: {time_to_str(epoch_0_batch_avg_t)}\n')
+        f.write(f'Total Epoch Time: {time_to_str(epoch_0_t)}\n')
+        f.write('\nOther Epochs\n')
+        f.write(f'Avg Batch Time: {time_to_str(epoch_batch_avg_t)}\n')
+        f.write(f'Avg Total Epoch Time: {time_to_str(epoch_avg_t)}\n')
+
+
+
+
 def save_stats_as_csv(
         best_epochs: list, 
         total_loss, 
@@ -998,9 +1090,9 @@ def save_stats_as_csv(
     # ! saving stats for each prop
     with open(f'out_{args.id}/test_stats_{args.id}.csv', 'w', newline='', encoding='utf-8') as file_stats:
         writer = csv.writer(file_stats)
-        header = ['head', 'task', 'loss', 'nrmse', 'accuracy', 'precision', 'recall', 'f1', 'auroc']
+        header = ['head', 'task', 'loss', 'nrmse', 'mae', 'accuracy', 'precision', 'recall', 'f1', 'auroc']
         writer.writerow(header)
-        writer.writerow(['total', total_error, total_loss, '', '', '', '', '', ''])
+        writer.writerow(['total', total_error, total_loss, '', '', '', '', '', '', ''])
                 
         for prop, values in stats_dict.items():
             if TASK_SPECS[prop]['head'] in ['binary', 'multiclass']:
@@ -1008,6 +1100,7 @@ def save_stats_as_csv(
                     prop, 
                     TASK_SPECS[prop]['head'], 
                     values['loss'].avg, 
+                    '', 
                     '', 
                     values['accuracies'].avg, 
                     values['precisions'].avg, 
@@ -1021,6 +1114,7 @@ def save_stats_as_csv(
                     TASK_SPECS[prop]['head'], 
                     values['loss'].avg, 
                     values['nrmse_errors'].avg, 
+                    values['mae_errors'].avg,
                     '', 
                     '', 
                     '', 
@@ -1071,20 +1165,32 @@ class NormalizerProp(object):
         self.std = state_dict['std']
 
         
+def mae(prediction, target):
+    """
+    Computes the mean absolute error between prediction and target
 
-# def nrmse(prediction, target, normalizer):
-#     """
-#     Computes the mean squared error between prediction and target
+    Parameters
+    ----------
 
-#     Parameters
-#     ----------
+    prediction: torch.Tensor (N, 1)
+    target: torch.Tensor (N, 1)
+    """
+    return torch.mean(torch.abs(target - prediction))
 
-#     prediction: torch.Tensor (N, 1)
-#     target: torch.Tensor (N, 1)
-#     """
-#     mse = ((prediction - target) ** 2).mean()
-#     bound = normalizer.get_bound()
-#     return torch.sqrt(mse) / bound
+
+def nrmse_func(prediction, target, normalizer):
+    """
+    Computes the mean squared error between prediction and target
+
+    Parameters
+    ----------
+
+    prediction: torch.Tensor (N, 1)
+    target: torch.Tensor (N, 1)
+    """
+    mse = ((prediction - target) ** 2).mean()
+    bound = normalizer.get_bound()
+    return torch.sqrt(mse) / bound
 
 
 def sum_sq_err(prediction, target):
