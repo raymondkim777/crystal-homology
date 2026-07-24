@@ -106,7 +106,7 @@ parser.add_argument('--delete', action='store_true',
                     help='deletes generated training files before training')
 parser.add_argument('--id', default='0', type=str, metavar='N',
                     help='identifier for multiple checkpoint/models')
-parser.add_argument('--dims', default=3, type=int,
+parser.add_argument('--dims', default=2, type=int,
                     help='number of persistence homology dimensions')
 parser.add_argument('--norm-sample', default=2000, type=int,
                     help='number of max samples to use to define normalizers')

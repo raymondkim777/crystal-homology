@@ -400,9 +400,9 @@ class GraphData(Dataset):
     def __init__(
             self, 
             root_dir, 
-            max_num_nbr=36, 
+            max_num_nbr=12, 
             dmin=0, 
-            dmax=16,  # 15.42974841
+            dmax=8,  # 15.42974841
             step=0.2,
             random_seed=42,
             vec_source='graph', 
@@ -443,22 +443,22 @@ class GraphData(Dataset):
         self.ari = AtomCustomJSONInitializer(atom_init_file)
         self.gdf = GaussianDistance(dmin=dmin, dmax=dmax, step=step)
 
-        # ! vectorization support
-        assert vec_source in ['graph', 'point'], 'incorrect vectorization source input!'
-        assert vector in ['none', 'image', 'landscape', 'perslay'], 'incorrect vectorization input!'
+        # # ! vectorization support
+        # assert vec_source in ['graph', 'point'], 'incorrect vectorization source input!'
+        # assert vector in ['none', 'image', 'landscape', 'perslay'], 'incorrect vectorization input!'
         self.dim_cnt = dims
-        self.vector = vector
-        self.vector_dict = dict()
-        ch = vec_source[0]
-        if self.vector == 'image':
-            with open(os.path.join(self.root_dir, 'vecs', f'images_{ch}.pkl'), 'rb') as file:
-                self.vector_dict = pickle.load(file)
-        elif self.vector == 'landscape':
-            with open(os.path.join(self.root_dir, 'vecs', f'landscapes_{ch}.pkl'), 'rb') as file:
-                self.vector_dict = pickle.load(file)
-        elif self.vector == 'perslay':
-            with open(os.path.join(self.root_dir, 'vecs', f'diagrams_{ch}.pkl'), 'rb') as file:
-                self.vector_dict = pickle.load(file)  # technically diagrams, not vector
+        # self.vector = vector
+        # self.vector_dict = dict()
+        # ch = vec_source[0]
+        # if self.vector == 'image':
+        #     with open(os.path.join(self.root_dir, 'vecs', f'images_{ch}.pkl'), 'rb') as file:
+        #         self.vector_dict = pickle.load(file)
+        # elif self.vector == 'landscape':
+        #     with open(os.path.join(self.root_dir, 'vecs', f'landscapes_{ch}.pkl'), 'rb') as file:
+        #         self.vector_dict = pickle.load(file)
+        # elif self.vector == 'perslay':
+        #     with open(os.path.join(self.root_dir, 'vecs', f'diagrams_{ch}.pkl'), 'rb') as file:
+        #         self.vector_dict = pickle.load(file)  # technically diagrams, not vector
         
 
     def __len__(self):
