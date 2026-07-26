@@ -45,9 +45,9 @@ PREDICT = [
 
 ABS_PREDICT = [
     # 'max_absorption',
-    # 'max_absorption_energy',
+    'max_absorption_energy',
     'integrated_absorption',
-    'integrated_absorption_visible',
+    # 'integrated_absorption_visible',
     'average_absorption_visible',
     # 'absorption_onset_energy',
 ]

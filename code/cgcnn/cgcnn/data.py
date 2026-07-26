@@ -218,10 +218,19 @@ def collate_pool(dataset_list):
         new_idx = torch.LongTensor(np.arange(n_i)+base_idx)
         crystal_atom_idx.append(new_idx)
         batch_vectorizations.append(vectorizations)
-        for i in range(len(diagrams)):
-            if len(batch_diagrams) <= i:
+        # for i in range(len(diagrams)):
+        #     if len(batch_diagrams) <= i:
+        #         batch_diagrams.append([])
+        #     batch_diagrams[i].append(diagrams[i])
+
+        for j in range(len(diagrams)):  # dimension
+            if len(batch_diagrams) <= j:
                 batch_diagrams.append([])
-            batch_diagrams[i].append(diagrams[i])
+            for k in range(len(diagrams[j])):  # vec source
+                if len(batch_diagrams[j]) <= k:
+                    batch_diagrams[j].append([])
+                batch_diagrams[j][k].append(diagrams[j][k])
+
         for key in targets.keys():
             if key not in batch_targets.keys():
                 batch_targets[key] = []
@@ -234,14 +243,35 @@ def collate_pool(dataset_list):
         batch_cif_ids.append(cif_id)
         base_idx += n_i
 
+    # return (torch.cat(batch_atom_fea, dim=0),
+    #         torch.cat(batch_nbr_fea, dim=0),
+    #         torch.cat(batch_nbr_fea_idx, dim=0),
+    #         crystal_atom_idx),\
+    #     torch.stack(batch_vectorizations, dim=0),\
+    #     [
+    #         torch.stack(batch_diags, dim=0)
+    #         for batch_diags in batch_diagrams
+    #     ],\
+    #     {
+    #         key: torch.cat(batch_targets[key], dim=0)
+    #         for key in batch_targets.keys()
+    #     },\
+    #     {
+    #         key: torch.cat(batch_mask[key], dim=0)
+    #         for key in batch_mask.keys()
+    #     },\
+    #     batch_cif_ids
+        
     return (torch.cat(batch_atom_fea, dim=0),
             torch.cat(batch_nbr_fea, dim=0),
             torch.cat(batch_nbr_fea_idx, dim=0),
             crystal_atom_idx),\
         torch.stack(batch_vectorizations, dim=0),\
         [
-            torch.stack(batch_diags, dim=0)
-            for batch_diags in batch_diagrams
+            [
+                torch.stack(batch_diags_d_v, dim=0)
+                for batch_diags_d_v in batch_diags_d
+            ] for batch_diags_d in batch_diagrams
         ],\
         {
             key: torch.cat(batch_targets[key], dim=0)
@@ -252,6 +282,8 @@ def collate_pool(dataset_list):
             for key in batch_mask.keys()
         },\
         batch_cif_ids
+
+
 
 
 class GaussianDistance(object):
@@ -452,23 +484,27 @@ class GraphData(Dataset):
         self.gdf = GaussianDistance(dmin=dmin, dmax=dmax, step=step)
 
         # ! vectorization support
-        assert vec_source in ['graph', 'point', 'custom'], 'incorrect vectorization source input!'
+        assert vec_source in ['graph', 'point', 'both'], 'incorrect vectorization source input!'
         assert vector in ['none', 'image', 'landscape', 'perslay'], 'incorrect vectorization input!'
         self.dim_cnt = dims
         self.vector = vector
-        self.vector_dict = dict()
-        ch = vec_source[0]
-        if self.vector == 'image':
-            with open(os.path.join(self.root_dir, 'vecs', f'images_{ch}.pkl'), 'rb') as file:
-                self.vector_dict = pickle.load(file)
-        elif self.vector == 'landscape':
-            with open(os.path.join(self.root_dir, 'vecs', f'landscapes_{ch}.pkl'), 'rb') as file:
-                self.vector_dict = pickle.load(file)
-        elif self.vector == 'perslay':
-            with open(os.path.join(self.root_dir, 'vecs', f'diagrams_{ch}.pkl'), 'rb') as file:
-                self.vector_dict = pickle.load(file)  # technically diagrams, not vector
+        self.vector_dicts = []
+        if vec_source in ['graph', 'point']:
+            chs = [vec_source[0]]
+        else:
+            chs = ['g', 'p']
+        for ch in chs:
+            if self.vector == 'image':
+                with open(os.path.join(self.root_dir, 'vecs', f'images_{ch}.pkl'), 'rb') as file:
+                    self.vector_dicts.append(pickle.load(file))
+            elif self.vector == 'landscape':
+                with open(os.path.join(self.root_dir, 'vecs', f'landscapes_{ch}.pkl'), 'rb') as file:
+                    self.vector_dicts.append(pickle.load(file))
+            elif self.vector == 'perslay':
+                with open(os.path.join(self.root_dir, 'vecs', f'diagrams_{ch}.pkl'), 'rb') as file:
+                    self.vector_dicts.append(pickle.load(file))  # technically diagrams, not vector
         if self.vector != 'none':
-            ex_key = list(self.vector_dict.keys())[0]
+            ex_key = list(self.vector_dicts[0].keys())[0]
             self.vec_prefix = ''
             if ex_key.startswith('mp-'):
                 self.vec_prefix = 'mp-' 
@@ -645,18 +681,16 @@ class GraphData(Dataset):
             diagrams = [torch.Tensor([]) for _ in range(self.dim_cnt)]
         elif self.vector in ['image', 'landscape']:
             vec_key = f"{self.vec_prefix}{mp_id}"
-            vectorizations = np.hstack([self.vector_dict[vec_key][dim] for dim in range(self.dim_cnt)])
-            # # normalize vectors (optional, ineffective)
-            # if np.sum(vectorizations) != 0:
-            #     vec_norm = np.linalg.norm(vectorizations)
-            #     vectorizations = vectorizations / vec_norm
+            vectorizations = np.hstack([vec_dict[vec_key][dim] for dim in range(self.dim_cnt) for vec_dict in self.vector_dicts])
             diagrams = [torch.Tensor([]) for _ in range(self.dim_cnt)]
         elif self.vector == 'perslay':
             vec_key = f"{self.vec_prefix}{mp_id}"
             # ! if perslay, then we pass in diagrams (each should be tensor)
             vectorizations = np.array([])
-            diagrams = [torch.Tensor(self.vector_dict[vec_key][dim]) for dim in range(self.dim_cnt)]  # list of np.ndarrays
-
+            diagrams = [
+                [torch.Tensor(vec_dict[vec_key][dim]) for vec_dict in self.vector_dicts]  # list of np.ndarrays
+                for dim in range(self.dim_cnt) 
+            ]
         atom_fea = torch.Tensor(atom_fea)
         nbr_fea = torch.Tensor(nbr_fea)
         nbr_fea_idx = torch.LongTensor(nbr_fea_idx)

@@ -124,7 +124,7 @@ parser.add_argument('--fold', default=0, type=int,
 parser.add_argument('--attr', action='store_true', 
                     help='add node attributes to input')
 parser.add_argument('--vec-source', default='graph', type=str,
-                    help='choose a vectorization source: graph, point')
+                    help='choose a vectorization source: graph, point, both')
 parser.add_argument('--vector', default='none', type=str,
                     help='choose a vectorization: none, image, landscape, perslay')
 parser.add_argument('--train', default='pretrain', type=str, 
@@ -196,7 +196,7 @@ def main():
         "No finetune arg if train=pretrain, and need finetune arg if train=abs/plqy"
     assert args.resume == '' or not finetune_true, "Choose one of resume or finetune!"
     assert args.val_metric in ['error', 'loss']
-    assert args.vec_source in ['graph', 'point', 'custom']
+    assert args.vec_source in ['graph', 'point', 'both']
     assert args.freeze_vectors in ['none', 'abs', 'plqy', 'both']
     assert args.scheduler in ['normal', 'adapt']
     assert not CROSS_VAL or args.train != 'pretrain',\
@@ -352,6 +352,7 @@ def main():
             vec_source=args.vec_source,
             vector=args.vector,
             dims=args.dims,
+            source_cnt=2 if args.vec_source == 'both' else 1,
             # ! miscellaneous arguments
             root_dir=args.data_options[0],
             task_specs=TASK_SPECS,
@@ -679,9 +680,15 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers, loss_t_
         crys_idx = [idx.to(device, non_blocking=True) for idx in crys_idx]
 
         vectorizations = vectorizations.to(device, non_blocking=True)
+        # diagrams = [
+        #     diagram.to(device, non_blocking=True)
+        #     for diagram in diagrams
+        # ]
         diagrams = [
-            diagram.to(device, non_blocking=True)
-            for diagram in diagrams
+            [
+                diagram_d_v.to(device, non_blocking=True)
+                for diagram_d_v in diagrams_d
+            ] for diagrams_d in diagrams
         ]
 
         # ! updated variables to use torch Tensors & receive additional data
@@ -887,9 +894,15 @@ def validate(
             crys_idx = [idx.to(device, non_blocking=True) for idx in crys_idx]
 
             vectorizations = vectorizations.to(device, non_blocking=True)
+            # diagrams = [
+            #     diagram.to(device, non_blocking=True)
+            #     for diagram in diagrams
+            # ]
             diagrams = [
-                diagram.to(device, non_blocking=True)
-                for diagram in diagrams
+                [
+                    diagram_d_v.to(device, non_blocking=True)
+                    for diagram_d_v in diagrams_d
+                ] for diagrams_d in diagrams
             ]
 
             # ! updated variables to use torch Tensors & receive additional data

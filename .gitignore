@@ -78,6 +78,7 @@ code/data/plqy-full/image_bounds*.pkl
 code/error.log
 code/example*
 logs
+code/data/prep_files.tar.gz
 
 code/ignore*
 
