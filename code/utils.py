@@ -40,7 +40,7 @@ PREDICT = [
     'direct_gap',
     'band_gap', 
     'efermi', 
-    'is_gap_direct',
+    # 'is_gap_direct',
     # 'max_absorption',
     # 'max_absorption_energy',
     # 'integrated_absorption',
@@ -51,9 +51,9 @@ PREDICT = [
 
 ABS_PREDICT = [
     # 'max_absorption',
-    # 'max_absorption_energy',
+    'max_absorption_energy',
     'integrated_absorption',
-    'integrated_absorption_visible',
+    # 'integrated_absorption_visible',
     'average_absorption_visible',
     # 'absorption_onset_energy',
 ]
@@ -95,11 +95,11 @@ TASK_SPECS = {
         'out_dim': 1,
         'weight': 1, 
     },
-    'is_gap_direct': {
-        'head': 'binary', 
-        'out_dim': 1,
-        'weight': 1, 
-    },
+    # 'is_gap_direct': {
+    #     'head': 'binary', 
+    #     'out_dim': 1,
+    #     'weight': 1, 
+    # },
     # 'max_absorption': {
     #     'head': 'regression', 
     #     'out_dim': 1,
@@ -138,21 +138,21 @@ ABS_TASK_SPECS = {
     #     'out_dim': 1,
     #     'weight': 1, 
     # },
-    # 'max_absorption_energy': {
-    #     'head': 'regression', 
-    #     'out_dim': 1,
-    #     'weight': 1, 
-    # },
+    'max_absorption_energy': {
+        'head': 'regression', 
+        'out_dim': 1,
+        'weight': 1, 
+    },
     'integrated_absorption': {
         'head': 'regression', 
         'out_dim': 1,
         'weight': 1, 
     },
-    'integrated_absorption_visible': {
-        'head': 'regression', 
-        'out_dim': 1,
-        'weight': 1, 
-    },
+    # 'integrated_absorption_visible': {
+    #     'head': 'regression', 
+    #     'out_dim': 1,
+    #     'weight': 1, 
+    # },
     'average_absorption_visible': {
         'head': 'regression', 
         'out_dim': 1,
