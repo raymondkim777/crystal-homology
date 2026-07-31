@@ -7,7 +7,7 @@ from collections import Counter
 
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from utils import CRYSTAL_SYSTEMS, FIELDS, PREDICT, ABS_PREDICT, TASK_SPECS, ABS_TASK_SPECS, open_write_file
+from utils import CRYSTAL_SYSTEMS, FIELDS, TASK_SPECS, ABS_TASK_SPECS, open_write_file
 
 
 # DATA_DIRECTORY = "data/pretrain"
@@ -17,14 +17,13 @@ from utils import CRYSTAL_SYSTEMS, FIELDS, PREDICT, ABS_PREDICT, TASK_SPECS, ABS
 DATA_DIRECTORY = None
 DATA_SUBSET_PATH = None
 MULTIGRAPH_DIRECTORY = None
+PREDICT = list(TASK_SPECS.keys())
+ABS_PREDICT = list(ABS_TASK_SPECS.keys())
 
 
 def _parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--abs', action='store_true', help='Only focuses separately on data/abs')
-    parser.add_argument('--merge', action='store_true', help='Pretrain data contains absorption data')
-    parser.add_argument('--plqy', action='store_true', help='Only focuses separately on data/plqy')
-    parser.add_argument('--plqy-full', action='store_true', help='Only focuses separately on data/plqy-full')
     parser.add_argument('--bounds', action='store_true', help='Computes maximum bond distance and neighbor cnt aross all graphs')
     parser.add_argument('--avail', action='store_true', help='Computes availability for each property in dataset')
     parser.add_argument('--dist', action='store_true', help='Computes label distribution for each property in dataset')
@@ -134,7 +133,7 @@ def find_data_avail():
         writer.writerows(csv_data)
 
 
-def find_data_dist(abs, merge):
+def find_data_dist(abs):
     # collect all crystal docs
     all_crystal_list = []
     for system in CRYSTAL_SYSTEMS:
@@ -158,37 +157,20 @@ def find_data_dist(abs, merge):
                 all_values['band_gap'].append(doc['band_gap'])
             if doc['efermi'] is not None:
                 all_values['efermi'].append(doc['efermi'])
-            if doc['is_gap_direct'] is not None:
-                all_values['is_gap_direct'].append(int(doc['is_gap_direct']))
-            
-            if merge and 'absorption' in doc.keys():
-                doc_abs = doc['absorption']
-                if doc_abs['max_absorption'] is not None:
-                    all_values['max_absorption'].append(doc_abs['max_absorption'])
-                if doc_abs['max_absorption_energy'] is not None:
-                    all_values['max_absorption_energy'].append(doc_abs['max_absorption_energy'])
-                if doc_abs['integrated_absorption'] is not None:
-                    all_values['integrated_absorption'].append(doc_abs['integrated_absorption'])
-                if doc_abs['integrated_absorption_visible'] is not None:
-                    all_values['integrated_absorption_visible'].append(doc_abs['integrated_absorption_visible'])
-                if doc_abs['average_absorption_visible'] is not None:
-                    all_values['average_absorption_visible'].append(doc_abs['average_absorption_visible'])
-                if doc_abs['absorption_onset_energy'] is not None:
-                    all_values['absorption_onset_energy'].append(doc_abs['absorption_onset_energy'])
         else:
             doc_abs = doc
-            if doc_abs['max_absorption'] is not None:
-                all_values['max_absorption'].append(doc_abs['max_absorption'])
+            # if doc_abs['max_absorption'] is not None:
+            #     all_values['max_absorption'].append(doc_abs['max_absorption'])
             if doc_abs['max_absorption_energy'] is not None:
                 all_values['max_absorption_energy'].append(doc_abs['max_absorption_energy'])
             if doc_abs['integrated_absorption'] is not None:
                 all_values['integrated_absorption'].append(doc_abs['integrated_absorption'])
-            if doc_abs['integrated_absorption_visible'] is not None:
-                all_values['integrated_absorption_visible'].append(doc_abs['integrated_absorption_visible'])
+            # if doc_abs['integrated_absorption_visible'] is not None:
+            #     all_values['integrated_absorption_visible'].append(doc_abs['integrated_absorption_visible'])
             if doc_abs['average_absorption_visible'] is not None:
                 all_values['average_absorption_visible'].append(doc_abs['average_absorption_visible'])
-            if doc_abs['absorption_onset_energy'] is not None:
-                all_values['absorption_onset_energy'].append(doc_abs['absorption_onset_energy'])
+            # if doc_abs['absorption_onset_energy'] is not None:
+            #     all_values['absorption_onset_energy'].append(doc_abs['absorption_onset_energy'])
 
     open_write_file(f'{DATA_DIRECTORY}/stats', '')
     for prop, values in all_values.items():
@@ -256,19 +238,11 @@ def bid_test():
 
 
 if __name__ == "__main__":
-    args = _parse_args()
-    
-    assert sum([args.abs, args.plqy, args.plqy_full]) <= 1, "Can only choose one of abs/plqy/plqy-full"
-    assert not (args.abs and args.merge), "--abs changes directory to data/abs --> can't also do --merge"    
+    args = _parse_args()  
 
     if args.abs:
         DATA_DIRECTORY = "data/abs"
         DATA_SUBSET_PATH = f"{DATA_DIRECTORY}/mp-abs"
-    elif args.plqy:
-        DATA_DIRECTORY = "data/plqy"
-        DATA_SUBSET_PATH = f"{DATA_DIRECTORY}/mp-plqy"
-    elif args.plqy_full:
-        DATA_DIRECTORY = "data/plqy-full"
     else:
         DATA_DIRECTORY = "data/pretrain"
         DATA_SUBSET_PATH = f"{DATA_DIRECTORY}/mp-subset"    
@@ -279,6 +253,6 @@ if __name__ == "__main__":
     if args.avail:
         find_data_avail()
     if args.dist:
-        find_data_dist(abs=args.abs, merge=args.merge)
+        find_data_dist(abs=args.abs)
     if args.test:
         bid_test()

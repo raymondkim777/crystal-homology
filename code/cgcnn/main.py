@@ -116,7 +116,7 @@ parser.add_argument('--id', default='0', type=str, metavar='N',
 parser.add_argument('--dims', default=3, type=int,
                     help='number of persistence homology dimensions')
 parser.add_argument('--norm-sample', default=2000, type=int,
-                    help='number of max samples to use to define normalizers')
+                    help='number of max samples to use to define normalizers. input 0 to use full train dataset.')
 
 
 parser.add_argument('--fold', default=0, type=int, 
@@ -302,10 +302,11 @@ def main():
                 drop_last=args.drop_last,
             )
 
-        if args.debug:
-            print("Normalizer train sample size 2000")    
         train_indices = list(train_loader.sampler)
-        sample_cnt = min(len(train_indices), args.norm_sample)
+        norm_sample_cnt = len(train_indices) if args.norm_sample == 0 else args.norm_sample
+        if args.debug:
+            print(f"Normalizer train sample size {norm_sample_cnt}")  
+        sample_cnt = min(len(train_indices), norm_sample_cnt)
         sample_indices = sample(train_indices, k=sample_cnt)
         sample_data_list = [dataset[i] for i in tqdm(sample_indices, desc="Normalizers: ")]
         _, _, _, sample_target, sample_mask, _ = collate_pool(sample_data_list)

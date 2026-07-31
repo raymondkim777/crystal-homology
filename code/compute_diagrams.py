@@ -326,14 +326,14 @@ if __name__ == "__main__":
         DATA_DIRECTORY = "data/abs"
     
     CIF_DIRECTORY = f"{DATA_DIRECTORY}/cif"
-    GRAPH_DIRECTORY = f"{DATA_DIRECTORY}/graphs-multi"
+    GRAPH_DIRECTORY = f"{DATA_DIRECTORY}/graphs"
     STRUCTURE_DIRECTORY = f"{DATA_DIRECTORY}/structs"
     DIAGRAM_GRAPH_DIRECTORY = f"{DATA_DIRECTORY}/diagrams_g"
     DIAGRAM_POINT_DIRECTORY = f"{DATA_DIRECTORY}/diagrams_p"
     DIAGRAM_CUSTOM_DIRECTORY = f"{DATA_DIRECTORY}/diagrams_c"
     MAX_DIST = get_max_dist("data/pretrain")
 
-    LABEL = 'ABS' if args.abs else 'PLQY' if args.plqy else 'PLQY-FULL' if args.plqy_full else 'PRETRAIN'
+    LABEL = 'ABS' if args.abs else 'PRETRAIN'
 
     if args.source == 'graph':
         compute_persistence_diagrams_graph()

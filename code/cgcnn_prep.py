@@ -11,7 +11,7 @@ from tqdm import tqdm
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from create_bonds import get_structures_from_cif
 from utils import CRYSTAL_SYSTEMS, DIMENSION_CNT, get_num_cpus, open_write_file
-from utils import PREDICT, ABS_PREDICT, TASK_SPECS, ABS_TASK_SPECS
+from utils import TASK_SPECS, ABS_TASK_SPECS
 
 
 DATA_PRE_DIRECTORY = "data/pretrain"
@@ -20,6 +20,9 @@ DATA_ABS_DIRECTORY = "data/abs"
 CGCNN_DATAPATH = 'cgcnn/data'
 CGCNN_PRE_DATAPATH = f'{CGCNN_DATAPATH}/pretrain'
 CGCNN_ABS_DATAPATH = f'{CGCNN_DATAPATH}/abs'
+
+PREDICT = list(TASK_SPECS.keys())
+ABS_PREDICT = list(ABS_TASK_SPECS.keys())
 
 
 def _parse_args():
@@ -378,7 +381,7 @@ def graph_process(abs=False, vector=False):
         
         for i in idxes:
             print(f"Saving {'PRETRAIN' if i == 0 else 'ABS'} graph/point/custom vectorizations...")
-            for ch in ['g', 'p', 'c']:
+            for ch in ['g', 'p']:
                 diagram_dict = retrieve_diagrams(vec_dirs[i])
                 image_dict, landscape_dict = dict(), dict()
                 for system in CRYSTAL_SYSTEMS:

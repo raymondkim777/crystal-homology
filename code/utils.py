@@ -4,6 +4,9 @@ import networkx as nx
 import matplotlib.pyplot as plt
 
 
+from pymatgen.core import Structure
+
+
 CRYSTAL_SYSTEMS = [
     'cubic', 
     'hexagonal', 
@@ -22,19 +25,6 @@ FIELDS = [
     'band_gap', 
     'efermi', 
     'is_gap_direct',
-]
-
-PREDICT = [
-    'system',
-    'direct_gap',
-    'band_gap', 
-    'efermi', 
-]
-
-ABS_PREDICT = [
-    'max_absorption_energy',
-    'integrated_absorption',
-    'average_absorption_visible',
 ]
 
 TASK_SPECS = {
@@ -112,6 +102,61 @@ def plot_nxgraph(graph: nx.DiGraph, save=None) -> None:
         plt.show()
     else:
         plt.savefig(save)
+
+
+def choose_sp_for_site(site, tie_tol=1e-3):
+    """
+    returns one Element from possibly disordered pymatgen site. 
+    prioritizes cu, halides, c, h if tied. 
+    """
+    if site.is_ordered:
+        return site.specie
+    
+    priority = ('Cu', 'F', 'Cl', 'Br', 'I', 'C', 'H')
+    priority_rank = {sym: i for i, sym in enumerate(priority)}
+
+    species_occ = site.species
+    max_occ = max(float(occ) for occ in species_occ.values())
+    tied_species = [
+        sp for sp, occ in species_occ.items()
+        if abs(occ - max_occ) <= tie_tol
+    ]
+
+    best_species = min(
+        tied_species, 
+        key=lambda sp: (
+            priority_rank.get(sp, len(priority_rank)),
+            getattr(sp, "symbol", str(sp)),
+        )
+    )
+    return best_species
+
+
+def make_structure_ordered(structure, tie_tol=1e-3):    
+    '''don't change original structure'''
+    chosen_species = [
+        choose_sp_for_site(site, tie_tol=tie_tol)
+        for site in structure
+    ]
+    site_properties = {
+        key: list(vals)
+        for key, vals in structure.site_properties.items()
+    }
+    ordered_structure = Structure(
+        lattice=structure.lattice,
+        species=chosen_species,
+        coords=structure.frac_coords,
+        coords_are_cartesian=False,
+        site_properties=site_properties,
+        labels=structure.labels,
+        charge=structure.charge,
+        properties=getattr(structure, "properties", None),
+    )
+
+    if not ordered_structure.is_ordered:
+        raise ValueError("[Structure Ordering] Ordering failed")
+
+    return ordered_structure
 
 
 def get_max_dist(data_dir):

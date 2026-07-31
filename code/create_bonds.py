@@ -12,8 +12,7 @@ from pymatgen.core.periodic_table import Element
 from pymatgen.core.composition import Composition
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-from find_hch import make_structure_ordered
-from utils import CRYSTAL_SYSTEMS, get_num_cpus, open_write_file
+from utils import CRYSTAL_SYSTEMS, get_num_cpus, open_write_file, make_structure_ordered
 
 
 DATA_DIRECTORY = None

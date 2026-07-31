@@ -436,9 +436,9 @@ class GraphData(Dataset):
     def __init__(
             self, 
             root_dir, 
-            max_num_nbr=36,     # ! shared encoder, so should be max val for pretrain/abs
+            max_num_nbr=38,     # ! shared encoder, so should be max val for pretrain/abs
             dmin=0, 
-            dmax=16,            # ! shared encoder, so should be max val for pretrain/abs      # 15.42974841
+            dmax=22,            # ! shared encoder, so should be max val for pretrain/abs      # 15.42974841
             step=0.2,
             random_seed=42,
             attr=False,
@@ -452,7 +452,7 @@ class GraphData(Dataset):
         self.max_num_nbr = max_num_nbr
         self.dmax = dmax
         self.task_specs = task_specs
-        self.predict_file = list(self.task_specs.keys())
+        self.predict_list = list(self.task_specs.keys())
         self.warn = warn
         self.attr = attr
         assert os.path.exists(root_dir), 'root_dir does not exist!'
