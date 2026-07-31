@@ -9,6 +9,8 @@ pip install -r requirements.txt
 
 ## Data Query & Preprocess
 
+(Tar file `code/data/data.tar.gz` is provided for submission, containing all outputs from this section.)
+
 Queries all materials from Materials Project API, and takes an optimal 7000 subset of each crystal system. Queries absorption data and saves separately. Converts all crystal structures to CIF. 
 
 NOTE: Materials Project API key must be stored in `.env` file under `MP_API_KEY` before running. 

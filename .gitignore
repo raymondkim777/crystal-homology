@@ -3,7 +3,8 @@
 __pycache__
 
 # DATA FILES (raw & generated)
-code/data*
+code/data/pretrain
+code/data/abs
 
 # MISC FILES
 code/error.log
