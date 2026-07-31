@@ -326,7 +326,7 @@ if __name__ == "__main__":
         DATA_DIRECTORY = "data/abs"
     
     CIF_DIRECTORY = f"{DATA_DIRECTORY}/cif"
-    GRAPH_DIRECTORY = f"{DATA_DIRECTORY}/graphs"
+    GRAPH_DIRECTORY = f"{DATA_DIRECTORY}/graphs-multi"
     STRUCTURE_DIRECTORY = f"{DATA_DIRECTORY}/structs"
     DIAGRAM_GRAPH_DIRECTORY = f"{DATA_DIRECTORY}/diagrams_g"
     DIAGRAM_POINT_DIRECTORY = f"{DATA_DIRECTORY}/diagrams_p"

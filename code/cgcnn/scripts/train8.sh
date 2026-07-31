@@ -1,4 +1,0 @@
-python main.py --seed --seed-val 45 --delete --dims 2 --clear-cache --optim Adam --scheduler adapt --attr --train-ratio 0.6 --val-ratio 0.2 --test-ratio 0.2 --epochs 100 --lr 0.001 --batch-size 256 --id p_nny_bl_s45 --atom-fea-len 64 --n-conv 4 --h-fea-len 128 --o-fea-len 64 --n-h 1 --n-o 1 --vec-fea-len 256 --cat-fea-len 64 --n-vec 1 --vec-source both --vector landscape --train pretrain data/pretrain
-
-python main.py --seed --seed-val 46 --delete --dims 2 --clear-cache --optim Adam --scheduler adapt --attr --train-ratio 0.6 --val-ratio 0.2 --test-ratio 0.2 --epochs 100 --lr 0.001 --batch-size 256 --id p_nny_bl_s46 --atom-fea-len 64 --n-conv 4 --h-fea-len 128 --o-fea-len 64 --n-h 1 --n-o 1 --vec-fea-len 256 --cat-fea-len 64 --n-vec 1 --vec-source both --vector landscape --train pretrain data/pretrain
-

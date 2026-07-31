@@ -612,23 +612,23 @@ class GraphData(Dataset):
             raise TypeError(f"[DATA Atom Feature] Incorrect node species data type")
 
         if self.attr:
-            # # add fractional coordinates as periodic coordinates
-            # periodic_coords = [
-            #     np.hstack([
-            #         [np.cos(2 * np.pi * val), np.sin(2 * np.pi * val)]
-            #         for val in graph.nodes[node]['coords']
-            #     ])
-            #     for node in graph.nodes
-            # ]
-            # atom_fea = np.hstack((feature_list, periodic_coords))
+            # add fractional coordinates as periodic coordinates
+            periodic_coords = [
+                np.hstack([
+                    [np.cos(2 * np.pi * val), np.sin(2 * np.pi * val)]
+                    for val in graph.nodes[node]['coords']
+                ])
+                for node in graph.nodes
+            ]
+            atom_fea = np.hstack((feature_list, periodic_coords))
 
-            # add distance to periodic center
-            dists_to_periodic_center = self.__find_distances(
-                cid=mp_id, 
-                graph=graph, 
-                lattice_matrix=graph_dict['lattice_matrix']
-            )[:, np.newaxis]
-            atom_fea = np.hstack((feature_list, dists_to_periodic_center))
+            # # add distance to periodic center
+            # dists_to_periodic_center = self.__find_distances(
+            #     cid=mp_id, 
+            #     graph=graph, 
+            #     lattice_matrix=graph_dict['lattice_matrix']
+            # )[:, np.newaxis]
+            # atom_fea = np.hstack((feature_list, dists_to_periodic_center))
 
             # # do both
             # atom_fea = np.hstack((feature_list, periodic_coords, dists_to_periodic_center))
