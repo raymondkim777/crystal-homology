@@ -624,19 +624,19 @@ class GraphData(Dataset):
             # ]
             # atom_fea = np.hstack((feature_list, periodic_coords))
 
-            # # add distance to periodic center
-            # dists_to_periodic_center = self.__find_distances(
-            #     cid=mp_id, 
-            #     graph=graph, 
-            #     lattice_matrix=graph_dict['lattice_matrix']
-            # )[:, np.newaxis]
-            # atom_fea = np.hstack((feature_list, dists_to_periodic_center))
+            # add distance to periodic center
+            dists_to_periodic_center = self.__find_distances(
+                cid=mp_id, 
+                graph=graph, 
+                lattice_matrix=graph_dict['lattice_matrix']
+            )[:, np.newaxis]
+            atom_fea = np.hstack((feature_list, dists_to_periodic_center))
 
             # # do both
             # atom_fea = np.hstack((feature_list, periodic_coords, dists_to_periodic_center))
 
-            # do nothing
-            atom_fea = np.vstack(feature_list)
+            # # do nothing
+            # atom_fea = np.vstack(feature_list)
         else:
             atom_fea = np.vstack(feature_list)
 
@@ -660,25 +660,25 @@ class GraphData(Dataset):
         nbr_fea = self.gdf.expand(nbr_fea)
 
         if self.attr:
-            # # increase nbr_fea_len by 3 to hold cartesian displacement vectors
-            # padding = ((0, 0), (0, 0), (0, 3))
-            # nbr_fea = np.pad(nbr_fea, pad_width=padding, mode='constant', constant_values=0)
+            # increase nbr_fea_len by 3 to hold cartesian displacement vectors
+            padding = ((0, 0), (0, 0), (0, 3))
+            nbr_fea = np.pad(nbr_fea, pad_width=padding, mode='constant', constant_values=0)
 
-            # # add to_jimage as cartesian displacement vector
-            # for u in adj_dict.keys():
-            #     cart_vectors = []
-            #     for v in adj_dict[u].keys():
-            #         for k in adj_dict[u][v].keys():
-            #             to_jimage = np.asarray(adj_dict[u][v][k]['to_jimage'])
-            #             coord_start = graph.nodes[u]['coords']
-            #             coord_end = graph.nodes[v]['coords']
-            #             matrix = graph_dict['lattice_matrix']
+            # add to_jimage as cartesian displacement vector
+            for u in adj_dict.keys():
+                cart_vectors = []
+                for v in adj_dict[u].keys():
+                    for k in adj_dict[u][v].keys():
+                        to_jimage = np.asarray(adj_dict[u][v][k]['to_jimage'])
+                        coord_start = graph.nodes[u]['coords']
+                        coord_end = graph.nodes[v]['coords']
+                        matrix = graph_dict['lattice_matrix']
 
-            #             cart_vector = self.__cart_vector(coord_start, coord_end, to_jimage, matrix)
+                        cart_vector = self.__cart_vector(coord_start, coord_end, to_jimage, matrix)
 
-            #             cart_vectors.append(cart_vector)
-            #     cart_vectors = np.asarray(cart_vectors)
-            #     nbr_fea[u, :cart_vectors.shape[0], -3:] = cart_vectors
+                        cart_vectors.append(cart_vector)
+                cart_vectors = np.asarray(cart_vectors)
+                nbr_fea[u, :cart_vectors.shape[0], -3:] = cart_vectors
             pass
 
         # ! vectorization & normalization (optional)

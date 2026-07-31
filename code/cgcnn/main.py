@@ -192,8 +192,8 @@ def main():
     assert args.train in ['pretrain', 'abs', 'plqy'],\
         "Wrong train argument! Should be one of 'pretrain', 'abs', 'plqy'"
     finetune_true = args.finetune != '' or args.finetune_auto
-    assert (args.train == 'pretrain' and not finetune_true) or (args.train != 'pretrain' and finetune_true), \
-        "No finetune arg if train=pretrain, and need finetune arg if train=abs/plqy"
+    # assert (args.train == 'pretrain' and not finetune_true) or (args.train != 'pretrain' and finetune_true), \
+    #     "No finetune arg if train=pretrain, and need finetune arg if train=abs/plqy"
     assert args.resume == '' or not finetune_true, "Choose one of resume or finetune!"
     assert args.val_metric in ['error', 'loss']
     assert args.vec_source in ['graph', 'point', 'both']
@@ -320,6 +320,10 @@ def main():
             else:
                 raise ValueError(f"[Normalizer] Unknown task {value['head']}")
             normalizers[prop] = normalizer
+
+        # for prop, norm in normalizers.items():
+        #     print(f"Prop: {prop}, Bound: {norm.get_bound()}")
+        # continue
         
         # ! clear dataloader cache
         if args.clear_cache:
@@ -359,9 +363,11 @@ def main():
         )
 
         # ! if fine-tune, freeze lower encoder layers
-        if args.train in ['abs', 'plqy']:
-            assert args.finetune != '' or args.finetune_auto
-            assert args.finetune == '' or not args.finetune_auto
+        finetune_true = args.finetune != '' or args.finetune_auto
+        if args.train in ['abs', 'plqy'] and finetune_true:
+            # assert args.finetune != '' or args.finetune_auto
+            # assert args.finetune == '' or not args.finetune_auto
+            assert not (args.finetune != '' and args.finetune_auto)
 
             if args.finetune_auto:
                 prefix = 'pre' if args.data_options[0][5:8] == 'abs' else 'abs'

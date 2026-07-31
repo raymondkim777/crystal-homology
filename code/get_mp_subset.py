@@ -77,6 +77,7 @@ class CrystalSubset:
 
         if absorption_data:
             self.absorption_subset = AbsorptionSubset()
+            self.abs_id_set = set()
 
 
     def load_crystals(self):
@@ -130,7 +131,7 @@ class CrystalSubset:
         return ids_by_system, avail_by_system, property_freq, property_rarity
 
 
-    def select_one_system_fast(self, system, subset_size, rejections=None):
+    def select_one_system_fast(self, system, subset_size, rejections=None, abs=False):
         ids = self.ids_by_system[system]
         A = self.avail_by_system[system]
 
@@ -143,6 +144,11 @@ class CrystalSubset:
         # Initial scores for all crystals in this system.
         scores = base_scores + A @ weights
         selected_indices = []
+
+        # Do not pick crystals from abs.
+        for i in range(len(scores)):
+            if ids[i] in self.abs_id_set:   # if no abs data, then set is empty
+                scores[i] = -np.inf
 
         for _ in tqdm(range(subset_size), desc=f"{system}: "):
             # Pick best remaining crystal.
@@ -207,7 +213,7 @@ class CrystalSubset:
     def select_and_save_subset_ids(
             self, subset_size=5500, 
             subset_large=False, total_size=7000, 
-            reject=False
+            reject=False, abs=False
     ):  
         rejections = Rejections() if reject else None
 
@@ -217,7 +223,7 @@ class CrystalSubset:
             self.prop_cnts = np.zeros(len(self.fields), dtype=np.float32)
 
             # find optimal subset IDs
-            subset_id_list = self.select_one_system_fast(system, subset_size, rejections=rejections)
+            subset_id_list = self.select_one_system_fast(system, subset_size, rejections=rejections, abs=abs)
 
             # optionally supplement with larger crystals for generalization
             if subset_large:
@@ -287,6 +293,8 @@ class CrystalSubset:
                         with open(subset_abs_path, 'wb') as f:
                             pickle.dump(subset_json_dict, f)
                     continue
+            
+                self.abs_id_set = set(id_list)
 
                 print(f"Extracting absorption data for {system} system...")
                 # extract absorption features from absorption coefficeints
@@ -683,15 +691,16 @@ if __name__ == "__main__":
         if args.cif:
             crystal_subset.convert_subsets_to_cif()
     else:
+        if args.abs:
+            crystal_subset.collect_abs_mp_data(merge=args.merge)
         if args.subset:
             crystal_subset.select_and_save_subset_ids(
                 subset_size=args.size,
                 subset_large=args.large,
                 total_size=args.size_large,
-                reject=args.reject
+                reject=args.reject, 
+                abs=args.abs,
             )
-        if args.abs:
-            crystal_subset.collect_abs_mp_data(merge=args.merge)
         if args.cif:
             crystal_subset.convert_subsets_to_cif(absorb=args.abs)
     if args.plqy:
