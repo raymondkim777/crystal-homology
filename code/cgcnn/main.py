@@ -174,13 +174,13 @@ def main():
         seed(args.seed_val)
         np.random.seed(args.seed_val)
 
-        # if torch.cuda.is_available():
-        #     torch.cuda.manual_seed(args.seed_val)
-        #     torch.cuda.manual_seed_all(args.seed_val)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(args.seed_val)
+            torch.cuda.manual_seed_all(args.seed_val)
 
-        # torch.backends.cudnn.benchmark = False
-        # torch.backends.cudnn.deterministic = True
-        # torch.use_deterministic_algorithms(True)
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
+        torch.use_deterministic_algorithms(True)
         
     print("GPU Available", args.cuda)
 
@@ -686,10 +686,6 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers, loss_t_
         crys_idx = [idx.to(device, non_blocking=True) for idx in crys_idx]
 
         vectorizations = vectorizations.to(device, non_blocking=True)
-        # diagrams = [
-        #     diagram.to(device, non_blocking=True)
-        #     for diagram in diagrams
-        # ]
         diagrams = [
             [
                 diagram_d_v.to(device, non_blocking=True)
@@ -900,10 +896,6 @@ def validate(
             crys_idx = [idx.to(device, non_blocking=True) for idx in crys_idx]
 
             vectorizations = vectorizations.to(device, non_blocking=True)
-            # diagrams = [
-            #     diagram.to(device, non_blocking=True)
-            #     for diagram in diagrams
-            # ]
             diagrams = [
                 [
                     diagram_d_v.to(device, non_blocking=True)
@@ -1089,9 +1081,6 @@ def validate(
                 assert np.isfinite(y_pred).all()
 
                 score = r2_score(y_true, y_pred)
-
-                # for target, prediction in zip(y_true, y_pred):
-                #     f.write(f"{prediction}\t\t{target}\n")
                 f.write(f"{prop} R^2: {score}\n")
 
     if args.debug:

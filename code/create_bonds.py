@@ -16,12 +16,6 @@ from find_hch import make_structure_ordered
 from utils import CRYSTAL_SYSTEMS, get_num_cpus, open_write_file
 
 
-# DATA_DIRECTORY = "data/pretrain"
-# DATA_DIRECTORY = "data/abs"
-# CIF_DIRECTORY = f"{DATA_DIRECTORY}/cif"
-# MULTIGRAPH_DIRECTORY = f"{DATA_DIRECTORY}/graphs-multi"
-# GRAPH_DIRECTORY = f"{DATA_DIRECTORY}/graphs"
-
 DATA_DIRECTORY = None
 CIF_DIRECTORY = None
 STRUCTURE_DIRECTORY = None
@@ -36,8 +30,6 @@ CRYSTALNN_LARGE = None
 def _parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--abs', action='store_true', help='Only focuses separately on data/abs')
-    parser.add_argument('--plqy', action='store_true', help='Only focuses separately on data/plqy')
-    parser.add_argument('--plqy-full', action='store_true', help='Only focuses separately on data/plqy-full')
     return parser.parse_args()
 
 
@@ -67,49 +59,18 @@ def get_structures_from_cif(filepath: str) -> list:
     return structures
 
 
-def get_structures_from_cif_plqy(filepath: str) -> list:
-    # ! parse_structures() returns "Incorrect stoichiometry" error
-    # ! --> bypass occupancy checks
-    cif_parser = CifParser(filepath, occupancy_tolerance=np.inf)
-    structures = cif_parser.parse_structures(check_occu=False)
-    if len(structures) > 1:
-        print(f"[PLQY Structures] File {filepath} generates multiple structures")
-    
-    for site in structures[0]:
-        total_occ = sum(site.species.values())
-        if total_occ > 1.0:
-            new_species_dict = {sp: occ / total_occ for sp, occ in site.species.items()}
-            new_species = Composition.from_weight_dict(new_species_dict)
-            site.species = new_species
-    return structures
-
-
-def get_structures_from_cif_plqy_full(filepath: str) -> list:
-    cif_parser = CifParser(filepath, occupancy_tolerance=1.1)
-    structures = cif_parser.parse_structures()
-    
-    if len(structures) > 1:
-        print(f"[PLQY Structures] File {filepath} generates multiple structures")
-    return structures
-
-
 def process_one_cif(args):
     # nx_multigraph: multidigraph  -->  CGCNN input
     # nx_graph: directed graph (not multi)  -->  PH input
 
     # accept one tuple for multiprocessing
-    system, filename, structure, plqy, plqy_full = args
+    system, filename, structure = args
 
     if structure is None:
         structure_filename = f"{CIF_DIRECTORY}/{system}/{filename}"
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            if plqy:
-                structures = get_structures_from_cif_plqy(structure_filename)
-            elif plqy_full:
-                structures = get_structures_from_cif_plqy_full(structure_filename)
-            else:
-                structures = get_structures_from_cif(structure_filename)
+            structures = get_structures_from_cif(structure_filename)
         structure = structures[0].get_reduced_structure()
 
     ordered_structure = structure
@@ -190,7 +151,7 @@ def init_crystalnn(crystalnn, crystalnn_large):
     CRYSTALNN_LARGE = crystalnn_large
 
 
-def construct_crystalnn_graph(plqy=False, plqy_full=False) -> None:
+def construct_crystalnn_graph() -> None:
     workers = get_num_cpus()
     print(f"Using {workers} worker processes")
 
@@ -224,10 +185,10 @@ def construct_crystalnn_graph(plqy=False, plqy_full=False) -> None:
             struct_exist = True
             with open(f'{STRUCTURE_DIRECTORY}/{system}.pkl', 'rb') as file:
                 system_structs = pickle.load(file)
-            tasks = [(system, filename, system_structs[filename[:-4]], plqy, plqy_full) for filename in cif_files]
+            tasks = [(system, filename, system_structs[filename[:-4]]) for filename in cif_files]
         else:
             print(f"Structure directory doesn't exist, need to parse CIFs")
-            tasks = [(system, filename, None, plqy, plqy_full) for filename in cif_files]
+            tasks = [(system, filename, None) for filename in cif_files]
                     
         print(f"Creating {'structs and ' if not struct_exist else ''}graphs of {system} system...")
         with ProcessPoolExecutor(
@@ -291,23 +252,18 @@ def check_structures() -> None:
 
 if __name__ == "__main__":
     args = _parse_args()
-    assert sum([args.abs, args.plqy, args.plqy_full]) <= 1, "Can only choose one of abs/plqy/plqy-full"
 
     DATA_DIRECTORY = "data/pretrain"
     if args.abs:
         DATA_DIRECTORY = "data/abs"
-    if args.plqy:
-        DATA_DIRECTORY = "data/plqy"
-    if args.plqy_full:
-        DATA_DIRECTORY = "data/plqy-full"
 
     CIF_DIRECTORY = f"{DATA_DIRECTORY}/cif"
     STRUCTURE_DIRECTORY = f"{DATA_DIRECTORY}/structs"
     MULTIGRAPH_DIRECTORY = f"{DATA_DIRECTORY}/graphs-multi"
     GRAPH_DIRECTORY = f"{DATA_DIRECTORY}/graphs"
 
-    label = 'ABS' if args.abs else 'PLQY' if args.plqy else 'PLQY FULL' if args.plqy_full else 'PRETRAIN'
+    label = 'ABS' if args.abs else 'PRETRAIN'
     print(f"----------- {label} -----------")
-    construct_crystalnn_graph(plqy=args.plqy, plqy_full=args.plqy_full)
+    construct_crystalnn_graph()
     print(f"----------- {label} END -----------")
     # check_structures()

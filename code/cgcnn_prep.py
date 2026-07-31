@@ -11,24 +11,20 @@ from tqdm import tqdm
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from create_bonds import get_structures_from_cif
 from utils import CRYSTAL_SYSTEMS, DIMENSION_CNT, get_num_cpus, open_write_file
-from utils import PREDICT, ABS_PREDICT, PLQY_PREDICT, TASK_SPECS, ABS_TASK_SPECS, PLQY_TASK_SPECS
+from utils import PREDICT, ABS_PREDICT, TASK_SPECS, ABS_TASK_SPECS
 
 
 DATA_PRE_DIRECTORY = "data/pretrain"
 DATA_ABS_DIRECTORY = "data/abs"
-DATA_PLQY_DIRECTORY = "data/plqy"
 
 CGCNN_DATAPATH = 'cgcnn/data'
 CGCNN_PRE_DATAPATH = f'{CGCNN_DATAPATH}/pretrain'
 CGCNN_ABS_DATAPATH = f'{CGCNN_DATAPATH}/abs'
-CGCNN_PLQY_DATAPATH = f'{CGCNN_DATAPATH}/plqy'
 
 
 def _parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--abs', action='store_true', help='Saves absorption data to CGCNN data path')
-    parser.add_argument('--merge', action='store_true', help='Merges absorption data and subset data')
-    parser.add_argument('--plqy', action='store_true', help='Saves PLQY data to CGCNN data path')
     parser.add_argument('--vector', action='store_true', help='Saves vectorizations to CGCNN data path')
     parser.add_argument('--bound', action='store_true', help='Saves persistence bounds to CGCNN data path')
     return parser.parse_args()
@@ -183,7 +179,7 @@ def retrieve_diagrams(data_dir):
     return reorganize_list_of_dicts(padded_diagram_dict_by_dim)
 
 
-def write_pretrain_id_prop_mask(abs=False, merge=False):
+def write_pretrain_id_prop_mask():
     print(f"\nPreparing PRETRAIN prop/mask CSVs...")
     doc_dict = dict()
     for system in CRYSTAL_SYSTEMS:
@@ -196,7 +192,7 @@ def write_pretrain_id_prop_mask(abs=False, merge=False):
     csv_mask_data = []
     system_to_int = {CRYSTAL_SYSTEMS[idx]: idx for idx in range(len(CRYSTAL_SYSTEMS))}
 
-    print(f"\nComputing PRETRAIN{'/ABS' if abs and merge else ''} id_prop.csv and id_mask.csv...")
+    print(f"\nComputing PRETRAIN id_prop.csv and id_mask.csv...")
     for mp_id, doc in tqdm(doc_dict.items()):
         prop_dict = {
             'system': system_to_int[str(doc['symmetry'].crystal_system).lower()],
@@ -220,45 +216,6 @@ def write_pretrain_id_prop_mask(abs=False, merge=False):
             'efermi': int(doc['efermi'] is not None),
             'is_gap_direct': int(doc['is_gap_direct'] is not None),
         }
-        if abs and merge:
-            if 'absorption' in doc.keys():
-                doc_abs = doc['absorption']
-                prop_dict.update({
-                    'max_absorption': doc_abs['max_absorption'] if doc_abs['max_absorption'] is not None else 0.0,
-                    'max_absorption_energy': doc_abs['max_absorption_energy'] if doc_abs['max_absorption_energy'] is not None else 0.0,
-                    'integrated_absorption': doc_abs['integrated_absorption'] if doc_abs['integrated_absorption'] is not None else 0.0,
-                    'integrated_absorption_visible': doc_abs['integrated_absorption_visible'] if doc_abs['integrated_absorption_visible'] is not None else 0.0,
-                    'average_absorption_visible': doc_abs['average_absorption_visible'] if doc_abs['average_absorption_visible'] is not None else 0.0,
-                    'absorption_onset_energy': doc_abs['absorption_onset_energy'] if doc_abs['absorption_onset_energy'] is not None else 0.0,
-                })
-            else:
-                prop_dict.update({
-                    'max_absorption': 0.0,
-                    'max_absorption_energy': 0.0,
-                    'integrated_absorption': 0.0,
-                    'integrated_absorption_visible': 0.0,
-                    'average_absorption_visible': 0.0,
-                    'absorption_onset_energy': 0.0,
-                })
-            if 'absorption' in doc.keys():
-                doc_abs = doc['absorption']
-                mask_dict.update({
-                    'max_absorption': int(doc_abs['max_absorption'] is not None),
-                    'max_absorption_energy': int(doc_abs['max_absorption_energy'] is not None),
-                    'integrated_absorption': int(doc_abs['integrated_absorption'] is not None),
-                    'integrated_absorption_visible': int(doc_abs['integrated_absorption_visible'] is not None),
-                    'average_absorption_visible': int(doc_abs['average_absorption_visible'] is not None),
-                    'absorption_onset_energy': int(doc_abs['absorption_onset_energy'] is not None),
-                })
-            else:
-                mask_dict.update({
-                    'max_absorption': 0,
-                    'max_absorption_energy': 0,
-                    'integrated_absorption': 0,
-                    'integrated_absorption_visible': 0,
-                    'average_absorption_visible': 0,
-                    'absorption_onset_energy': 0,
-                })
         csv_prop_row = [mp_id[3:]]
         csv_mask_row = [mp_id[3:]]
 
@@ -333,49 +290,7 @@ def write_abs_id_prop_mask():
         writer.writerows(csv_mask_data)
 
 
-def write_plqy_id_prop_mask():
-    print(f"\nPreparing PLQY prop/mask CSVs...")
-    doc_dict = dict()
-    for system in CRYSTAL_SYSTEMS:
-        print(f"Unpacking PLQY {system} system docs...")
-        with open(f'{DATA_PLQY_DIRECTORY}/mp-plqy/{system}.pkl', 'rb') as file:
-            system_dict = pickle.load(file)
-        doc_dict.update(system_dict)
-    
-    csv_prop_data = []
-    csv_mask_data = []
-
-    print(f"\nComputing PLQY id_prop.csv and id_mask.csv...")
-    for mp_id, doc in tqdm(doc_dict.items()):
-        prop_dict = {
-            'plqy': doc['plqy'],
-        }
-        mask_dict = {
-            'plqy': 1,
-        }
-        csv_prop_row = [mp_id]  # id names don't have 'mp-'
-        csv_mask_row = [mp_id]
-
-        # ensure order is same as ABS_PREDICT in utils.py
-        for prop in PLQY_PREDICT:
-            csv_prop_row.append(prop_dict[prop])
-            csv_mask_row.append(mask_dict[prop])
-        csv_prop_data.append(csv_prop_row)
-        csv_mask_data.append(csv_mask_row)
-    
-    print(f"\nWriting PLQY id_prop.csv and id_mask.csv...")
-    csv_prop_filepath = open_write_file(CGCNN_PLQY_DATAPATH, 'id_prop.csv')
-    with open(csv_prop_filepath, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.writer(f)
-        writer.writerows(csv_prop_data)
-
-    csv_mask_filepath = open_write_file(CGCNN_PLQY_DATAPATH, 'id_mask.csv')
-    with open(csv_mask_filepath, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.writer(f)
-        writer.writerows(csv_mask_data)
-
-
-def graph_process(abs=False, merge=False, plqy=False, vector=False):
+def graph_process(abs=False, vector=False):
     """
     Saves all graphs with labeled crystal systems in CGCNN data folder. 
     Computes and prints required bounds for GraphData.
@@ -408,28 +323,11 @@ def graph_process(abs=False, merge=False, plqy=False, vector=False):
             cgcnn_datapath = open_write_file(f"{CGCNN_ABS_DATAPATH}/graphs", f'{mp_id}.pkl')
             with open(cgcnn_datapath, 'wb') as f:
                 pickle.dump(value, f)
-
-    # save PLQY data if needed
-    if plqy:
-        print(f"\nUnpacking PLQY graphs...")
-        graph_dict = unpack_plqy_graphs()
-        print(f"Saving PLQY graph files to {CGCNN_PLQY_DATAPATH}")
-        # save graphs to CGCNN data folder
-        for mp_id, value in tqdm(graph_dict.items()):
-            # ! NOTE: not actually Materials Project IDs, but need to be same string format
-            cgcnn_datapath = open_write_file(f"{CGCNN_PLQY_DATAPATH}/graphs", f'mp-{mp_id}.pkl')
-            with open(cgcnn_datapath, 'wb') as f:
-                pickle.dump(value, f)
     
     # multitask regression/classification id_prop and id_mask
-    write_pretrain_id_prop_mask(abs=abs, merge=merge)
+    write_pretrain_id_prop_mask()
 
     print(f"\nSaving PRETRAIN task specs...")
-    # save PREDICT list to CGCNN data path
-    predict_filepath = open_write_file(f"{CGCNN_PRE_DATAPATH}/tasks", f'predict.pkl')
-    with open(predict_filepath, 'wb') as f:
-        pickle.dump(PREDICT, f)
-
     # save TASK_SPEC dict to CGCNN data path
     task_filepath = open_write_file(f"{CGCNN_PRE_DATAPATH}/tasks", f'tasks.pkl')
     with open(task_filepath, 'wb') as f:
@@ -445,7 +343,7 @@ def graph_process(abs=False, merge=False, plqy=False, vector=False):
     destination = open_write_file(f'{CGCNN_PRE_DATAPATH}', '')
     shutil.copy(source_file, destination)
 
-    if abs and not merge:
+    if abs:
         # multitask regression/classification id_prop and id_mask
         write_abs_id_prop_mask()
 
@@ -469,45 +367,17 @@ def graph_process(abs=False, merge=False, plqy=False, vector=False):
         source_file = f'{CGCNN_DATAPATH}/atom_init.json'
         destination = open_write_file(f'{CGCNN_ABS_DATAPATH}', '')
         shutil.copy(source_file, destination)
-    
-    if plqy:
-        # plqy id_prop and id_mask
-        write_plqy_id_prop_mask()
-
-        print(f"\nSaving PLQY task specs...")
-        # save PLQY_PREDICT list to CGCNN data path
-        predict_filepath = open_write_file(f"{CGCNN_PLQY_DATAPATH}/tasks", f'predict.pkl')
-        with open(predict_filepath, 'wb') as f:
-            pickle.dump(PLQY_PREDICT, f)
-
-        # save ABS_TASK_SPEC dict to CGCNN data path
-        task_filepath = open_write_file(f"{CGCNN_PLQY_DATAPATH}/tasks", f'tasks.pkl')
-        with open(task_filepath, 'wb') as f:
-            pickle.dump(PLQY_TASK_SPECS, f)
-
-         # save max nbrs and bond dist info to CGCNN data path
-        source_file = f'{DATA_PLQY_DIRECTORY}/bounds.json'
-        destination = open_write_file(f'{CGCNN_PLQY_DATAPATH}/tasks', '')
-        shutil.copy(source_file, destination)
-
-        # copy atom_init.json to CGCNN data path
-        source_file = f'{CGCNN_DATAPATH}/atom_init.json'
-        destination = open_write_file(f'{CGCNN_PLQY_DATAPATH}', '')
-        shutil.copy(source_file, destination)
-
 
     if vector:
-        vec_dirs = [DATA_PRE_DIRECTORY, DATA_ABS_DIRECTORY, DATA_PLQY_DIRECTORY]
-        des_dirs = [CGCNN_PRE_DATAPATH, CGCNN_ABS_DATAPATH, CGCNN_PLQY_DATAPATH]
+        vec_dirs = [DATA_PRE_DIRECTORY, DATA_ABS_DIRECTORY]
+        des_dirs = [CGCNN_PRE_DATAPATH, CGCNN_ABS_DATAPATH]
 
         idxes = [0]
-        if abs and not merge:
+        if abs:
             idxes.append(1)
-        if plqy:
-            idxes.append(2)
         
         for i in idxes:
-            print(f"Saving {'PRETRAIN' if i == 0 else 'ABS' if i == 1 else 'PLQY'} graph/point/custom vectorizations...")
+            print(f"Saving {'PRETRAIN' if i == 0 else 'ABS'} graph/point/custom vectorizations...")
             for ch in ['g', 'p', 'c']:
                 diagram_dict = retrieve_diagrams(vec_dirs[i])
                 image_dict, landscape_dict = dict(), dict()
@@ -533,26 +403,20 @@ def graph_process(abs=False, merge=False, plqy=False, vector=False):
                     pickle.dump(landscape_dict, f)
 
 
-def save_bounds(abs=False, merge=False, plqy=False):
+def save_bounds(abs=False,):
     print(f"\n Saving PRETRAIN image transformer bounds...")
 
-    for ch in ['g', 'p', 'c']:
+    for ch in ['g', 'p']:
         # ! for perslay --> need same image bounds across pretrain/abs/plqy
         # ! --> use pretrain image bounds for everything
         source_file = f'{DATA_PRE_DIRECTORY}/image_bounds_{ch}.pkl'
         destination = open_write_file(f'{CGCNN_PRE_DATAPATH}/tasks', '')
         shutil.copy(source_file, destination)
 
-        if abs and not merge:
+        if abs:
             print(f"\n Saving ABS image transformer bounds...")
             source_file = f'{DATA_PRE_DIRECTORY}/image_bounds_{ch}.pkl'
             destination = open_write_file(f'{CGCNN_ABS_DATAPATH}/tasks', '')
-            shutil.copy(source_file, destination)
-        
-        if plqy:
-            print(f"\n Saving PLQY image transformer bounds...")
-            source_file = f'{DATA_PRE_DIRECTORY}/image_bounds_{ch}.pkl'
-            destination = open_write_file(f'{CGCNN_PLQY_DATAPATH}/tasks', '')
             shutil.copy(source_file, destination)
             
 
@@ -561,9 +425,7 @@ if __name__ == "__main__":
 
     graph_process(
         abs=args.abs, 
-        merge=args.merge,
-        plqy=args.plqy,
         vector=args.vector
     )
     if args.bound:
-        save_bounds(abs=args.abs, merge=args.merge, plqy=args.plqy)
+        save_bounds(abs=args.abs)

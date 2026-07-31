@@ -38,10 +38,8 @@ LABEL = None
 
 def _parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--source', type=str, default='graph', help="how to create complex [graph, point, custom]")
+    parser.add_argument('--source', type=str, default='graph', help="how to create complex [graph, point]")
     parser.add_argument('--abs', action='store_true', help='constructs diagrams for absorption data')
-    parser.add_argument('--plqy', action='store_true', help='constructs diagrams for plqy data')
-    parser.add_argument('--plqy-full', action='store_true', help='constructs diagrams for plqy-full data')
     return parser.parse_args()
 
 
@@ -166,38 +164,12 @@ def get_structures_from_cif(filepath: str) -> list:
     return structures
 
 
-def get_structures_from_cif_plqy(filepath: str) -> list:
-    # ! parse_structures() returns "Incorrect stoichiometry" error
-    # ! --> bypass occupancy checks
-    cif_parser = CifParser(filepath, occupancy_tolerance=np.inf)
-    structures = cif_parser.parse_structures(check_occu=False)
-    if len(structures) > 1:
-        print(f"[PLQY Structures] File {filepath} generates multiple structures")
-    
-    for site in structures[0]:
-        total_occ = sum(site.species.values())
-        if total_occ > 1.0:
-            new_species_dict = {sp: occ / total_occ for sp, occ in site.species.items()}
-            new_species = Composition.from_weight_dict(new_species_dict)
-            site.species = new_species
-    return structures
-
-
-def get_structures_from_cif_plqy_full(filepath: str) -> list:
-    cif_parser = CifParser(filepath, occupancy_tolerance=1.1)
-    structures = cif_parser.parse_structures()
-    
-    if len(structures) > 1:
-        print(f"[PLQY Structures] File {filepath} generates multiple structures")
-    return structures
-
-
 def compute_dist_mat_for_cif(args):
     '''
     distance matrix is normalized; max pairwise distance is 1
     '''
     # accept one tuple for multiprocessing
-    system, filename, structure, plqy, plqy_full = args
+    system, filename, structure = args
 
     if structure is None:
         print(f"extracting structure for {filename}")
@@ -205,12 +177,7 @@ def compute_dist_mat_for_cif(args):
         structure_filename = f"{CIF_DIRECTORY}/{system}/{filename}"
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            if plqy:
-                structures = get_structures_from_cif_plqy(structure_filename)
-            elif plqy_full:
-                structures = get_structures_from_cif_plqy_full(structure_filename)
-            else:
-                structures = get_structures_from_cif(structure_filename)
+            structures = get_structures_from_cif(structure_filename)
         structure = structures[0].get_reduced_structure()
 
     # get distance matrix for each pair of frac. coordinates
@@ -235,7 +202,7 @@ def compute_dist_mat_for_cif(args):
     return filename[:-4], dist_mat / max_dist, max_dist   # normalized to 1
 
 
-def cif_to_dist_mat_norm(plqy=False, plqy_full=False):
+def cif_to_dist_mat_norm():
     n_workers = get_num_cpus()
     dist_dict = dict()
 
@@ -254,9 +221,9 @@ def cif_to_dist_mat_norm(plqy=False, plqy_full=False):
 
         cif_files = fetch_cif_filenames(system)
         if struct_exist:
-            tasks = [(system, filename, system_structs[filename[:-4]], plqy, plqy_full) for filename in cif_files]
+            tasks = [(system, filename, system_structs[filename[:-4]]) for filename in cif_files]
         else:
-            tasks = [(system, filename, None, plqy, plqy_full) for filename in cif_files]
+            tasks = [(system, filename, None) for filename in cif_files]
 
         # uncompleted_files = set([filename[:-4] for filename in cif_files])
 
@@ -274,28 +241,18 @@ def cif_to_dist_mat_norm(plqy=False, plqy_full=False):
             ):
                 crystal_id, dist_mat, max_dist = future.result()
                 system_dist_mats[crystal_id] = (dist_mat, max_dist)
-                # uncompleted_files.remove(crystal_id)
-                # print(uncompleted_files)
-
-        # with ProcessPoolExecutor(
-        #     max_workers=n_workers, 
-        # ) as executor:
-        #     results = executor.map(compute_dist_mat_for_cif, tasks)
-
-        #     for crystal_id, dist_mat in tqdm(results, total=len(tasks), desc=f"PC for {system}: "):
-        #         system_dist_mats[crystal_id] = dist_mat
         
         dist_dict[system] = system_dist_mats
     return dist_dict
 
 
-def compute_persistence_diagrams_point(plqy=False, plqy_full=False):
+def compute_persistence_diagrams_point():
     print(f"------ {{{LABEL}}} POINT CLOUD PERSISTENCE ------")
     n_workers = get_num_cpus()
     print(f"Using {n_workers} job processes")
 
     # compute normalized distance matrices for each crystal for each system
-    dist_dict = cif_to_dist_mat_norm(plqy=plqy, plqy_full=plqy_full)
+    dist_dict = cif_to_dist_mat_norm()
 
     rips = RipsPersistence(
         homology_dimensions=tuple(range(DIMENSION_CNT)),
@@ -335,15 +292,6 @@ def compute_persistence_diagrams_point(plqy=False, plqy_full=False):
                 crystal_diag[dim] *= max_dist
                 crystal_diag[dim][np.isinf(crystal_diag[dim])] = MAX_DIST + 1
 
-        # diagrams_filtered = []
-        # diag_select = DiagramSelector(
-        #     use=True, 
-        #     point_type='finite', 
-        #     limit=MAX_DIST,     # + 1??
-        # )
-        # for diag_crystal in diagrams:
-        #     diagrams_filtered.append(diag_select.fit_transform(diag_crystal))
-
         # match diagrams to crystal id (format with multiple dimensions)
         keys = list(dist_dict[system].keys())
         diagrams_with_id = {
@@ -365,112 +313,17 @@ def compute_persistence_diagrams_point(plqy=False, plqy_full=False):
     print(f"------ END PERSISTENCE ------")
 
 
-############### CUSTOM POINT CLOUD PERSISTENCE ###############
-
-
-def modify_dist_mat(dist_mat, graph):
-    # directed graph (not multigraph)
-    for i, j in graph.edges:
-        dist_mat[i, j] = 0
-        dist_mat[j, i] = 0
-    return dist_mat
-
-
-def compute_persistence_diagrams_custom(plqy=False, plqy_full=False):
-    print(f"------ {{{LABEL}}} CUSTOM POINT CLOUD PERSISTENCE ------")
-    n_workers = get_num_cpus()
-    print(f"Using {n_workers} job processes")
-
-    print(f"Unpacking all graphs...")
-    graph_dict = unpack_all_graphs()
-
-    # compute normalized distance matrices for each crystal for each system
-    dist_dict = cif_to_dist_mat_norm(plqy=plqy, plqy_full=plqy_full)
-
-    rips = RipsPersistence(
-        homology_dimensions=tuple(range(DIMENSION_CNT)),
-        threshold=0.6, 
-        input_type='full distance matrix', 
-        n_jobs=n_workers,
-    )
-
-    # compute diagrams for each system
-    for system in CRYSTAL_SYSTEMS:
-        print(f"Computing PD for {system}")
-
-        # modify dist matrix s.t. graph edges have dist 0
-        dist_mat_system = [
-            modify_dist_mat(item[0], graph_dict[system][id])
-            for id, item in dist_dict[system].items()
-        ]
-        max_dists_system = [item[1] for item in dist_dict[system].values()]
-        # dist_mat_system = list(map(modify_dist_mat, dist_dict[system].values(), graph_dict[system].values()))
-
-        if len(dist_mat_system) == 0:
-            print(f"No crystals for {system} system!")
-            diagrams_with_id = dict()
-            diag_filepath = open_write_file(DIAGRAM_CUSTOM_DIRECTORY, f'{system}.pkl')
-            with open(diag_filepath, 'wb') as f:
-                pickle.dump(diagrams_with_id, f)
-            continue
-        
-        # fit & transform rips to each crystal (point cloud)
-        diagrams = rips.fit_transform(dist_mat_system)
-        # [crystal1, crystal2, ...] where crystaln = [h0_diag, h1_diag, h2_diag]
-
-        # multiply back into original distance scale, turn np.infs into MAX_DIST + 1
-        assert len(diagrams) == len(max_dists_system)
-        for crystal_diag, max_dist in zip(diagrams, max_dists_system):
-            for dim in range(DIMENSION_CNT):
-                crystal_diag[dim] *= max_dist
-                crystal_diag[dim][np.isinf(crystal_diag[dim])] = MAX_DIST + 1
-
-        # diagrams_filtered = []
-        # diag_select = DiagramSelector(
-        #     use=True, 
-        #     point_type='finite', 
-        #     limit=MAX_DIST,     # + 1??
-        # )
-        # for diag_crystal in diagrams:
-        #     diagrams_filtered.append(diag_select.fit_transform(diag_crystal))
-
-        # match diagrams to crystal id (format with multiple dimensions)
-        keys = list(dist_dict[system].keys())
-        diagrams_with_id = {
-            keys[i]: diagrams[i]
-            for i in range(len(diagrams))
-        }
-
-        # print diagram info
-        print(f"diagram cnt: {len(diagrams)}")
-        point_diagram_list = diagrams[0]
-        print("Persistence Diagram Shape for H0:", point_diagram_list[0].shape)
-        print("Points (Birth, Death) for H0:\n", point_diagram_list[0])
-    
-        # save diagrams dict as pickle
-        diag_filepath = open_write_file(DIAGRAM_CUSTOM_DIRECTORY, f'{system}.pkl')
-        with open(diag_filepath, 'wb') as f:
-            pickle.dump(diagrams_with_id, f)
-
-    print(f"------ END PERSISTENCE ------")
-
-
 ############### PERSISTENCE END ###############
 
 
 if __name__ == "__main__":
     args = _parse_args()
 
-    assert args.source in ['graph', 'point', 'custom']
-    assert sum([args.abs, args.plqy, args.plqy_full]) <= 1, "Can only choose one of abs/plqy/plqy-full"
+    assert args.source in ['graph', 'point']
 
     DATA_DIRECTORY = "data/pretrain"
     if args.abs:
         DATA_DIRECTORY = "data/abs"
-    if args.plqy:
-        DATA_DIRECTORY = "data/plqy"
-    if args.plqy_full:
-        DATA_DIRECTORY = "data/plqy-full"
     
     CIF_DIRECTORY = f"{DATA_DIRECTORY}/cif"
     GRAPH_DIRECTORY = f"{DATA_DIRECTORY}/graphs"
@@ -484,13 +337,5 @@ if __name__ == "__main__":
 
     if args.source == 'graph':
         compute_persistence_diagrams_graph()
-    elif args.source == 'point':
-        compute_persistence_diagrams_point(
-            plqy=args.plqy, 
-            plqy_full=args.plqy_full,
-        )
     else:
-        compute_persistence_diagrams_custom(
-            plqy=args.plqy, 
-            plqy_full=args.plqy_full,
-        )
+        compute_persistence_diagrams_point()

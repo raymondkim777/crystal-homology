@@ -436,9 +436,9 @@ class GraphData(Dataset):
     def __init__(
             self, 
             root_dir, 
-            max_num_nbr=36,     # ! shared encoder, so should be max val for pretrain/abs/plqy
+            max_num_nbr=36,     # ! shared encoder, so should be max val for pretrain/abs
             dmin=0, 
-            dmax=16,    # ! shared encoder, so should be max val for pretrain/abs/plqy      # 15.42974841
+            dmax=16,            # ! shared encoder, so should be max val for pretrain/abs      # 15.42974841
             step=0.2,
             random_seed=42,
             attr=False,
@@ -452,6 +452,7 @@ class GraphData(Dataset):
         self.max_num_nbr = max_num_nbr
         self.dmax = dmax
         self.task_specs = task_specs
+        self.predict_file = list(self.task_specs.keys())
         self.warn = warn
         self.attr = attr
         assert os.path.exists(root_dir), 'root_dir does not exist!'
@@ -469,9 +470,6 @@ class GraphData(Dataset):
         for i in range(len(self.id_prop_data)):
             assert self.id_prop_data[i][0][0] == id_mask_data[i][0], 'id_prop and id_mask IDs do not match!'
             self.id_prop_data[i].append(id_mask_data[i])
-        predict_file = os.path.join(self.root_dir, 'tasks', 'predict.pkl')
-        with open(predict_file, 'rb') as f:
-            self.predict_list = pickle.load(f)
         assert len(self.id_prop_data[0][0][1:]) == len(self.predict_list), 'prop count does not match predict count!'
         assert len(self.id_prop_data[0][1][1:]) == len(self.predict_list), 'mask count does not match predict count!'
         
@@ -702,242 +700,3 @@ class GraphData(Dataset):
         nbr_fea_idx = torch.LongTensor(nbr_fea_idx)
         vectorizations = torch.Tensor(vectorizations)
         return (atom_fea, nbr_fea, nbr_fea_idx), vectorizations, diagrams, targets, mask, mp_id
-    
-
-class CifData(Dataset):
-    """
-    The GraphData dataset is a wrapper for a dataset where the crystal structures
-    are stored in the form of NetworkX graphs. The dataset should have the following
-    directory structure:
-
-    root_dir
-    ├── id_prop.csv
-    ├── atom_init.json
-    └── graphs
-        ├── id0.pkl
-        ├── id1.pkl
-        ├── ...
-
-    id_prop.csv: a CSV file with two columns. The first column recodes a
-    unique ID for each crystal, and the second column recodes the value of
-    target property.
-
-    atom_init.json: a JSON file that stores the initialization vector for each
-    element.
-
-    ID.pkl: a Pickle file that encodes the crystal structure as an NX graph, 
-    where ID is the unique ID for the crystal.
-
-    Parameters
-    ----------
-    NEED TO CHANGE
-    root_dir: str
-        The path to the root directory of the dataset
-    max_num_nbr: int
-        The maximum number of neighbors while constructing the crystal graph
-    radius: float
-        The cutoff radius for searching neighbors
-    dmin: float
-        The minimum distance for constructing GaussianDistance
-    step: float
-        The step size for constructing GaussianDistance
-    random_seed: int
-        Random seed for shuffling the dataset
-
-    Returns
-    -------
-
-    atom_fea: torch.Tensor shape (n_i, atom_fea_len)
-    nbr_fea: torch.Tensor shape (n_i, M, nbr_fea_len)
-    nbr_fea_idx: torch.LongTensor shape (n_i, M)
-    target: torch.Tensor shape (1, )
-    cif_id: str or int
-    """
-    def __init__(
-            self, 
-            root_dir, 
-            max_num_nbr=36, 
-            dmin=0, 
-            dmax=16,  # 15.42974841
-            step=0.2,
-            random_seed=42,
-            vec_source='graph', 
-            vector='none',  # 'none', 'image', 'landscape', 'perslay
-            dims=3,
-            task_specs=None,
-    ):
-        self.root_dir = root_dir  # cgcnn/data/<folder>
-        self.max_num_nbr = max_num_nbr
-        self.task_specs = task_specs
-        self.radius = dmax
-        assert os.path.exists(root_dir), 'root_dir does not exist!'
-        id_prop_file = os.path.join(self.root_dir, 'id_prop.csv')
-        assert os.path.exists(id_prop_file), 'id_prop.csv does not exist!'
-        with open(id_prop_file) as f:
-            reader = csv.reader(f)
-            self.id_prop_data = [[[row[0]] + [float(item) for item in row[1:]]] for row in reader]
-        # ! appending mask data to prop data
-        id_mask_file = os.path.join(self.root_dir, 'id_mask.csv')
-        assert os.path.exists(id_mask_file), 'id_mask.csv does not exist!'
-        with open(id_mask_file) as f:
-            reader = csv.reader(f)
-            id_mask_data = [[row[0]] + [float(item) for item in row[1:]] for row in reader]
-        for i in range(len(self.id_prop_data)):
-            assert self.id_prop_data[i][0][0] == id_mask_data[i][0], 'id_prop and id_mask IDs do not match!'
-            self.id_prop_data[i].append(id_mask_data[i])
-        predict_file = os.path.join(self.root_dir, 'tasks', 'predict.pkl')
-        with open(predict_file, 'rb') as f:
-            self.predict_list = pickle.load(f)
-        assert len(self.id_prop_data[0][0][1:]) == len(self.predict_list), 'prop count does not match predict count!'
-        assert len(self.id_prop_data[0][1][1:]) == len(self.predict_list), 'mask count does not match predict count!'
-        
-        # ! shuffling (before calling get_train_val_test_loader in main)
-        random.seed(random_seed)
-        random.shuffle(self.id_prop_data)
-        atom_init_file = os.path.join(self.root_dir, 'atom_init.json')
-        assert os.path.exists(atom_init_file), 'atom_init.json does not exist!'
-        self.ari = AtomCustomJSONInitializer(atom_init_file)
-        self.gdf = GaussianDistance(dmin=dmin, dmax=dmax, step=step)
-
-        # ! vectorization support
-        assert vec_source in ['graph', 'point'], 'incorrect vectorization source input!'
-        assert vector in ['none', 'image', 'landscape', 'perslay'], 'incorrect vectorization input!'
-        self.dim_cnt = dims
-        self.vector = vector
-        self.vector_dict = dict()
-        ch = vec_source[0]
-        if self.vector == 'image':
-            with open(os.path.join(self.root_dir, 'vecs', f'images_{ch}.pkl'), 'rb') as file:
-                self.vector_dict = pickle.load(file)
-        elif self.vector == 'landscape':
-            with open(os.path.join(self.root_dir, 'vecs', f'landscapes_{ch}.pkl'), 'rb') as file:
-                self.vector_dict = pickle.load(file)
-        elif self.vector == 'perslay':
-            with open(os.path.join(self.root_dir, 'vecs', f'diagrams_{ch}.pkl'), 'rb') as file:
-                self.vector_dict = pickle.load(file)  # technically diagrams, not vector
-        if self.vector != 'none':
-            ex_key = list(self.vector_dict.keys())[0]
-            self.vec_prefix = ''
-            if ex_key.startswith('mp-'):
-                self.vec_prefix = 'mp-' 
-            if ex_key.startswith('cif-'):
-                self.vec_prefix = 'cif-' 
-        
-
-    def __len__(self):
-        return len(self.id_prop_data)
-    
-
-    @functools.lru_cache(maxsize=None)  # Cache computed attributes
-    def _load_struct_dict(self, cif_id):
-        with open(os.path.join(self.root_dir, "structs", f"mp-{cif_id}.pkl"), 'rb') as file:
-            return pickle.load(file)
-        
-
-    @functools.lru_cache(maxsize=None)
-    def _get_atom_and_nbr_fea(self, cif_id):
-        struct_dict = self._load_struct_dict(cif_id)
-        crystal = struct_dict['structure']
-
-        ########################
-        # struct_dict format:
-        # {
-        #     structure: <structure>, 
-        #     system: <system>,
-        #     ... (additional properties if relevant)
-        # }
-        ########################
-
-        if crystal.is_ordered:
-            atom_fea = np.vstack([self.ari.get_atom_fea(crystal[i].specie.number)
-                              for i in range(len(crystal))])
-        else:
-            atom_fea = []
-            for site in range(len(crystal)):
-                el_amt_dict = crystal[site].species.get_el_amt_dict()
-                if sum(el_amt_dict.values()) > 1.0:
-                    raise ValueError(f"[CIFData Struct Parse] total amount in site {site} > 1.0")
-                num_to_amt_dict = {
-                    Element(element).number: el_amt_dict[element]
-                    for element in el_amt_dict.keys()
-                }
-                site_embedding = np.sum((
-                    sp_w * self.ari.get_atom_fea(sp_n) 
-                    for sp_n, sp_w in num_to_amt_dict.items()
-                ), axis=0)
-                atom_fea.append(site_embedding)
-            atom_fea = np.vstack(atom_fea)
-
-        all_nbrs = crystal.get_all_neighbors(self.radius, include_index=True)
-        all_nbrs = [sorted(nbrs, key=lambda x: x[1]) for nbrs in all_nbrs]
-        nbr_fea_idx, nbr_fea = [], []
-        for nbr in all_nbrs:
-            if len(nbr) < self.max_num_nbr:
-                # ! disabled custom neighbor warnings
-                # warnings.warn('{} not find enough neighbors to build graph. '
-                #               'If it happens frequently, consider increase '
-                #               'radius.'.format(cif_id))
-                nbr_fea_idx.append(list(map(lambda x: x[2], nbr)) +
-                                   [0] * (self.max_num_nbr - len(nbr)))
-                nbr_fea.append(list(map(lambda x: x[1], nbr)) +
-                               [self.radius + 1.] * (self.max_num_nbr -
-                                                     len(nbr)))
-            else:
-                nbr_fea_idx.append(list(map(lambda x: x[2],
-                                            nbr[:self.max_num_nbr])))
-                nbr_fea.append(list(map(lambda x: x[1],
-                                        nbr[:self.max_num_nbr])))
-        nbr_fea_idx, nbr_fea = np.array(nbr_fea_idx), np.array(nbr_fea)
-        nbr_fea = self.gdf.expand(nbr_fea)
-
-        atom_fea = torch.tensor(atom_fea, dtype=torch.float32)
-        nbr_fea = torch.tensor(nbr_fea, dtype=torch.float32)
-        nbr_fea_idx = torch.tensor(nbr_fea_idx, dtype=torch.long)
-
-        return atom_fea, nbr_fea, nbr_fea_idx
-
-
-    @functools.lru_cache(maxsize=None)
-    def __getitem__(self, idx):
-        cif_id = self.id_prop_data[idx][0][0]
-
-        # ! multitask targets
-        target_list = list(self.id_prop_data[idx][0][1:])
-        mask_list = list(self.id_prop_data[idx][1][1:])
-        # print("target list:", target_list)
-        # print("mask list:", mask_list)
-
-        targets, mask = dict(), dict()
-        for i in range(len(self.predict_list)):
-            task_type = self.task_specs[self.predict_list[i]]['head']
-            if task_type in ['binary', 'multiclass']:
-                targets[self.predict_list[i]] = torch.tensor([target_list[i]]).long()
-            elif task_type == 'regression':
-                targets[self.predict_list[i]] = torch.tensor([target_list[i]]).float()
-            else:
-                raise ValueError(f'[CIFData] unrecognized target task {task_type}')
-            mask[self.predict_list[i]] = torch.tensor([mask_list[i]]).bool()
-
-        atom_fea, nbr_fea, nbr_fea_idx = self._get_atom_and_nbr_fea(cif_id)
-
-        # ! vectorization & normalization (optional)
-        if self.vector == 'none':
-            vectorizations = np.array([])
-            diagrams = [torch.tensor([], dtype=torch.float32) for _ in range(self.dim_cnt)]
-        elif self.vector in ['image', 'landscape']:
-            vectorizations = np.hstack([self.vector_dict[f'mp-{cif_id}'][dim] for dim in range(self.dim_cnt)])
-            diagrams = [torch.tensor([], dtype=torch.float32) for _ in range(self.dim_cnt)]
-        elif self.vector == 'perslay':
-            # ! if perslay, then we pass in diagrams (each should be tensor)
-            vectorizations = np.array([])
-            diagrams = [torch.tensor(self.vector_dict[f'mp-{cif_id}'][dim], dtype=torch.float32)
-                        for dim in range(self.dim_cnt)]  # list of np.ndarrays
-
-        # atom_fea = torch.Tensor(atom_fea)
-        # nbr_fea = torch.Tensor(nbr_fea)
-        # nbr_fea_idx = torch.LongTensor(nbr_fea_idx)
-        # target = torch.Tensor([float(target)])
-
-        vectorizations = torch.tensor(vectorizations, dtype=torch.float32)
-
-        return (atom_fea, nbr_fea, nbr_fea_idx), vectorizations, diagrams, targets, mask, cif_id
