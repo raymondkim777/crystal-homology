@@ -38,7 +38,7 @@ bash scripts/persistent_homology.sh
 
 Generated persistence diagrams, landscapes, and images are stored in `code/data/<folder>/diagrams`, `code/data/<folder>/landscapes` and `code/data/<folder>/images` as `.pkl` files, where `<folder>` is `pretrain` or `abs`. Also computes persistence image bounds for later, for `GraphData` input.
 
-## CGCNN Prep
+## TopoMT-CGCNN Prep
 
 Moves graph/vectorization data over to `cgcnn/data/<folder>` folder, and stores `id_prop.csv` and `id_mask.csv`, where `<folder>` is `pretrain` or `abs`. 
 
@@ -46,7 +46,7 @@ Moves graph/vectorization data over to `cgcnn/data/<folder>` folder, and stores 
 bash scripts/cgcnn_prep.sh
 ```
 
-## CGCNN Training
+## TopoMT-CGCNN Training
 
 Trains CGCNN+ to predict crystal systems via classification, with vectorization options. Example command listed below for training a model with landscape vectorizations of graph PH features, using graph augmentation with cartesian displacement vectors. 
 
