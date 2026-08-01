@@ -60,5 +60,5 @@ Note: GraphData parameters `max_num_nbr` and `dmax` in `code/cgcnn/cgcnn/data.py
 cd cgcnn
 ```
 ```
-python main.py --seed --delete --dims 2 --optim Adam --scheduler adapt --train-ratio 0.6 --val-ratio 0.2 --test-ratio 0.2 --epochs 150 --lr 0.001 --batch-size 256 --norm-sample 0 --id ex_graph_landscape --attr --atom-fea-len 64 --n-conv 4 --h-fea-len 128 --o-fea-len 64 --n-h 1 --n-o 1 --vec-fea-len 256 --cat-fea-len 64 --n-vec 1 --vec-source graph --vector landscape --train pretrain data/pretrain
+python main.py --seed --delete --dims 2 --optim Adam --scheduler adapt --train-ratio 0.6 --val-ratio 0.2 --test-ratio 0.2 --epochs 150 --lr 0.001 --batch-size 256 --norm-sample 0 --id example --atom-fea-len 64 --n-conv 4 --h-fea-len 256 --o-fea-len 64 --n-h 1 --n-o 1 --vec-fea-len 256 --cat-fea-len 64 --n-vec 1 --vec-source both --vector landscape --train pretrain data/pretrain
 ```

@@ -18,3 +18,5 @@ code/cgcnn/data/abs*
 code/cgcnn/data/pretrain*
 code/cgcnn/checkpoints
 code/cgcnn/out*
+code/*png
+code/test*
