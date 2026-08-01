@@ -40,7 +40,7 @@ Generates persistence diagrams, landscapes, and images for all crystals, for bot
 bash scripts/persistent_homology.sh
 ```
 
-Generated persistence diagrams, landscapes, and images are stored in `code/data/<folder>/diagrams`, `code/data/<folder>/landscapes` and `code/data/<folder>/images` as `.pkl` files, where `<folder>` is `pretrain` or `abs`. Also computes persistence image bounds for later, for `GraphData` input.
+Generated persistence diagrams, landscapes, and images are stored in `code/data/<folder>/diagrams`, `code/data/<folder>/landscapes` and `code/data/<folder>/images` as `.pkl` files, where `<folder>` is `pretrain` or `abs`. Also computes persistence image bounds for PersLay input.
 
 ## TopoMT-CGCNN Prep
 
@@ -54,7 +54,7 @@ bash scripts/cgcnn_prep.sh
 
 Trains CGCNN+ to predict crystal systems via classification, with vectorization options. Example command listed below for training a model with landscape vectorizations of graph PH features, using graph augmentation with cartesian displacement vectors. 
 
-Note: GraphData parameters `max_num_nbr` and `dmax` need to be set to the smallest integers greater than or equal to the corresponding numbers in `data/<folder>/tasks/bounds.json`.
+Note: GraphData parameters `max_num_nbr` and `dmax` in `code/cgcnn/cgcnn/data.py`need to be set to the smallest integers greater than or equal to the corresponding numbers in `code/cgcnn/data/<folder>/tasks/bounds.json`.
 
 ```
 cd cgcnn
