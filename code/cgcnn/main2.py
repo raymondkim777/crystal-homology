@@ -195,8 +195,8 @@ def main():
     
     assert args.train in ['pretrain', 'abs', 'plqy'],\
         "Wrong train argument! Should be one of 'pretrain', 'abs', 'plqy'"
-    assert (args.train == 'pretrain' and args.finetune == '')or (args.train != 'pretrain' and args.finetune != ''), \
-        "No finetune arg if train=pretrain, and need finetune arg if train=abs/plqy"
+    # assert (args.train == 'pretrain' and args.finetune == '')or (args.train != 'pretrain' and args.finetune != ''), \
+    #     "No finetune arg if train=pretrain, and need finetune arg if train=abs/plqy"
     assert args.resume == '' or args.finetune == '', "Choose one of resume or finetune!"
     assert args.val_metric in ['error', 'loss']
     assert args.vec_source in ['graph', 'point']
@@ -349,8 +349,9 @@ def main():
         )
 
         # ! if fine-tune, freeze lower encoder layers
-        if args.train in ['abs', 'plqy']:
-            assert args.finetune != ''
+        finetune_true = args.finetune != ''
+        if args.train in ['abs', 'plqy'] and finetune_true:
+            # assert args.finetune != ''
 
             # load checkpoint encoder weights
             if not os.path.isfile(args.finetune):
@@ -443,7 +444,7 @@ def main():
             # train for one epoch
             if args.debug:
                 print(f"Training epoch {epoch}")
-            avg_batch_time = train(train_loader, model, criterion, optimizer, epoch, normalizers)
+            avg_batch_time = train(train_loader, model, criterion, optimizer, epoch, normalizers, finetune_true)
 
             t_end_train = perf_counter()
             if epoch == 0:
@@ -530,7 +531,7 @@ def main():
     )
 
 
-def train(train_loader, model, criterion, optimizer, epoch, normalizers):
+def train(train_loader, model, criterion, optimizer, epoch, normalizers, finetune_true):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     # ! stat trackers for each metric per head
@@ -556,7 +557,7 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizers):
     model.train()
 
     # ! set frozen layers to eval (undo model.train() for those layers)
-    if args.train in ['abs', 'plqy']:
+    if args.train in ['abs', 'plqy'] and finetune_true:
         set_frozen_encoder_parts_to_eval(model)
 
     end = time.time()
@@ -804,7 +805,7 @@ def validate(val_loader, model, criterion, normalizers, best_epoch=0, test=False
             mask_dict=mask, 
             task_specs=TASK_SPECS,
         )
-
+        
         # measure accuracy and record loss
         batch_cnt = len(mask[list(TASK_SPECS.keys())[0]])
         losses.update(loss.detach().cpu().item(), n=batch_cnt)
