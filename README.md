@@ -52,7 +52,7 @@ bash scripts/cgcnn_prep.sh
 
 ## TopoMT-CGCNN Training
 
-Trains CGCNN+ to predict crystal systems via classification, with vectorization options. Example command listed below for training a model with landscape vectorizations of graph PH features, using graph augmentation with cartesian displacement vectors. 
+Trains TopoMT-CGCNN to predict multiple crystal properties with configurability. Example command listed below for training a model with landscape vectorizations for both graph and point cloud PH features, without graph augmentation. 
 
 Note: GraphData parameters `max_num_nbr` and `dmax` in `code/cgcnn/cgcnn/data.py`need to be set to the smallest integers greater than or equal to the corresponding numbers in `code/cgcnn/data/<folder>/tasks/bounds.json`.
 
