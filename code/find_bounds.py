@@ -158,8 +158,8 @@ def find_data_dist(abs, merge):
                 all_values['band_gap'].append(doc['band_gap'])
             if doc['efermi'] is not None:
                 all_values['efermi'].append(doc['efermi'])
-            if doc['is_gap_direct'] is not None:
-                all_values['is_gap_direct'].append(int(doc['is_gap_direct']))
+            # if doc['is_gap_direct'] is not None:
+            #     all_values['is_gap_direct'].append(int(doc['is_gap_direct']))
             
             if merge and 'absorption' in doc.keys():
                 doc_abs = doc['absorption']

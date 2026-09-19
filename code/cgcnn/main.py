@@ -305,7 +305,10 @@ def main():
         if args.debug:
             print("Normalizer train sample size 2000")    
         train_indices = list(train_loader.sampler)
-        sample_cnt = min(len(train_indices), args.norm_sample)
+        norm_sample_cnt = len(train_indices) if args.norm_sample == 0 else args.norm_sample
+        if args.debug:
+            print(f"Normalizer train sample size {norm_sample_cnt}")  
+        sample_cnt = min(len(train_indices), norm_sample_cnt)
         sample_indices = sample(train_indices, k=sample_cnt)
         sample_data_list = [dataset[i] for i in tqdm(sample_indices, desc="Normalizers: ")]
         _, _, _, sample_target, sample_mask, _ = collate_pool(sample_data_list)

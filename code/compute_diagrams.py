@@ -200,7 +200,7 @@ def compute_dist_mat_for_cif(args):
     system, filename, structure, plqy, plqy_full = args
 
     if structure is None:
-        print(f"extracting structure for {filename}")
+        # print(f"extracting structure for {filename}")
         # extract structure from CIF
         structure_filename = f"{CIF_DIRECTORY}/{system}/{filename}"
         with warnings.catch_warnings():
@@ -213,6 +213,7 @@ def compute_dist_mat_for_cif(args):
                 structures = get_structures_from_cif(structure_filename)
         structure = structures[0].get_reduced_structure()
 
+    print("Starting")
     # get distance matrix for each pair of frac. coordinates
     n = len(structure)
     dist_mat = np.zeros((n, n))
@@ -231,6 +232,7 @@ def compute_dist_mat_for_cif(args):
             max_dist = max(max_dist, dist)
     if max_dist == 0:
         max_dist = 1
+    print("Finished")
 
     return filename[:-4], dist_mat / max_dist, max_dist   # normalized to 1
 
@@ -258,7 +260,7 @@ def cif_to_dist_mat_norm(plqy=False, plqy_full=False):
         else:
             tasks = [(system, filename, None, plqy, plqy_full) for filename in cif_files]
 
-        # uncompleted_files = set([filename[:-4] for filename in cif_files])
+        uncompleted_files = set([filename[:-4] for filename in cif_files])
 
         with ProcessPoolExecutor(
             max_workers=n_workers,
@@ -274,8 +276,8 @@ def cif_to_dist_mat_norm(plqy=False, plqy_full=False):
             ):
                 crystal_id, dist_mat, max_dist = future.result()
                 system_dist_mats[crystal_id] = (dist_mat, max_dist)
-                # uncompleted_files.remove(crystal_id)
-                # print(uncompleted_files)
+                uncompleted_files.remove(crystal_id)
+                print(uncompleted_files)
 
         # with ProcessPoolExecutor(
         #     max_workers=n_workers, 

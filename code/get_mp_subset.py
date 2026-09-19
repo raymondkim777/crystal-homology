@@ -41,7 +41,8 @@ DATA_PLQY_SUBSET_PATH = f'{DATA_PLQY_PATH}/mp-plqy'
 DATA_PLQY_CIF_PATH_RAW = f'{DATA_PLQY_PATH}/cif-plqy'
 DATA_PLQY_CIF_PATH = f'{DATA_PLQY_PATH}/cif'
 
-PROBLEM_CIFS = ['2349961.cif']
+PROBLEM_CIFS = ['2349961.cif', '1582205.cif']
+# PROBLEM_CIFS = ['2349961.cif']
 
 
 def _parse_args():
@@ -56,6 +57,7 @@ def _parse_args():
     parser.add_argument('--abs', action='store_true', help='collect absorption data')
     parser.add_argument('--merge', action='store_true', help='merge absorption data to subsets')
     parser.add_argument('--plqy', action='store_true', help='create plqy mp doc data')
+    parser.add_argument('--ple', action='store_true', help='create ple mp doc data')
     parser.add_argument('--reject', action='store_true', help='stores rejected mp_ids to CSV')
     return parser.parse_args()
 
@@ -433,17 +435,18 @@ class CrystalSubset:
             return found_systems[0].lower()
 
 
-    def create_plqy_docs(self):
+    def create_cu_docs(self, property):
+        assert property in ['plqy', 'ple']
         # read PLQY CSV, store all PLQY values
-        plqy_values = dict()
-        print(f"Reading PLQY CSV...")
-        with open(f"data/plqy.csv", mode='r', encoding='utf-8') as f:
+        prop_values = dict()
+        print(f"Reading {property.upper()} CSV...")
+        with open(f"data/{property}.csv", mode='r', encoding='utf-8') as f:
             csv_reader = csv.reader(f)
             for row in csv_reader:
-                plqy_values[row[0]] = float(row[1])
+                prop_values[row[0]] = float(row[1])
 
         # read CIF filenames, create dictionary with pymatgen Structures
-        print(f"Fetching PLQY CIF files...")
+        print(f"Fetching {property.upper()} CIF files...")
         cif_files = []
         # os.scandir() returns an iterator of DirEntry objects
         with os.scandir(f"{DATA_PLQY_CIF_PATH_RAW}") as entries:
@@ -453,13 +456,13 @@ class CrystalSubset:
                 cif_files.append(entry.name) 
         print(len(cif_files))
         
-        print(f"Retrieving PLQY structures from CIF files...")
+        print(f"Retrieving {property.upper()} structures from CIF files...")
         plqy_doc_systems = dict()
         for system in CRYSTAL_SYSTEMS:
             plqy_doc_systems[system] = dict()
             open_write_file(f"{DATA_PLQY_CIF_PATH}/{system}", '')
         
-        for crystal_id in plqy_values.keys():
+        for crystal_id in prop_values.keys():
         # for filename in cif_files:
             filename = f"{crystal_id}.cif"
             # ! ignore problematic CIF files
@@ -480,11 +483,11 @@ class CrystalSubset:
             # save structure doc & CIF file
             plqy_doc_systems[system][crystal_id] = {
                 'structure': structure,
-                'plqy': plqy_values[crystal_id],
+                'plqy': prop_values[crystal_id],
             }
             shutil.copy(file_path, f"{DATA_PLQY_CIF_PATH}/{system}")
         
-        print(f"Saving PLQY docs...")
+        print(f"Saving {property.upper()} docs...")
         for system in CRYSTAL_SYSTEMS:
             subset_plqy_path = open_write_file(DATA_PLQY_SUBSET_PATH, f'{system}.pkl')
             with open(subset_plqy_path, 'wb') as f:
@@ -686,22 +689,24 @@ if __name__ == "__main__":
         absorption_data=args.abs
     )
 
-    if args.random:
-        select_random_subset()
-        if args.cif:
-            crystal_subset.convert_subsets_to_cif()
-    else:
-        if args.abs:
-            crystal_subset.collect_abs_mp_data(merge=args.merge)
-        if args.subset:
-            crystal_subset.select_and_save_subset_ids(
-                subset_size=args.size,
-                subset_large=args.large,
-                total_size=args.size_large,
-                reject=args.reject, 
-                abs=args.abs,
-            )
-        if args.cif:
-            crystal_subset.convert_subsets_to_cif(absorb=args.abs)
+    # if args.random:
+    #     select_random_subset()
+    #     if args.cif:
+    #         crystal_subset.convert_subsets_to_cif()
+    # else:
+    #     if args.abs:
+    #         crystal_subset.collect_abs_mp_data(merge=args.merge)
+    #     if args.subset:
+    #         crystal_subset.select_and_save_subset_ids(
+    #             subset_size=args.size,
+    #             subset_large=args.large,
+    #             total_size=args.size_large,
+    #             reject=args.reject, 
+    #             abs=args.abs,
+    #         )
+    #     if args.cif:
+    #         crystal_subset.convert_subsets_to_cif(absorb=args.abs)
     if args.plqy:
-        crystal_subset.create_plqy_docs()
+        crystal_subset.create_cu_docs('plqy')
+    if args.ple:
+        crystal_subset.create_cu_docs('ple')

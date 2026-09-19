@@ -101,16 +101,19 @@ def process_one_cif(args):
     system, filename, structure, plqy, plqy_full = args
 
     if structure is None:
-        structure_filename = f"{CIF_DIRECTORY}/{system}/{filename}"
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            if plqy:
-                structures = get_structures_from_cif_plqy(structure_filename)
-            elif plqy_full:
-                structures = get_structures_from_cif_plqy_full(structure_filename)
-            else:
-                structures = get_structures_from_cif(structure_filename)
-        structure = structures[0].get_reduced_structure()
+        try:
+            structure_filename = f"{CIF_DIRECTORY}/{system}/{filename}"
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                if plqy:
+                    structures = get_structures_from_cif_plqy(structure_filename)
+                elif plqy_full:
+                    structures = get_structures_from_cif_plqy_full(structure_filename)
+                else:
+                    structures = get_structures_from_cif(structure_filename)
+            structure = structures[0].get_reduced_structure()
+        except ValueError as e:
+            return filename[:-4], None, None, None, False
 
     ordered_structure = structure
     if not structure.is_ordered:
@@ -181,7 +184,7 @@ def process_one_cif(args):
     # nx_graph = nx_graph.to_undirected()
     crystal_id = filename[:-4]
 
-    return crystal_id, structure, nx_multigraph, nx_graph
+    return crystal_id, structure, nx_multigraph, nx_graph, True
 
 
 def init_crystalnn(crystalnn, crystalnn_large):
@@ -217,6 +220,7 @@ def construct_crystalnn_graph(plqy=False, plqy_full=False) -> None:
         system_graphs = dict()
 
         cif_files = fetch_cif_filenames(system)
+        unparsed_cifs = []
 
         struct_exist = False
         if os.path.isfile(f"{STRUCTURE_DIRECTORY}/{system}.pkl"):
@@ -244,9 +248,12 @@ def construct_crystalnn_graph(plqy=False, plqy_full=False) -> None:
                 total=len(futures),
                 desc=f'{system}: ',
             ):
-                crystal_id, structure, nx_multigraph, nx_graph = future.result()
+                crystal_id, structure, nx_multigraph, nx_graph, success = future.result()
             # results = executor.map(process_one_cif, tasks, chunksize=8)
             # for crystal_id, structure, nx_multigraph, nx_graph in tqdm(results, total=len(tasks)):
+                if not success:
+                    unparsed_cifs.append(crystal_id)
+                    continue
                 system_structures[crystal_id] = structure
                 system_multigraphs[crystal_id] = nx_multigraph
                 system_graphs[crystal_id] = nx_graph
@@ -266,6 +273,8 @@ def construct_crystalnn_graph(plqy=False, plqy_full=False) -> None:
         graph_filepath = open_write_file(GRAPH_DIRECTORY, f'{system}.pkl')
         with open(graph_filepath, 'wb') as f:
             pickle.dump(system_graphs, f)
+
+        print(f"Finished parsing system {system}; unparsable CIFs: {unparsed_cifs}")
         
     print(f"Unordered structures: {len(unordered_id_list)}")
     with open(f'{DATA_DIRECTORY}/unordered.txt', 'w') as f:

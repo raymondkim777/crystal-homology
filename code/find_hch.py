@@ -20,7 +20,7 @@ from utils import CRYSTAL_SYSTEMS, open_write_file
 
 
 COD_CSV_PATH = 'data/COD-selection.csv'
-PLQY_FULL_PATH = 'data/plqy-full'
+PLQY_FULL_PATH = 'data/plqy'
 PLQY_FULL_CIF_PATH = f'{PLQY_FULL_PATH}/cif'
 PLQY_FULL_CIF_RAW_PATH = f'{PLQY_FULL_PATH}/cif-raw'
 PLQY_FULL_DOC_PATH = f'{PLQY_FULL_PATH}/cod-plqy'
@@ -221,12 +221,12 @@ def is_organic_edge(attr1, attr2):
 
 
 def collect_hybrid_cu_halides(debug=False):
-    if not os.path.isdir(PLQY_FULL_CIF_RAW_PATH):
-        id_list = filter_copper_and_halide()
-        print(f'Crystal # with Cu and Halides: {len(id_list)}')
-        collect_cifs(id_list)
-    else:
-        print(f"PLQY full CIF directory exists, skipping CIF downloads")
+    # if not os.path.isdir(PLQY_FULL_CIF_RAW_PATH):
+    #     id_list = filter_copper_and_halide()
+    #     print(f'Crystal # with Cu and Halides: {len(id_list)}')
+    #     collect_cifs(id_list)
+    # else:
+    #     print(f"PLQY full CIF directory exists, skipping CIF downloads")
     
     cif_filenames = fetch_cif_filenames()
 
@@ -307,7 +307,7 @@ def collect_hybrid_cu_halides(debug=False):
         f.write("COD IDs of unordered parsed CIF structures:\n")
         for cod_id in unordered_id_list:
             f.write(f"{cod_id}\n")
-        f.write("ENDLINST")
+        f.write("ENDLIST")
     
     print(f"Found {len(plqy_docs_dict.keys())} hybrid Cu halides")
 
