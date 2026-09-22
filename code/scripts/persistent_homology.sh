@@ -6,6 +6,8 @@ export NUMEXPR_NUM_THREADS=1
 # python compute_diagrams.py --source graph
 # python compute_diagrams.py --source point
 # python compute_diagrams.py --source custom
+# python compute_diagrams.py --atom
+python vectorizers.py --atom --example
 # python vectorizers.py --source graph --landscape --image
 # python vectorizers.py --source point --landscape --image
 # python vectorizers.py --source custom --landscape --image
@@ -19,10 +21,10 @@ export NUMEXPR_NUM_THREADS=1
 
 # python compute_diagrams.py --source graph --plqy
 # python compute_diagrams.py --source point --plqy
-python compute_diagrams.py --source custom --plqy
-python vectorizers.py --source graph --plqy --landscape --image
-python vectorizers.py --source point --plqy --landscape --image
-python vectorizers.py --source custom --plqy --landscape --image
+# python compute_diagrams.py --source custom --plqy
+# python vectorizers.py --source graph --plqy --landscape --image
+# python vectorizers.py --source point --plqy --landscape --image
+# python vectorizers.py --source custom --plqy --landscape --image
 
 # python compute_diagrams.py --source graph --plqy-full
 # python compute_diagrams.py --source point --plqy-full

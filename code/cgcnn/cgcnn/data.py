@@ -624,19 +624,29 @@ class GraphData(Dataset):
             # ]
             # atom_fea = np.hstack((feature_list, periodic_coords))
 
-            # add distance to periodic center
-            dists_to_periodic_center = self.__find_distances(
-                cid=mp_id, 
-                graph=graph, 
-                lattice_matrix=graph_dict['lattice_matrix']
-            )[:, np.newaxis]
-            atom_fea = np.hstack((feature_list, dists_to_periodic_center))
+            # # add distance to periodic center
+            # dists_to_periodic_center = self.__find_distances(
+            #     cid=mp_id, 
+            #     graph=graph, 
+            #     lattice_matrix=graph_dict['lattice_matrix']
+            # )[:, np.newaxis]
+            # atom_fea = np.hstack((feature_list, dists_to_periodic_center))
 
             # # do both
             # atom_fea = np.hstack((feature_list, periodic_coords, dists_to_periodic_center))
 
             # # do nothing
             # atom_fea = np.vstack(feature_list)
+
+            # ! ATOM SPECIFIC PERSISTENT HOMOLOGY
+            node_ph_vector = None
+            atom_ph_vectors = [
+                node_ph_vector[node]
+                for node in graph.nodes
+            ]
+
+            atom_fea = np.hstack((feature_list, atom_ph_vectors))
+
         else:
             atom_fea = np.vstack(feature_list)
 

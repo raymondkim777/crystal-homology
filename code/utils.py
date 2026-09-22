@@ -138,6 +138,7 @@ PLQY_TASK_SPECS = {
 }
 
 DIMENSION_CNT = 2
+ATOM_DIMENSION_CNT = 2
 
 
 def get_num_cpus(default=1):

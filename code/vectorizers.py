@@ -5,12 +5,13 @@ from tqdm import tqdm
 import matplotlib
 import matplotlib.pyplot as plt
 matplotlib.use('Agg')  # Directs Matplotlib to write to a file, not a GUI window
+from gudhi import plot_persistence_diagram
 import gudhi.representations as gdr
 import gtda.diagrams as gtd
 from gudhi.representations import Landscape, PersistenceImage
 
 from concurrent.futures import ProcessPoolExecutor
-from compute_diagrams import plot_persistence_diagram
+from compute_diagrams import plot_persistence_diagram_gtda
 from utils import CRYSTAL_SYSTEMS, DIMENSION_CNT, get_num_cpus, open_write_file, get_max_dist
 
 
@@ -38,13 +39,18 @@ LA_RESOLUTION = 100
 IM_BANDWIDTH = 1.0
 IM_RESOLUTION = [20, 20]
 
+# atom
+ATOM_LA_LAYER = 2
+ATOM_LA_RESOLUTION = 25
+
 
 def _parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--source', type=str, default='graph', help='persistence diagram source [graph, point]')
+    parser.add_argument('--source', type=str, default='none', help='persistence diagram source [none, graph, point, custom]')
     parser.add_argument('--abs', action='store_true', help='vectorizes absorption PDs')
     parser.add_argument('--plqy', action='store_true', help='Only focuses separately on data/plqy')
     parser.add_argument('--plqy-full', action='store_true', help='Only focuses separately on data/plqy-full')
+    parser.add_argument('--atom', action='store_true', help='computes atom-specific persistent diagrams')
     parser.add_argument('--landscape', action='store_true', help='generates persistence landscapes')
     parser.add_argument('--image', action='store_true', help='generates persistence images')
     parser.add_argument('--example', action='store_true', help='display some examples')
@@ -360,7 +366,7 @@ def plot_landscape(system: str, mat_id: str, dim: int=0):
     Plots persistence diagram and landscape of given material id in given system, for given dimension. 
     '''
     diagram = collect_system_diagrams(system)[mat_id]
-    plot_persistence_diagram(diagram)
+    plot_persistence_diagram_gtda(diagram)
 
     transformers = fit_landscape_transformers(num_landscapes=LA_LAYER, resolution=LA_RESOLUTION)
     with open(f'{LANDSCAPE_DIRECTORY}/{system}.pkl', 'rb') as file:
@@ -388,7 +394,7 @@ def plot_image(system: str, mat_id: str, dim: int=0):
     Plots persistence diagram and image of given material id in given system, for given dimension. 
     '''
     diagram = collect_system_diagrams(system)[mat_id]
-    plot_persistence_diagram(diagram)
+    plot_persistence_diagram_gtda(diagram)
 
     transformers = fit_image_transformers(bandwidth=IM_BANDWIDTH, resolution=IM_RESOLUTION)
     with open(f'{IMAGE_DIRECTORY}/{system}.pkl', 'rb') as file:
@@ -405,6 +411,126 @@ def plot_image(system: str, mat_id: str, dim: int=0):
     plt.colorbar(label="Pixel Intensity")
     # plt.show()
     plt.savefig(f'{IMAGE_DIRECTORY}/example_gudhi.png')
+
+
+################   ATOM VECTORIZATIONS   ################
+
+
+def collect_system_diagrams_atom(system: str) -> dict:
+    '''Collects atom-specific persistence diagrams from .pkl files from one system as a dict.'''
+    with open(f'{ATOM_DIAGRAM_DIRECTORY}/{system}.pkl', 'rb') as file:
+        diagrams = pickle.load(file)
+    return diagrams     # diagrams[crystal][site_idx] = PD
+
+
+def fit_atom_landscape_transformers(num_landscapes, resolution):
+    '''
+    For each dimension, fits atom-specific landscape transformers to all system persistence diagrams. 
+    '''
+    # ! sample_range is already provided, so no need to fit to actual diagrams
+    # define and fit landscape classes
+    print("fitting atom-specific landscape transformers...")
+
+    dummy_diagrams = [np.empty((0, 2))]
+
+    transformers = []  # one per dimension
+    for dim in range(DIMENSION_CNT):
+        transformer = Landscape(
+            num_landscapes=num_landscapes, 
+            resolution=resolution, 
+            sample_range=[0, MAX_DIST]
+        )
+        # transformer.fit(processed_diagrams[dim])
+        transformer.fit(dummy_diagrams)  # to create grid_
+        transformers.append(transformer)
+    return transformers
+
+
+def compute_atom_landscapes_for_system(args):
+    '''
+    Generates persistence landscapes for one system for each dimension.
+    '''
+    system, transformers = args
+
+    # print(f"computing landscapes for {system} system...")
+    # process all diagrams in system
+    system_diagrams = collect_system_diagrams_atom(system)  # diagrams[crystal][site_idx] = PD
+
+    if len(system_diagrams.keys()) == 0:
+        return system, dict()
+
+    system_atom_landscapes = dict()
+
+    for crystal_id, site_diagrams in system_diagrams.items():
+        site_diagrams_by_dims = process_all_gudhi_diagrams(site_diagrams)
+
+        # generate persistence landscapes for all diagrams for each dimension
+        site_landscapes_by_dim = []  # [[h0_land1, h0_land2, ...], [h1_land1, ...], ...]
+        for dim in range(DIMENSION_CNT):
+            site_landscapes_by_dim.append(transformers[dim].transform(site_diagrams_by_dims[dim]))
+
+        system_atom_landscapes[crystal_id] = site_landscapes_by_dim
+        
+    return system, system_atom_landscapes
+
+
+
+def persistence_landscape_atom(
+        num_landscapes=ATOM_LA_LAYER, 
+        resolution=ATOM_LA_RESOLUTION,
+    ):
+    '''
+    Generates atom-specific persistence landscapes for every system for each dimension.
+    Uses multiprocessing. 
+    '''
+    n_workers = get_num_cpus()
+    landscape_transformers = fit_atom_landscape_transformers(num_landscapes, resolution)
+    tasks = [(system, landscape_transformers) for system in CRYSTAL_SYSTEMS]
+
+    print(f"Computing landscapes with {n_workers} workers...")
+    with ProcessPoolExecutor(
+        max_workers=n_workers,
+    ) as executor:
+        results = executor.map(compute_atom_landscapes_for_system, tasks)
+
+        for system, system_landscapes in tqdm(results, total=len(CRYSTAL_SYSTEMS)):
+            # save system images
+            landscape_path = open_write_file(ATOM_LANDSCAPE_DIRECTORY, f"{system}.pkl")
+            with open(landscape_path, 'wb') as f:
+                pickle.dump(system_landscapes, f)
+
+
+def plot_landscape_atom(system: str, mat_id: str, dim: int=0, site: int=0):
+    '''
+    Plots persistence diagram and landscape of given material id in given system, for given dimension. 
+    '''
+    diagram = collect_system_diagrams_atom(system)[mat_id][site]  # [dim] - all dims
+    print(type(diagram))
+    print(diagram)
+    # plot_persistence_diagram_gtda(diagram)  # --> gtda diagram plot function
+    plot_persistence_diagram(diagram, legend=True)
+    plt.savefig(f"{ATOM_DIAGRAM_DIRECTORY}/diagram_{mat_id}_atom.png")
+
+
+    transformers = fit_atom_landscape_transformers(num_landscapes=ATOM_LA_LAYER, resolution=ATOM_LA_RESOLUTION)
+    with open(f'{ATOM_LANDSCAPE_DIRECTORY}/{system}.pkl', 'rb') as file:
+        landscapes = pickle.load(file)
+    landscape_to_plot = landscapes[mat_id][dim][site]
+    
+    x_values = np.linspace(*transformers[dim].sample_range_fixed_, ATOM_LA_RESOLUTION)
+    plt.figure(figsize=(8, 5))  
+
+    for i in range(ATOM_LA_LAYER):
+        y_values = landscape_to_plot[i * ATOM_LA_RESOLUTION : (i + 1) * ATOM_LA_RESOLUTION]
+        plt.plot(x_values, y_values, label=f"Landscape {i+1}")
+
+    plt.title(f"Atom Persistence Landscape Dimension {dim}")
+    plt.xlabel("Parameter $t$")
+    plt.ylabel("$\lambda_k(t)$")
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    # plt.show()
+    plt.savefig(f'{ATOM_LANDSCAPE_DIRECTORY}/example_gudhi.png')
 
 
 ################   UNUSED FROM BELOW   ################
@@ -437,7 +563,7 @@ def plot_landscape_gtda(
 if __name__ == "__main__":
     args = _parse_args()
 
-    assert args.source in ['graph', 'point', 'custom']
+    assert args.source in ['none', 'graph', 'point', 'custom']
     assert sum([args.abs, args.plqy, args.plqy_full]) <= 1, "Can only choose one of abs/plqy/plqy-full"
 
     DATA_DIRECTORY = "data/pretrain"
@@ -448,23 +574,34 @@ if __name__ == "__main__":
     if args.plqy_full:
         DATA_DIRECTORY = "data/plqy-full"
 
-    if args.source == 'graph':
-        ch = 'g'
-    elif args.source == 'point':
-        ch = 'p'
-    else:
-        ch = 'c'
-    DIAGRAM_DIRECTORY = f"{DATA_DIRECTORY}/diagrams_{ch}"
-    LANDSCAPE_DIRECTORY = f"{DATA_DIRECTORY}/landscapes_{ch}"
-    IMAGE_DIRECTORY = f"{DATA_DIRECTORY}/images_{ch}"
     MAX_DIST = get_max_dist(DATA_DIRECTORY) 
 
-    if args.landscape:
-        persistence_landscape(source=args.source)
+    if args.source != 'none':
+        if args.source == 'graph':
+            ch = 'g'
+        elif args.source == 'point':
+            ch = 'p'
+        else:
+            ch = 'c'
+        DIAGRAM_DIRECTORY = f"{DATA_DIRECTORY}/diagrams_{ch}"
+        LANDSCAPE_DIRECTORY = f"{DATA_DIRECTORY}/landscapes_{ch}"
+        IMAGE_DIRECTORY = f"{DATA_DIRECTORY}/images_{ch}"
+
+        if args.landscape:
+            persistence_landscape(source=args.source)
+            if args.example:
+                plot_landscape_gtda('triclinic', 'mp-2981')
+                plot_landscape('triclinic', 'mp-2981', dim=0)
+        if args.image:
+            persistence_image(source=args.source)
+            if args.example:
+                plot_image('triclinic', 'mp-2981', dim=1)
+
+    if args.atom:
+        ATOM_DIAGRAM_DIRECTORY = f"{DATA_DIRECTORY}/diagrams_atom_p"
+        ATOM_LANDSCAPE_DIRECTORY = f"{DATA_DIRECTORY}/landscapes_atom_p"
+
+        persistence_landscape_atom()
         if args.example:
-            plot_landscape_gtda('triclinic', 'mp-2981')
-            plot_landscape('triclinic', 'mp-2981', dim=0)
-    if args.image:
-        persistence_image(source=args.source)
-        if args.example:
-            plot_image('triclinic', 'mp-2981', dim=1)
+            plot_landscape_atom('triclinic', 'mp-2981', dim=0, site=0)
+        

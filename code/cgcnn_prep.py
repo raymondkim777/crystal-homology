@@ -1,3 +1,4 @@
+import os
 import argparse
 import random
 import pickle
@@ -531,6 +532,23 @@ def graph_process(abs=False, merge=False, plqy=False, vector=False):
                 cgcnn_landscape_datapath = open_write_file(f"{des_dirs[i]}/vecs", f'landscapes_{ch}.pkl')
                 with open(cgcnn_landscape_datapath, 'wb') as f:
                     pickle.dump(landscape_dict, f)
+
+            # atom specific PH vectorizations
+            dir_path = f'{vec_dirs[i]}/landscapes_atom_p'
+            atom_exist = os.path.isdir(dir_path)
+
+            if atom_exist:
+                print(f"Atom-specific PH folder exists!")
+                
+                landscape_atom_dict = dict()
+                for system in CRYSTAL_SYSTEMS:
+                    with open(f"{dir_path}/{system}.pkl", 'rb') as file:
+                        landscapes_atom = pickle.load(file)
+                    landscape_atom_dict = landscape_atom_dict | landscapes_atom  # [mat_id][dim][site]
+
+                cgcnn_atom_datapath = open_write_file(f"{des_dirs[i]}/vecs", f'landscapes_atom_p.pkl')
+                with open(cgcnn_atom_datapath, 'wb') as f:
+                    pickle.dump(landscape_atom_dict, f)
 
 
 def save_bounds(abs=False, merge=False, plqy=False):
