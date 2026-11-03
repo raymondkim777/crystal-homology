@@ -9,6 +9,7 @@ from gudhi import plot_persistence_diagram
 import gudhi.representations as gdr
 import gtda.diagrams as gtd
 from gudhi.representations import Landscape, PersistenceImage
+from gudhi.representations.vector_methods import BettiCurve
 
 from concurrent.futures import ProcessPoolExecutor
 from compute_diagrams import plot_persistence_diagram_gtda
@@ -42,6 +43,7 @@ IM_RESOLUTION = [20, 20]
 # atom
 ATOM_LA_LAYER = 2
 ATOM_LA_RESOLUTION = 25
+ATOM_BE_RESOLUTION = 50
 
 
 def _parse_args():
@@ -50,9 +52,11 @@ def _parse_args():
     parser.add_argument('--abs', action='store_true', help='vectorizes absorption PDs')
     parser.add_argument('--plqy', action='store_true', help='Only focuses separately on data/plqy')
     parser.add_argument('--plqy-full', action='store_true', help='Only focuses separately on data/plqy-full')
-    parser.add_argument('--atom', action='store_true', help='computes atom-specific persistent diagrams')
     parser.add_argument('--landscape', action='store_true', help='generates persistence landscapes')
     parser.add_argument('--image', action='store_true', help='generates persistence images')
+
+    parser.add_argument('--atom', action='store_true', help='computes atom-specific persistent diagrams')
+    parser.add_argument('--atom-vec', type=str, default='landscape', help='atom vectorization method [landscape, betti]')
     parser.add_argument('--example', action='store_true', help='display some examples')
     return parser.parse_args()
 
@@ -423,7 +427,7 @@ def collect_system_diagrams_atom(system: str) -> dict:
     return diagrams     # diagrams[crystal][site_idx] = PD
 
 
-def fit_atom_landscape_transformers(num_landscapes, resolution):
+def fit_atom_vector_transformers(vector_method, num_landscapes, resolution):
     '''
     For each dimension, fits atom-specific landscape transformers to all system persistence diagrams. 
     '''
@@ -435,27 +439,34 @@ def fit_atom_landscape_transformers(num_landscapes, resolution):
 
     transformers = []  # one per dimension
     for dim in range(DIMENSION_CNT):
-        transformer = Landscape(
-            num_landscapes=num_landscapes, 
-            resolution=resolution, 
-            sample_range=[0, MAX_DIST]
-        )
+        if vector_method == 'landscape':
+            transformer = Landscape(
+                num_landscapes=num_landscapes, 
+                resolution=resolution, 
+                sample_range=[0, MAX_DIST]
+            )
+        elif vector_method == 'betti':
+            transformer = BettiCurve(
+                resolution=resolution, 
+                sample_range=[0, MAX_DIST]
+            )
+        else:
+            raise ValueError(f"atom vectorization method is invalid: {vector_method}")
         # transformer.fit(processed_diagrams[dim])
         transformer.fit(dummy_diagrams)  # to create grid_
         transformers.append(transformer)
     return transformers
 
 
-def compute_atom_landscapes_for_system(args):
+def compute_atom_vectors_for_system(args):
     '''
-    Generates persistence landscapes for one system for each dimension.
+    Generates persistence vectorizations for one system for each dimension.
     '''
     system, transformers = args
 
     # print(f"computing landscapes for {system} system...")
     # process all diagrams in system
     system_diagrams = collect_system_diagrams_atom(system)  # diagrams[crystal][site_idx] = PD
-
     if len(system_diagrams.keys()) == 0:
         return system, dict()
 
@@ -470,58 +481,71 @@ def compute_atom_landscapes_for_system(args):
             site_landscapes_by_dim.append(transformers[dim].transform(site_diagrams_by_dims[dim]))
 
         system_atom_landscapes[crystal_id] = site_landscapes_by_dim
-        
     return system, system_atom_landscapes
 
 
 
-def persistence_landscape_atom(
+def persistence_vector_atom(
+        vector_method,
         num_landscapes=ATOM_LA_LAYER, 
         resolution=ATOM_LA_RESOLUTION,
     ):
     '''
-    Generates atom-specific persistence landscapes for every system for each dimension.
+    Generates atom-specific persistence vectorizations for every system for each dimension.
     Uses multiprocessing. 
     '''
     n_workers = get_num_cpus()
-    landscape_transformers = fit_atom_landscape_transformers(num_landscapes, resolution)
-    tasks = [(system, landscape_transformers) for system in CRYSTAL_SYSTEMS]
+    num_landscapes = ATOM_LA_LAYER
+    if vector_method == 'landscape':
+        resolution = ATOM_LA_RESOLUTION
+    elif vector_method == 'betti':
+        resolution = ATOM_BE_RESOLUTION
+    else:
+        raise ValueError(f"[Atom Resolution Init] vector method is invalid: {vector_method}")
+    
+    vector_transformers = fit_atom_vector_transformers(vector_method, num_landscapes, resolution)
+    tasks = [(system, vector_transformers) for system in CRYSTAL_SYSTEMS]
 
-    print(f"Computing landscapes with {n_workers} workers...")
+    print(f"Computing {vector_method}s with {n_workers} workers...")
     with ProcessPoolExecutor(
         max_workers=n_workers,
     ) as executor:
-        results = executor.map(compute_atom_landscapes_for_system, tasks)
+        results = executor.map(compute_atom_vectors_for_system, tasks)
 
-        for system, system_landscapes in tqdm(results, total=len(CRYSTAL_SYSTEMS)):
+        for system, system_vectors in tqdm(results, total=len(CRYSTAL_SYSTEMS)):
             # save system images
-            landscape_path = open_write_file(ATOM_LANDSCAPE_DIRECTORY, f"{system}.pkl")
-            with open(landscape_path, 'wb') as f:
-                pickle.dump(system_landscapes, f)
+            vector_path = open_write_file(ATOM_VECTOR_DIRECTORY, f"{system}.pkl")
+            with open(vector_path, 'wb') as f:
+                pickle.dump(system_vectors, f)
 
 
-def plot_landscape_atom(system: str, mat_id: str, dim: int=0, site: int=0):
-    '''
-    Plots persistence diagram and landscape of given material id in given system, for given dimension. 
-    '''
-    diagram = collect_system_diagrams_atom(system)[mat_id][site]  # [dim] - all dims
-    print(type(diagram))
-    print(diagram)
-    # plot_persistence_diagram_gtda(diagram)  # --> gtda diagram plot function
-    plot_persistence_diagram(diagram, legend=True)
-    plt.savefig(f"{ATOM_DIAGRAM_DIRECTORY}/diagram_{mat_id}_atom.png")
+def plot_atom_betti(betti_transformer, betti_curve, dim):
+    # Generate the corresponding filtration/x-axis values over the sample range
+    x_axis = np.linspace(
+        betti_transformer.sample_range[0],
+        betti_transformer.sample_range[1],
+        betti_transformer.resolution,
+    )
+
+    # 4. Plot using Matplotlib
+    plt.figure(figsize=(8, 5))
+    plt.plot(x_axis, betti_curve, label="Betti Curve", color="blue", lw=2)
+
+    plt.title(f"Atom Betti Curve Dimension {dim}")
+    plt.xlabel("Filtration Value")
+    plt.ylabel("Betti Number")
+    plt.grid(True, linestyle="--", alpha=0.6)
+    plt.legend()
+    # plt.show()
+    plt.savefig(f'{ATOM_VECTOR_DIRECTORY}/example_atom_betti.png')
 
 
-    transformers = fit_atom_landscape_transformers(num_landscapes=ATOM_LA_LAYER, resolution=ATOM_LA_RESOLUTION)
-    with open(f'{ATOM_LANDSCAPE_DIRECTORY}/{system}.pkl', 'rb') as file:
-        landscapes = pickle.load(file)
-    landscape_to_plot = landscapes[mat_id][dim][site]
-    
-    x_values = np.linspace(*transformers[dim].sample_range_fixed_, ATOM_LA_RESOLUTION)
+def plot_atom_landscape(transformer, landscape, dim):    
+    x_values = np.linspace(*transformer.sample_range_fixed_, ATOM_LA_RESOLUTION)
     plt.figure(figsize=(8, 5))  
 
     for i in range(ATOM_LA_LAYER):
-        y_values = landscape_to_plot[i * ATOM_LA_RESOLUTION : (i + 1) * ATOM_LA_RESOLUTION]
+        y_values = landscape[i * ATOM_LA_RESOLUTION : (i + 1) * ATOM_LA_RESOLUTION]
         plt.plot(x_values, y_values, label=f"Landscape {i+1}")
 
     plt.title(f"Atom Persistence Landscape Dimension {dim}")
@@ -530,7 +554,35 @@ def plot_landscape_atom(system: str, mat_id: str, dim: int=0, site: int=0):
     plt.legend()
     plt.grid(True, alpha=0.3)
     # plt.show()
-    plt.savefig(f'{ATOM_LANDSCAPE_DIRECTORY}/example_gudhi.png')
+    plt.savefig(f'{ATOM_VECTOR_DIRECTORY}/example_atom_landscape.png')
+
+
+def plot_atom_vector(vector_method, system: str, mat_id: str, dim: int=0, site: int=0):
+    '''
+    Plots persistence diagram and vectorization of given material id in given system, for given dimension. 
+    '''
+    diagram = collect_system_diagrams_atom(system)[mat_id][site]  # [dim] - all dims
+    print(type(diagram))
+    print(diagram)
+    # plot_persistence_diagram_gtda(diagram)  # --> gtda diagram plot function
+    plot_persistence_diagram(diagram, legend=True)
+    plt.savefig(f"{ATOM_DIAGRAM_DIRECTORY}/diagram_{mat_id}_atom.png")
+
+    if vector_method == 'landscape':
+        plot_function = plot_atom_landscape
+        resolution = ATOM_LA_RESOLUTION
+    elif vector_method == 'betti':
+        plot_function = plot_atom_betti
+        resolution = ATOM_BE_RESOLUTION
+    else:
+        raise ValueError(f"[Atom plot] vector method is invalid: {vector_method}")
+
+    transformers = fit_atom_vector_transformers(vector_method, num_landscapes=ATOM_LA_LAYER, resolution=resolution)
+    with open(f'{ATOM_VECTOR_DIRECTORY}/{system}.pkl', 'rb') as file:
+        vectors = pickle.load(file)
+    vector_to_plot = vectors[mat_id][dim][site]
+
+    plot_function(transformers[dim], vector_to_plot, dim)
 
 
 ################   UNUSED FROM BELOW   ################
@@ -599,9 +651,10 @@ if __name__ == "__main__":
 
     if args.atom:
         ATOM_DIAGRAM_DIRECTORY = f"{DATA_DIRECTORY}/diagrams_atom_p"
-        ATOM_LANDSCAPE_DIRECTORY = f"{DATA_DIRECTORY}/landscapes_atom_p"
+        ATOM_VECTOR_DIRECTORY = f"{DATA_DIRECTORY}/vectors_atom_p"
 
-        persistence_landscape_atom()
+        assert args.atom_vec in ['landscape', 'betti']
+        persistence_vector_atom(vector_method=args.atom_vec)
         if args.example:
-            plot_landscape_atom('triclinic', 'mp-2981', dim=0, site=0)
+            plot_atom_vector(vector_method=args.atom_vec, system='triclinic', mat_id='mp-2981', dim=1, site=0)
         

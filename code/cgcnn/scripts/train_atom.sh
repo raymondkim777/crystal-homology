@@ -1,0 +1,7 @@
+# python main.py --seed --seed-val 42 --delete --dims 2 --optim Adam --scheduler adapt --attr --train-ratio 0.6 --val-ratio 0.2 --test-ratio 0.2 --epochs 150 --lr 0.001 --batch-size 256 --norm-sample 0 --id atom_test --atom-fea-len 64 --n-conv 4 --h-fea-len 128 --o-fea-len 64 --n-h 1 --n-o 1 --vec-fea-len 256 --cat-fea-len 64 --n-vec 1 --vec-source both --vector landscape --train pretrain data/pretrain
+
+# # no ASPH
+# python main.py --notify --clear-cache --seed --seed-val 46 --delete --dims 2 --optim Adam --scheduler adapt --train-ratio 0.6 --val-ratio 0.2 --test-ratio 0.2 --epochs 150 --lr 0.001 --batch-size 256 --norm-sample 2000 --id bl_baseline --atom-fea-len 64 --n-conv 4 --h-fea-len 128 --o-fea-len 64 --n-h 1 --n-o 1 --vec-fea-len 256 --cat-fea-len 64 --n-vec 1 --vec-source both --vector landscape --train pretrain data/pretrain
+
+# yes ASPH
+python main.py --notify --clear-cache --seed --seed-val 45 --delete --dims 2 --optim Adam --scheduler adapt --attr --train-ratio 0.6 --val-ratio 0.2 --test-ratio 0.2 --epochs 150 --lr 0.001 --batch-size 256 --norm-sample 2000 --id bl_atom05 --atom-fea-len 64 --n-conv 4 --h-fea-len 128 --o-fea-len 64 --n-h 1 --n-o 1 --vec-fea-len 256 --cat-fea-len 64 --n-vec 1 --vec-source both --vector landscape --train pretrain data/pretrain

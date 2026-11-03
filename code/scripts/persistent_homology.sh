@@ -3,14 +3,14 @@ export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 
-# python compute_diagrams.py --source graph
-# python compute_diagrams.py --source point
-# python compute_diagrams.py --source custom
-# python compute_diagrams.py --atom
-python vectorizers.py --atom --example
-# python vectorizers.py --source graph --landscape --image
-# python vectorizers.py --source point --landscape --image
-# python vectorizers.py --source custom --landscape --image
+python compute_diagrams.py --source graph
+python compute_diagrams.py --source point
+python compute_diagrams.py --source custom
+python compute_diagrams.py --atom
+python vectorizers.py --source graph --landscape --image
+python vectorizers.py --source point --landscape --image
+python vectorizers.py --source custom --landscape --image
+python vectorizers.py --atom --atom-vec landscape --example
 
 # python compute_diagrams.py --source graph --abs
 # python compute_diagrams.py --source point --abs

@@ -6,6 +6,7 @@ import sys
 import time
 import csv
 import warnings
+import subprocess
 from random import seed, sample
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -150,6 +151,10 @@ parser.add_argument('--save-fold', action='store_true',
 parser.add_argument('--drop-last', action='store_true',
                     help="whether to drop incomplete batches")
 
+parser.add_argument('--notify', action='store_true',
+                    help="Linux notification for training end/error")
+
+
 
 args = parser.parse_args(sys.argv[1:])
 
@@ -174,13 +179,15 @@ def main():
         seed(args.seed_val)
         np.random.seed(args.seed_val)
 
-        # if torch.cuda.is_available():
-        #     torch.cuda.manual_seed(args.seed_val)
-        #     torch.cuda.manual_seed_all(args.seed_val)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(args.seed_val)
+            torch.cuda.manual_seed_all(args.seed_val)
 
-        # torch.backends.cudnn.benchmark = False
-        # torch.backends.cudnn.deterministic = True
-        # torch.use_deterministic_algorithms(True)
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
+        torch.use_deterministic_algorithms(True)
+
+
         
     print("GPU Available", args.cuda)
 
@@ -315,6 +322,8 @@ def main():
 
         normalizers = dict()
         for prop, value in TASK_SPECS.items():
+            if args.debug:
+                print(f'PROP {prop}')
             if value['head'] in ['binary', 'multiclass']:
                 normalizer = NormalizerProp(torch.zeros(2))
                 normalizer.load_state_dict({'mean': 0., 'std': 1., 'bound': 0.,})
@@ -1208,7 +1217,8 @@ def save_stats_as_csv(
         print(f"Saving {'test' if test else 'val'} results and stats as CSV")
     if test:
         with open(f'out_{args.id}/params_{args.id}.txt', 'w') as f:
-            f.write(f"Attributes:\t\t{'Yes' if args.attr else 'No'}")
+            f.write(f"Seed:\t\t\t{args.seed_val}") 
+            f.write(f"\nAttributes:\t\t{'Yes' if args.attr else 'No'}")
             f.write(f'\nSource:\t\t\t{args.vec_source}' if args.vector != 'none' else '')
             f.write(f"\nVector:\t\t\t{args.vector}")
             f.write(f'\nAtom Len:\t\t{args.atom_fea_len}\nConv Num:\t\t{args.n_conv}')
@@ -1334,7 +1344,7 @@ class NormalizerProp(object):
             self.min, self.max = torch.min(tensor[mask].float()), torch.max(tensor[mask].float())
             self.bound = self.max - self.min
         if args.debug:
-            print('normalprop:', self.mean, self.std, self.min, self.max, self.bound)
+            print('NormalizerProp init:', f"mean {self.mean}", f"std {self.std}", f"min {self.min}", f"max {self.max}", f"bound {self.bound}")
 
     def norm(self, tensor):
         return (tensor - self.mean) / self.std
@@ -1474,5 +1484,42 @@ def adjust_learning_rate(optimizer, epoch, k):
         param_group['lr'] = lr
 
 
+# Linux notification
+def notify(title, message):
+    try:
+        result = subprocess.run(
+            [
+                "notify-send",
+                "-u", "critical",
+                "-a", "CGCNN Training",
+                title,
+                message
+            ],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+
+        print(f"Notification exit code: {result.returncode}", flush=True)
+
+        if result.stderr:
+            print(f"Notification error: {result.stderr}", flush=True)
+
+    except FileNotFoundError:
+        print("ERROR: notify-send is not installed!", flush=True)
+
+
 if __name__ == '__main__':
-    main()
+    if args.notify:
+        try:
+            main()
+        except Exception:
+            print("Running failure notification")
+            notify("Training Failed!", "Something went wrong :c")
+            raise
+        else:
+            print("Running success notification")
+            notify("Training Complete!", "All epochs finished! :3")
+
+    else:
+        main()

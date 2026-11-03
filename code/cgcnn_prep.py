@@ -31,6 +31,7 @@ def _parse_args():
     parser.add_argument('--merge', action='store_true', help='Merges absorption data and subset data')
     parser.add_argument('--plqy', action='store_true', help='Saves PLQY data to CGCNN data path')
     parser.add_argument('--vector', action='store_true', help='Saves vectorizations to CGCNN data path')
+    parser.add_argument('--atom', action='store_true', help='Saves ASPH vectorizations to CGCNN data path')
     parser.add_argument('--bound', action='store_true', help='Saves persistence bounds to CGCNN data path')
     return parser.parse_args()
 
@@ -376,7 +377,7 @@ def write_plqy_id_prop_mask():
         writer.writerows(csv_mask_data)
 
 
-def graph_process(abs=False, merge=False, plqy=False, vector=False):
+def graph_process(abs=False, merge=False, plqy=False, vector=False, atom=False):
     """
     Saves all graphs with labeled crystal systems in CGCNN data folder. 
     Computes and prints required bounds for GraphData.
@@ -533,22 +534,25 @@ def graph_process(abs=False, merge=False, plqy=False, vector=False):
                 with open(cgcnn_landscape_datapath, 'wb') as f:
                     pickle.dump(landscape_dict, f)
 
+            if not atom:
+                continue
+            
             # atom specific PH vectorizations
-            dir_path = f'{vec_dirs[i]}/landscapes_atom_p'
+            dir_path = f'{vec_dirs[i]}/vectors_atom_p'
             atom_exist = os.path.isdir(dir_path)
 
             if atom_exist:
                 print(f"Atom-specific PH folder exists!")
                 
-                landscape_atom_dict = dict()
+                atom_vector_dict = dict()
                 for system in CRYSTAL_SYSTEMS:
                     with open(f"{dir_path}/{system}.pkl", 'rb') as file:
-                        landscapes_atom = pickle.load(file)
-                    landscape_atom_dict = landscape_atom_dict | landscapes_atom  # [mat_id][dim][site]
+                        atom_vectors = pickle.load(file)
+                    atom_vector_dict = atom_vector_dict | atom_vectors  # [mat_id][dim][site]
 
-                cgcnn_atom_datapath = open_write_file(f"{des_dirs[i]}/vecs", f'landscapes_atom_p.pkl')
+                cgcnn_atom_datapath = open_write_file(f"{des_dirs[i]}/vecs", f'vectors_atom_p.pkl')
                 with open(cgcnn_atom_datapath, 'wb') as f:
-                    pickle.dump(landscape_atom_dict, f)
+                    pickle.dump(atom_vector_dict, f)
 
 
 def save_bounds(abs=False, merge=False, plqy=False):
@@ -581,7 +585,8 @@ if __name__ == "__main__":
         abs=args.abs, 
         merge=args.merge,
         plqy=args.plqy,
-        vector=args.vector
+        vector=args.vector,
+        atom=args.atom,
     )
     if args.bound:
         save_bounds(abs=args.abs, merge=args.merge, plqy=args.plqy)

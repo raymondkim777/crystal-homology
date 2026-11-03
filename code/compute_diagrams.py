@@ -38,6 +38,7 @@ ATOM_DIAGRAM_POINT_DIRECTORY = None
 MAX_DIST = None
 LABEL = None
 
+ATOM_ENV_PERC = 5
 
 def _parse_args():
     parser = argparse.ArgumentParser()
@@ -499,7 +500,7 @@ def compute_atom_dist_mats_for_cif(args):
         for radius in radii:
             # get neighborhood atoms within radius 
             neighborhood = structure.get_neighbors(site, radius)
-            if len(neighborhood) <= int(len(structure) / 10):
+            if len(neighborhood) <= int(len(structure) * ATOM_ENV_PERC / 100):
                 continue
             break
 

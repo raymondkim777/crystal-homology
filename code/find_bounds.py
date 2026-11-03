@@ -177,17 +177,17 @@ def find_data_dist(abs, merge):
                     all_values['absorption_onset_energy'].append(doc_abs['absorption_onset_energy'])
         else:
             doc_abs = doc
-            if doc_abs['max_absorption'] is not None:
+            if 'max_absorption' in all_values and doc_abs['max_absorption'] is not None:
                 all_values['max_absorption'].append(doc_abs['max_absorption'])
-            if doc_abs['max_absorption_energy'] is not None:
+            if 'max_absorption_energy' in all_values and doc_abs['max_absorption_energy'] is not None:
                 all_values['max_absorption_energy'].append(doc_abs['max_absorption_energy'])
-            if doc_abs['integrated_absorption'] is not None:
+            if 'integrated_absorption' in all_values and doc_abs['integrated_absorption'] is not None:
                 all_values['integrated_absorption'].append(doc_abs['integrated_absorption'])
-            if doc_abs['integrated_absorption_visible'] is not None:
+            if 'integrated_absorption_visible' in all_values and doc_abs['integrated_absorption_visible'] is not None:
                 all_values['integrated_absorption_visible'].append(doc_abs['integrated_absorption_visible'])
-            if doc_abs['average_absorption_visible'] is not None:
+            if 'average_absorption_visible' in all_values and doc_abs['average_absorption_visible'] is not None:
                 all_values['average_absorption_visible'].append(doc_abs['average_absorption_visible'])
-            if doc_abs['absorption_onset_energy'] is not None:
+            if 'absorption_onset_energy' in all_values and doc_abs['absorption_onset_energy'] is not None:
                 all_values['absorption_onset_energy'].append(doc_abs['absorption_onset_energy'])
 
     open_write_file(f'{DATA_DIRECTORY}/stats', '')

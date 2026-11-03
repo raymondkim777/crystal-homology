@@ -489,6 +489,7 @@ class GraphData(Dataset):
         self.dim_cnt = dims
         self.vector = vector
         self.vector_dicts = []
+        self.vector_atom_dict = []  # dict[mat_id][dim][site]
         if vec_source in ['graph', 'point']:
             chs = [vec_source[0]]
         else:
@@ -510,7 +511,10 @@ class GraphData(Dataset):
                 self.vec_prefix = 'mp-' 
             if ex_key.startswith('cif-'):
                 self.vec_prefix = 'cif-' 
-        
+
+        if self.attr:
+            with open(os.path.join(self.root_dir, 'vecs', f'vectors_atom_p.pkl'), 'rb') as file:
+                self.vector_atom_dict = pickle.load(file)
 
     def __len__(self):
         return len(self.id_prop_data)
@@ -639,12 +643,15 @@ class GraphData(Dataset):
             # atom_fea = np.vstack(feature_list)
 
             # ! ATOM SPECIFIC PERSISTENT HOMOLOGY
-            node_ph_vector = None
+            # self.vector_atom_dict  # dict[mat_id][dim][site]
+            vec_key = f"{self.vec_prefix}{mp_id}"
             atom_ph_vectors = [
-                node_ph_vector[node]
+                np.hstack([
+                    self.vector_atom_dict[vec_key][dim][node] 
+                    for dim in range(self.dim_cnt)
+                ])
                 for node in graph.nodes
             ]
-
             atom_fea = np.hstack((feature_list, atom_ph_vectors))
 
         else:
