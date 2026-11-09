@@ -13,6 +13,7 @@ class MultiTaskLoss(nn.Module):
         self.loss_class = nn.CrossEntropyLoss(reduction='none')
         # self.loss_reg = nn.HuberLoss(reduction='none')
         self.loss_reg = nn.MSELoss(reduction='none')
+        # self.loss_reg = nn.L1Loss(reduction='none')  # ! TEST FOR SINGLE TASK
     
 
     def forward(self, input, target_dict, mask_dict, task_specs):

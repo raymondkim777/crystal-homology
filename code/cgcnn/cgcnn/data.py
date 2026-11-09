@@ -555,10 +555,6 @@ class GraphData(Dataset):
         return dists
     
 
-    def get_id_from_idx(self, idx):
-        return self.id_prop_data[idx][0][0]
-    
-
     @functools.lru_cache(maxsize=None)  # Cache computed attributes
     def __load_graph_dict(self, mp_id):
         with open(os.path.join(self.root_dir, "graphs", f"mp-{mp_id}.pkl"), 'rb') as file:

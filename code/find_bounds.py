@@ -93,7 +93,11 @@ def find_graph_bounds():
 
 
 def find_data_avail():
-    fields = FIELDS[3:] if not args.abs else ABS_PREDICT
+    # fields = FIELDS[3:] if not args.abs else ABS_PREDICT
+    fields = (
+        FIELDS[3:4] + ['direct_gap'] + FIELDS[4:]
+        if not args.abs else ABS_PREDICT
+    )
     all_crystals = {}
     crystal_system = {}
 
@@ -118,9 +122,21 @@ def find_data_avail():
             value = crystal_json[mp_id]
 
             for prop_idx, prop in enumerate(fields):
-                x = value[prop]
+                # x = value[prop]
 
-                if x is not None:
+                # if x is not None:
+                #     A[i, prop_idx] = 1.0
+
+                if prop == 'direct_gap':
+                    bs = value['bandstructure']
+                    available = (
+                        bs is not None
+                        and bs.latimer_munro is not None
+                    )
+                else:
+                    available = value[prop] is not None
+
+                if available:
                     A[i, prop_idx] = 1.0
 
         property_ratios[system] = A.sum(axis=0) / len(ids)

@@ -54,6 +54,7 @@ code/data/pretrain/structs
 code/data/pretrain/diagrams*
 code/data/pretrain/images*
 code/data/pretrain/landscapes*
+code/data/pretrain/vectors*
 code/data/pretrain/image_bounds*.pkl
 
 code/data/abs/structs

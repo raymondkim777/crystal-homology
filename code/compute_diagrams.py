@@ -38,7 +38,8 @@ ATOM_DIAGRAM_POINT_DIRECTORY = None
 MAX_DIST = None
 LABEL = None
 
-ATOM_ENV_PERC = 5
+# ATOM_ENV_PERC = 0
+ATOM_ENV_PERC = int(os.environ.get("ATOM_ENV_PERC", "0"))
 
 def _parse_args():
     parser = argparse.ArgumentParser()
@@ -48,6 +49,8 @@ def _parse_args():
     parser.add_argument('--plqy', action='store_true', help='constructs diagrams for plqy data')
     parser.add_argument('--plqy-full', action='store_true', help='constructs diagrams for plqy-full data')
     parser.add_argument('--atom', action='store_true', help='computes atom-specific persistent diagrams')
+    # TEMPORARY
+    parser.add_argument('--atom-env-perc', type=int, default=0, help='percentage of environment to consider for ASPH')
     return parser.parse_args()
 
 
@@ -742,6 +745,9 @@ if __name__ == "__main__":
     DIAGRAM_CUSTOM_DIRECTORY = f"{DATA_DIRECTORY}/diagrams_c"
     ATOM_DIAGRAM_POINT_DIRECTORY = f"{DATA_DIRECTORY}/diagrams_atom_p"
     MAX_DIST = get_max_dist("data/pretrain")
+    if args.atom:
+        ATOM_ENV_PERC = args.atom_env_perc
+        os.environ["ATOM_ENV_PERC"] = str(ATOM_ENV_PERC)
 
     LABEL = 'ABS' if args.abs else 'PLQY' if args.plqy else 'PLQY-FULL' if args.plqy_full else 'PRETRAIN'
 

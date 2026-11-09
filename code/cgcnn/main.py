@@ -5,6 +5,7 @@ import shutil
 import sys
 import time
 import csv
+import json
 import warnings
 import subprocess
 from random import seed, sample
@@ -16,7 +17,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from sklearn import metrics
-from torch.utils.data import Subset
+from torch.utils.data import Subset, DataLoader, SubsetRandomSampler
 from torch.autograd import Variable
 from torch.optim.lr_scheduler import MultiStepLR, ReduceLROnPlateau
 from sklearn.metrics import r2_score
@@ -105,7 +106,7 @@ parser.add_argument('--n-vec', default=1, type=int, metavar='N',
 parser.add_argument('--debug', action='store_true',
                     help='prints debug messages')
 parser.add_argument('--seed', action='store_true',
-                    help='sets torch seed to 42')
+                    help='sets torch seed to arg to --seed-val')
 parser.add_argument('--seed-val', default=42, type=int,
                     help='value of torch seed')
 parser.add_argument('--delete', action='store_true',
@@ -153,6 +154,10 @@ parser.add_argument('--drop-last', action='store_true',
 
 parser.add_argument('--notify', action='store_true',
                     help="Linux notification for training end/error")
+parser.add_argument('--print-norm', action='store_true',
+                    help="Print normalizer bounds (will NOT run training)")
+parser.add_argument('--save-split', action='store_true', 
+                    help='saves crystal IDs per split to file')
 
 
 
@@ -243,6 +248,58 @@ def main():
             # ! below causes constantly increasing memory
             # persistent_workers=True
         )
+        # ! TEMPORARY - single task 
+
+        # def filter_valid_labels(loader, dataset, prop="direct_gap"):
+        #     mask_col = dataset.predict_list.index(prop) + 1
+
+        #     original_indices = list(loader.sampler.indices)
+
+        #     valid_indices = [
+        #         idx for idx in original_indices
+        #         if dataset.id_prop_data[idx][1][mask_col] == 1
+        #     ]
+
+        #     print(
+        #         f"{prop}: retained {len(valid_indices)} "
+        #         f"of {len(original_indices)} structures"
+        #     )
+
+        #     return DataLoader(
+        #         dataset,
+        #         batch_size=loader.batch_size,
+        #         sampler=SubsetRandomSampler(valid_indices),
+        #         collate_fn=collate_pool,
+        #         num_workers=args.workers,
+        #         pin_memory=args.cuda,
+        #     )
+
+        # train_loader = filter_valid_labels(train_loader, dataset)
+        # val_loader = filter_valid_labels(val_loader, dataset)
+        # test_loader = filter_valid_labels(test_loader, dataset)
+
+        # print("Train samples:", len(train_loader.sampler))
+        # print("Train batches:", len(train_loader))
+        # print("Validation batches:", len(val_loader))
+        # print("Epochs:", args.epochs)
+
+        # ! TEMPORARY - write split crystal IDs to JSON file
+        if args.save_split:
+            train_idx_list = list(train_loader.sampler.indices)
+            val_idx_list = list(val_loader.sampler.indices)
+            test_idx_list = list(test_loader.sampler.indices)
+
+            # id_prop_data[idx][0][0]
+            split_data = {
+                'seed': args.seed_val, 
+                'train': [f"mp-{dataset.id_prop_data[idx][0][0]}" for idx in train_idx_list], 
+                'val': [f"mp-{dataset.id_prop_data[idx][0][0]}" for idx in val_idx_list], 
+                'test': [f"mp-{dataset.id_prop_data[idx][0][0]}" for idx in test_idx_list],
+            }
+            os.makedirs(f"split_info", exist_ok=True)
+            with open(f"split_info/s{args.seed_val}.json", 'w', encoding='utf-8') as f:
+                json.dump(split_data, f, indent=4)
+                return
     else:
         if args.debug:
             print(f"Constructing {args.fold} folds")
@@ -333,9 +390,10 @@ def main():
                 raise ValueError(f"[Normalizer] Unknown task {value['head']}")
             normalizers[prop] = normalizer
 
-        # for prop, norm in normalizers.items():
-        #     print(f"Prop: {prop}, Bound: {norm.get_bound()}")
-        # continue
+        if args.print_norm:
+            for prop, norm in normalizers.items():
+                print(f"Prop: {prop}, Mean: {norm.mean}, SD: {norm.std}, Bound: {norm.get_bound()}")
+            continue
         
         # ! clear dataloader cache
         if args.clear_cache:
@@ -999,7 +1057,8 @@ def validate(
                         test_stats[prop]['test_probs'] += test_probs.tolist()
                         test_stats[prop]['test_targets'] += test_target.view(-1).tolist()
                         test_stats[prop]['test_cif_ids'] += batch_cif_ids
-                        test_stats[prop]['test_masks'] += mask[prop].view(-1).tolist()
+                        # test_stats[prop]['test_masks'] += mask[prop].view(-1).tolist()
+                        test_stats[prop]['test_masks'] += [True] * len(valid_cif_ids)
 
                 
                 elif task == 'regression':
@@ -1015,7 +1074,8 @@ def validate(
                         test_stats[prop]['test_preds'] += test_pred.view(-1).tolist()
                         test_stats[prop]['test_targets'] += targ_valid.view(-1).tolist()
                         test_stats[prop]['test_cif_ids'] += valid_cif_ids
-                        test_stats[prop]['test_masks'] += mask[prop].view(-1).tolist()
+                        # test_stats[prop]['test_masks'] += mask[prop].view(-1).tolist()
+                        test_stats[prop]['test_masks'] += [True] * len(valid_cif_ids)
 
                         all_outputs[prop] += test_pred.view(-1).tolist()
                         all_targets[prop] += targ_valid.view(-1).tolist()

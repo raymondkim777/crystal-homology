@@ -6,7 +6,8 @@ export NUMEXPR_NUM_THREADS=1
 python compute_diagrams.py --source graph
 python compute_diagrams.py --source point
 python compute_diagrams.py --source custom
-python compute_diagrams.py --atom
+# python compute_diagrams.py --atom
+python compute_diagrams.py --atom "$@"  # passes in arguments inputted to bash file
 python vectorizers.py --source graph --landscape --image
 python vectorizers.py --source point --landscape --image
 python vectorizers.py --source custom --landscape --image
