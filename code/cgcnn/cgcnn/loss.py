@@ -3,7 +3,7 @@ import torch.nn as nn
 
 
 class MultiTaskLoss(nn.Module):
-    def __init__(self, device):
+    def __init__(self, device, loss_reg_type='mse'):
         super().__init__()
         self.loss_bin = nn.BCEWithLogitsLoss(reduction='none')
         self.loss_bin_w = nn.BCEWithLogitsLoss(
@@ -12,8 +12,12 @@ class MultiTaskLoss(nn.Module):
         )  
         self.loss_class = nn.CrossEntropyLoss(reduction='none')
         # self.loss_reg = nn.HuberLoss(reduction='none')
-        self.loss_reg = nn.MSELoss(reduction='none')
-        # self.loss_reg = nn.L1Loss(reduction='none')  # ! TEST FOR SINGLE TASK
+        if loss_reg_type == 'mse':
+            self.loss_reg = nn.MSELoss(reduction='none')
+        elif loss_reg_type == 'mae':
+            self.loss_reg = nn.L1Loss(reduction='none')  # ! TEST FOR SINGLE TASK
+        else:
+            raise ValueError(f"criterion input {loss_reg_type} unrecognized")
     
 
     def forward(self, input, target_dict, mask_dict, task_specs):

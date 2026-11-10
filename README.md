@@ -1,7 +1,7 @@
 # Environment Setup
 
 ```
-conda create -n crystal python=3.11
+conda create -n crystal python=3.11 -y
 pip install -r requirements.txt
 ```
 

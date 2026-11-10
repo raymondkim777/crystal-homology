@@ -158,6 +158,8 @@ parser.add_argument('--print-norm', action='store_true',
                     help="Print normalizer bounds (will NOT run training)")
 parser.add_argument('--save-split', action='store_true', 
                     help='saves crystal IDs per split to file')
+parser.add_argument('--loss-reg', default='mse', type=str, metavar="LOSS_REG_TYPE", 
+                    help='type of regression loss: MSE or MAE')
 
 
 
@@ -504,7 +506,7 @@ def main():
         # ! CUSTOM LOSS FUNCTION 
         if args.debug:
             print("Instantiating custom loss function")
-        criterion = MultiTaskLoss(device)
+        criterion = MultiTaskLoss(device, args.loss_reg)
                 
         if args.optim == 'SGD':
             optimizer = optim.SGD(model.parameters(), args.lr,
@@ -1285,6 +1287,7 @@ def save_stats_as_csv(
             f.write(f'\nHidden Len:\t\t{args.h_fea_len}\nHidden Num:\t\t{args.n_h}\nHead Layer Num:\t{args.n_o}')
             f.write(f'\nVec Len:\t\t{args.vec_fea_len}\nVec Layer Num:\t{args.n_vec}\nVec Out Num:\t{args.cat_fea_len}')
             f.write(f"\nVec Freeze:\t\t{args.freeze_vectors}")
+            f.write(f"\nReg Loss:\t\t{args.loss_reg}")
             f.write(f"\nVal Metric:\t\t{args.val_metric}")
             f.write(f'\nBest Epochs:\t{", ".join(list(map(str, best_epochs)))}')
     
