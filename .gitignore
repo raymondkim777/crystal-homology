@@ -6,8 +6,8 @@ __pycache__
 code/data/mp-raw
 
 # DATA RAW FILES
-code/data/pretrain/cif
-!code/data/pretrain/cif-pre.zip
+code/data/pretrain/cif/*
+!code/data/pretrain/cif/cif-pre.zip
 # code/data/pretrain/mp-subset
 code/data/pretrain/rejects.csv
 
