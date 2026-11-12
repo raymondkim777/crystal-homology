@@ -1280,7 +1280,7 @@ def save_stats_as_csv(
     if test:
         with open(f'out_{args.id}/params_{args.id}.txt', 'w') as f:
             f.write(f"Seed:\t\t\t{args.seed_val}") 
-            f.write(f"\nAttributes:\t\t{'Yes' if args.attr else 'No'}")
+            f.write(f"\ASPH:\t\t\t{'Yes' if args.attr else 'No'}")
             f.write(f'\nSource:\t\t\t{args.vec_source}' if args.vector != 'none' else '')
             f.write(f"\nVector:\t\t\t{args.vector}")
             f.write(f'\nAtom Len:\t\t{args.atom_fea_len}\nConv Num:\t\t{args.n_conv}')
