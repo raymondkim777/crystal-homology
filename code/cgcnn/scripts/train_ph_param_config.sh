@@ -22,105 +22,105 @@ HP_CONFIGS=(
      --cat-fea-len 64 \
      --n-vec 0"
 
-    # "--atom-fea-len 128 \
-    #  --n-conv 4 \
-    #  --h-fea-len 128 \
-    #  --o-fea-len 64 \
-    #  --n-h 1 \
-    #  --n-o 1 \
-    #  --vec-fea-len 256 \
-    #  --cat-fea-len 64 \
-    #  --n-vec 0"
+    "--atom-fea-len 128 \
+     --n-conv 4 \
+     --h-fea-len 128 \
+     --o-fea-len 64 \
+     --n-h 1 \
+     --n-o 1 \
+     --vec-fea-len 256 \
+     --cat-fea-len 64 \
+     --n-vec 0"
 
-    # "--atom-fea-len 64 \
-    #  --n-conv 5 \
-    #  --h-fea-len 128 \
-    #  --o-fea-len 64 \
-    #  --n-h 1 \
-    #  --n-o 1 \
-    #  --vec-fea-len 256 \
-    #  --cat-fea-len 64 \
-    #  --n-vec 0"
+    "--atom-fea-len 64 \
+     --n-conv 5 \
+     --h-fea-len 128 \
+     --o-fea-len 64 \
+     --n-h 1 \
+     --n-o 1 \
+     --vec-fea-len 256 \
+     --cat-fea-len 64 \
+     --n-vec 0"
 
-    # "--atom-fea-len 64 \
-    #  --n-conv 4 \
-    #  --h-fea-len 256 \
-    #  --o-fea-len 64 \
-    #  --n-h 1 \
-    #  --n-o 1 \
-    #  --vec-fea-len 256 \
-    #  --cat-fea-len 64 \
-    #  --n-vec 0"
+    "--atom-fea-len 64 \
+     --n-conv 4 \
+     --h-fea-len 256 \
+     --o-fea-len 64 \
+     --n-h 1 \
+     --n-o 1 \
+     --vec-fea-len 256 \
+     --cat-fea-len 64 \
+     --n-vec 0"
 
-    # "--atom-fea-len 64 \
-    #  --n-conv 4 \
-    #  --h-fea-len 128 \
-    #  --o-fea-len 128 \
-    #  --n-h 1 \
-    #  --n-o 1 \
-    #  --vec-fea-len 256 \
-    #  --cat-fea-len 64 \
-    #  --n-vec 0"
+    "--atom-fea-len 64 \
+     --n-conv 4 \
+     --h-fea-len 128 \
+     --o-fea-len 128 \
+     --n-h 1 \
+     --n-o 1 \
+     --vec-fea-len 256 \
+     --cat-fea-len 64 \
+     --n-vec 0"
 
-    # "--atom-fea-len 64 \
-    #  --n-conv 4 \
-    #  --h-fea-len 128 \
-    #  --o-fea-len 64 \
-    #  --n-h 2 \
-    #  --n-o 1 \
-    #  --vec-fea-len 256 \
-    #  --cat-fea-len 64 \
-    #  --n-vec 0"
+    "--atom-fea-len 64 \
+     --n-conv 4 \
+     --h-fea-len 128 \
+     --o-fea-len 64 \
+     --n-h 2 \
+     --n-o 1 \
+     --vec-fea-len 256 \
+     --cat-fea-len 64 \
+     --n-vec 0"
 
-    # "--atom-fea-len 64 \
-    #  --n-conv 4 \
-    #  --h-fea-len 128 \
-    #  --o-fea-len 64 \
-    #  --n-h 1 \
-    #  --n-o 2 \
-    #  --vec-fea-len 256 \
-    #  --cat-fea-len 64 \
-    #  --n-vec 0"
+    "--atom-fea-len 64 \
+     --n-conv 4 \
+     --h-fea-len 128 \
+     --o-fea-len 64 \
+     --n-h 1 \
+     --n-o 2 \
+     --vec-fea-len 256 \
+     --cat-fea-len 64 \
+     --n-vec 0"
 
-    # "--atom-fea-len 64 \
-    #  --n-conv 4 \
-    #  --h-fea-len 128 \
-    #  --o-fea-len 64 \
-    #  --n-h 1 \
-    #  --n-o 1 \
-    #  --vec-fea-len 128 \
-    #  --cat-fea-len 64 \
-    #  --n-vec 0"
+    "--atom-fea-len 64 \
+     --n-conv 4 \
+     --h-fea-len 128 \
+     --o-fea-len 64 \
+     --n-h 1 \
+     --n-o 1 \
+     --vec-fea-len 128 \
+     --cat-fea-len 64 \
+     --n-vec 0"
 
-    # "--atom-fea-len 64 \
-    #  --n-conv 4 \
-    #  --h-fea-len 128 \
-    #  --o-fea-len 64 \
-    #  --n-h 1 \
-    #  --n-o 1 \
-    #  --vec-fea-len 512 \
-    #  --cat-fea-len 64 \
-    #  --n-vec 0"
+    "--atom-fea-len 64 \
+     --n-conv 4 \
+     --h-fea-len 128 \
+     --o-fea-len 64 \
+     --n-h 1 \
+     --n-o 1 \
+     --vec-fea-len 512 \
+     --cat-fea-len 64 \
+     --n-vec 0"
 
-    # "--atom-fea-len 64 \
-    #  --n-conv 4 \
-    #  --h-fea-len 128 \
-    #  --o-fea-len 64 \
-    #  --n-h 1 \
-    #  --n-o 1 \
-    #  --vec-fea-len 256 \
-    #  --cat-fea-len 128 \
-    #  --n-vec 0"
+    "--atom-fea-len 64 \
+     --n-conv 4 \
+     --h-fea-len 128 \
+     --o-fea-len 64 \
+     --n-h 1 \
+     --n-o 1 \
+     --vec-fea-len 256 \
+     --cat-fea-len 128 \
+     --n-vec 0"
 
-    # "--atom-fea-len 64 \
-    #  --n-conv 4 \
-    #  --h-fea-len 128 \
-    #  --o-fea-len 64 \
-    #  --n-h 1 \
-    #  --n-o 1 \
-    #  --vec-fea-len 256 \
-    #  --cat-fea-len 64 \
-    #  --n-vec 1"
+    "--atom-fea-len 64 \
+     --n-conv 4 \
+     --h-fea-len 128 \
+     --o-fea-len 64 \
+     --n-h 1 \
+     --n-o 1 \
+     --vec-fea-len 256 \
+     --cat-fea-len 64 \
+     --n-vec 1"
 )
 
 # Seeds to evaluate
