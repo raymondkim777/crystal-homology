@@ -1280,12 +1280,12 @@ def save_stats_as_csv(
     if test:
         with open(f'out_{args.id}/params_{args.id}.txt', 'w') as f:
             f.write(f"Seed:\t\t\t{args.seed_val}") 
-            f.write(f"\nAttributes:\t\t{'Yes' if args.attr else 'No'}")
+            f.write(f"\ASPH:\t\t\t{'Yes' if args.attr else 'No'}")
             f.write(f'\nSource:\t\t\t{args.vec_source}' if args.vector != 'none' else '')
             f.write(f"\nVector:\t\t\t{args.vector}")
             f.write(f'\nAtom Len:\t\t{args.atom_fea_len}\nConv Num:\t\t{args.n_conv}')
-            f.write(f'\nHidden Len:\t\t{args.h_fea_len}\nHidden Num:\t\t{args.n_h}\nHead Layer Num:\t{args.n_o}')
-            f.write(f'\nVec Len:\t\t{args.vec_fea_len}\nVec Layer Num:\t{args.n_vec}\nVec Out Num:\t{args.cat_fea_len}')
+            f.write(f'\nHidden Len:\t\t{args.h_fea_len}\nHidden Num:\t\t{args.n_h}\nHead Out Num:\t{args.n_o}')
+            f.write(f'\nVec Len:\t\t{args.vec_fea_len}\nVec Layer Num:\t{args.n_vec}\nVec Cat Num:\t{args.cat_fea_len}')
             f.write(f"\nVec Freeze:\t\t{args.freeze_vectors}")
             f.write(f"\nReg Loss:\t\t{args.loss_reg}")
             f.write(f"\nVal Metric:\t\t{args.val_metric}")
