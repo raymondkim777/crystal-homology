@@ -7,6 +7,7 @@ import json
 import os
 import random
 import warnings
+import hashlib
 
 import numpy as np
 import networkx as nx
@@ -77,6 +78,7 @@ def get_train_val_test_loader(dataset, collate_fn=default_collate,
                               batch_size=64, train_ratio=None,
                               val_ratio=0.1, test_ratio=0.1, return_test=False,
                               num_workers=1, pin_memory=False, persistent_workers=False,
+                              direct_gap_keep=1.0, mask_seed=42,
                               **kwargs):
     """
     Utility function for dividing a dataset to train, val, test datasets.
@@ -131,6 +133,60 @@ def get_train_val_test_loader(dataset, collate_fn=default_collate,
         valid_size = kwargs['val_size']
     else:
         valid_size = int(val_ratio * total_size)
+
+    # ! turn portion of direct_gap labels to 0
+    if not 0.0 < direct_gap_keep <= 1.0:
+        raise ValueError("direct_gap_keep must be in (0, 1].")
+
+    mask_col = dataset.predict_list.index("direct_gap") + 1
+
+    train_indices = indices[:train_size]
+
+    # crystal idx with dg label
+    valid_train_indices = [
+        idx for idx in train_indices
+        if dataset.id_prop_data[idx][1][mask_col] == 1
+    ]
+
+    # crystal MPID with dg label
+    valid_ids = sorted(
+        dataset.id_prop_data[idx][0][0]
+        for idx in valid_train_indices
+    )
+
+    # independent rng from training rng
+    rng = random.Random(mask_seed)
+    rng.shuffle(valid_ids)
+
+    # crystal MPID with dg label - keep
+    keep_count = round(len(valid_ids) * direct_gap_keep)
+    kept_ids = set(valid_ids[:keep_count])
+
+    # sanity check
+    kept_ids_sorted = sorted(kept_ids)
+    fingerprint = hashlib.sha256(
+        "\n".join(kept_ids_sorted).encode()
+    ).hexdigest()
+    print(f"[Direct-gap masking] Retained ID fingerprint: {fingerprint}")
+
+    # continue with mask changing
+    if keep_count < 2:
+        raise ValueError("Too few direct-gap labels retained for training.")
+
+    # crystal MPID with dg label (not kept) --> mask = 0
+    for idx in valid_train_indices:
+        crystal_id = dataset.id_prop_data[idx][0][0]
+
+        if crystal_id not in kept_ids:
+            dataset.id_prop_data[idx][1][mask_col] = 0
+
+    print(
+        f"[Direct-gap masking] Seed {mask_seed}: "
+        f"retained {len(kept_ids)}/{len(valid_ids)} "
+        f"originally labeled training crystals "
+        f"({direct_gap_keep:.1%})"
+    )
+    
     train_sampler = SubsetRandomSampler(indices[:train_size])
     val_sampler = SubsetRandomSampler(
         indices[-(valid_size + test_size):-test_size])

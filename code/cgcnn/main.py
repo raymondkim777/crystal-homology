@@ -160,6 +160,10 @@ parser.add_argument('--save-split', action='store_true',
                     help='saves crystal IDs per split to file')
 parser.add_argument('--loss-reg', default='mse', type=str, metavar="LOSS_REG_TYPE", 
                     help='type of regression loss: MSE or MAE')
+parser.add_argument('--direct-gap-keep', default=1.0, type=float, 
+                    help='fraction of labeled direct gap training crystals to retain')
+parser.add_argument('--only-direct-gap', action='store_true',
+                    help='flag for single task DG model')
 
 
 
@@ -249,59 +253,28 @@ def main():
             return_test=True,
             # ! below causes constantly increasing memory
             # persistent_workers=True
+            # ! direct gap label control
+            direct_gap_keep=args.direct_gap_keep,
+            mask_seed=args.seed_val,
         )
-        # ! TEMPORARY - single task 
+        
+        # # ! TEMPORARY - write split crystal IDs to JSON file
+        # if args.save_split:
+        #     train_idx_list = list(train_loader.sampler.indices)
+        #     val_idx_list = list(val_loader.sampler.indices)
+        #     test_idx_list = list(test_loader.sampler.indices)
 
-        # def filter_valid_labels(loader, dataset, prop="direct_gap"):
-        #     mask_col = dataset.predict_list.index(prop) + 1
-
-        #     original_indices = list(loader.sampler.indices)
-
-        #     valid_indices = [
-        #         idx for idx in original_indices
-        #         if dataset.id_prop_data[idx][1][mask_col] == 1
-        #     ]
-
-        #     print(
-        #         f"{prop}: retained {len(valid_indices)} "
-        #         f"of {len(original_indices)} structures"
-        #     )
-
-        #     return DataLoader(
-        #         dataset,
-        #         batch_size=loader.batch_size,
-        #         sampler=SubsetRandomSampler(valid_indices),
-        #         collate_fn=collate_pool,
-        #         num_workers=args.workers,
-        #         pin_memory=args.cuda,
-        #     )
-
-        # train_loader = filter_valid_labels(train_loader, dataset)
-        # val_loader = filter_valid_labels(val_loader, dataset)
-        # test_loader = filter_valid_labels(test_loader, dataset)
-
-        # print("Train samples:", len(train_loader.sampler))
-        # print("Train batches:", len(train_loader))
-        # print("Validation batches:", len(val_loader))
-        # print("Epochs:", args.epochs)
-
-        # ! TEMPORARY - write split crystal IDs to JSON file
-        if args.save_split:
-            train_idx_list = list(train_loader.sampler.indices)
-            val_idx_list = list(val_loader.sampler.indices)
-            test_idx_list = list(test_loader.sampler.indices)
-
-            # id_prop_data[idx][0][0]
-            split_data = {
-                'seed': args.seed_val, 
-                'train': [f"mp-{dataset.id_prop_data[idx][0][0]}" for idx in train_idx_list], 
-                'val': [f"mp-{dataset.id_prop_data[idx][0][0]}" for idx in val_idx_list], 
-                'test': [f"mp-{dataset.id_prop_data[idx][0][0]}" for idx in test_idx_list],
-            }
-            os.makedirs(f"split_info", exist_ok=True)
-            with open(f"split_info/s{args.seed_val}.json", 'w', encoding='utf-8') as f:
-                json.dump(split_data, f, indent=4)
-                return
+        #     # id_prop_data[idx][0][0]
+        #     split_data = {
+        #         'seed': args.seed_val, 
+        #         'train': [f"mp-{dataset.id_prop_data[idx][0][0]}" for idx in train_idx_list], 
+        #         'val': [f"mp-{dataset.id_prop_data[idx][0][0]}" for idx in val_idx_list], 
+        #         'test': [f"mp-{dataset.id_prop_data[idx][0][0]}" for idx in test_idx_list],
+        #     }
+        #     os.makedirs(f"split_info", exist_ok=True)
+        #     with open(f"split_info/s{args.seed_val}.json", 'w', encoding='utf-8') as f:
+        #         json.dump(split_data, f, indent=4)
+        #         return
     else:
         if args.debug:
             print(f"Constructing {args.fold} folds")
@@ -376,6 +349,37 @@ def main():
             print(f"Normalizer train sample size {norm_sample_cnt}")  
         sample_cnt = min(len(train_indices), norm_sample_cnt)
         sample_indices = sample(train_indices, k=sample_cnt)
+
+        # ! TEMPORARY - normalizer selected crystal ID check
+        import hashlib
+
+        sample_ids = sorted(
+            str(dataset.id_prop_data[idx][0][0])
+            for idx in sample_indices
+        )
+
+        digest = hashlib.sha256(
+            "\n".join(sample_ids).encode()
+        ).hexdigest()
+
+        print("Normalizer sample fingerprint:", digest)
+
+        mask_col = dataset.predict_list.index("direct_gap") + 1
+
+        sample_valid_ids = sorted(
+            str(dataset.id_prop_data[idx][0][0])
+            for idx in sample_indices
+            if dataset.id_prop_data[idx][1][mask_col] == 1
+        )
+
+        valid_digest = hashlib.sha256(
+            "\n".join(sample_valid_ids).encode()
+        ).hexdigest()
+
+        print("Normalizer valid-label count:", len(sample_valid_ids))
+        print("Normalizer valid-label fingerprint:", valid_digest)
+        # ! TEMPORARY END
+
         sample_data_list = [dataset[i] for i in tqdm(sample_indices, desc="Normalizers: ")]
         _, _, _, sample_target, sample_mask, _ = collate_pool(sample_data_list)
 
@@ -396,6 +400,48 @@ def main():
             for prop, norm in normalizers.items():
                 print(f"Prop: {prop}, Mean: {norm.mean}, SD: {norm.std}, Bound: {norm.get_bound()}")
             continue
+
+        norm = normalizers["direct_gap"]
+
+        print("Direct-gap normalizer mean:", norm.mean.item())
+        print("Direct-gap normalizer std:", norm.std.item())
+        print("Direct-gap normalizer bound:", norm.bound.item())
+
+        # ! TEMPORARY - single task 
+        if args.only_direct_gap:
+            def filter_valid_labels(loader, dataset, prop="direct_gap"):
+                mask_col = dataset.predict_list.index(prop) + 1
+
+                original_indices = list(loader.sampler.indices)
+
+                valid_indices = [
+                    idx for idx in original_indices
+                    if dataset.id_prop_data[idx][1][mask_col] == 1
+                ]
+
+                print(
+                    f"{prop}: retained {len(valid_indices)} "
+                    f"of {len(original_indices)} structures"
+                )
+
+                return DataLoader(
+                    dataset,
+                    batch_size=loader.batch_size,
+                    sampler=SubsetRandomSampler(valid_indices),
+                    collate_fn=collate_pool,
+                    num_workers=args.workers,
+                    pin_memory=args.cuda,
+                )
+
+            train_loader = filter_valid_labels(train_loader, dataset)
+            val_loader = filter_valid_labels(val_loader, dataset)
+            test_loader = filter_valid_labels(test_loader, dataset)
+
+            print("Train samples:", len(train_loader.sampler))
+            print("Train batches:", len(train_loader))
+            print("Validation batches:", len(val_loader))
+            print("Epochs:", args.epochs)
+        # ! TEMPORARY END
         
         # ! clear dataloader cache
         if args.clear_cache:
