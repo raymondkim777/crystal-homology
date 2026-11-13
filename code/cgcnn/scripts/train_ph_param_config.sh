@@ -123,6 +123,8 @@ HP_CONFIGS=(
      --n-vec 1"
 )
 
+HP_INDICES=(1 2 3 4 5 6)
+
 # Seeds to evaluate
 SEEDS=(42)
 
@@ -168,9 +170,9 @@ run_config() {
 }
 
 echo "======================================"
-echo "Number of HP configurations: ${#HP_CONFIGS[@]}"
+echo "Number of HP configurations: ${#HP_INDICES[@]}"
 echo "Number of seeds: ${#SEEDS[@]}"
-echo "Total training runs: $((${#HP_CONFIGS[@]} * ${#SEEDS[@]}))"
+echo "Total training runs: $((${#HP_INDICES[@]} * ${#SEEDS[@]}))"
 echo "======================================"
 
 # ==========================================
@@ -178,7 +180,7 @@ echo "======================================"
 # ==========================================
 
 for seed in "${SEEDS[@]}"; do
-    for hp_index in "${!HP_CONFIGS[@]}"; do
+    for hp_index in "${HP_INDICES[@]}"; do
         run_config "$hp_index" "$seed"
     done
 done
