@@ -31,15 +31,15 @@ FIELDS = [
 ]
 
 PREDICT = [
-    'system',
+    # 'system',
     # 'bm_voigt',
     # 'bm_reuss',
     # 'bm_vrh', 
     # 'dos',                # future task
     # 'bandstructure',      # extract direct_gap (others already exist)
     'direct_gap',
-    'band_gap', 
-    'efermi', 
+    # 'band_gap', 
+    # 'efermi', 
     # 'is_gap_direct',
 ]
 
@@ -57,11 +57,11 @@ PLQY_PREDICT = [
 ]
 
 TASK_SPECS = {
-    'system': {
-        'head': 'multiclass', 
-        'out_dim': 7,
-        'weight': 1, 
-    },
+    # 'system': {
+    #     'head': 'multiclass', 
+    #     'out_dim': 7,
+    #     'weight': 1, 
+    # },
     # 'bm_voigt': {
     #     'head': 'regression', 
     #     'out_dim': 1,
@@ -79,16 +79,16 @@ TASK_SPECS = {
         'out_dim': 1,
         'weight': 1, 
     },
-    'band_gap': {
-        'head': 'regression', 
-        'out_dim': 1,
-        'weight': 1, 
-    },
-    'efermi': {
-        'head': 'regression', 
-        'out_dim': 1,
-        'weight': 1, 
-    },
+    # 'band_gap': {
+    #     'head': 'regression', 
+    #     'out_dim': 1,
+    #     'weight': 1, 
+    # },
+    # 'efermi': {
+    #     'head': 'regression', 
+    #     'out_dim': 1,
+    #     'weight': 1, 
+    # },
     # 'is_gap_direct': {
     #     'head': 'binary', 
     #     'out_dim': 1,
