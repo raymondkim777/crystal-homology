@@ -1,3 +1,7 @@
+export OMP_NUM_THREADS=16
+export MKL_NUM_THREADS=16
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
 
 #!/usr/bin/env bash
 set -euo pipefail
@@ -6,7 +10,7 @@ mkdir -p logs
 
 # Shared backbone hyperparameters
 COMMON_HP=(
-    --atom-fea-len 164
+    --atom-fea-len 64
     --n-conv 4
     --h-fea-len 128
     --o-fea-len 64
@@ -18,7 +22,7 @@ COMMON_HP=(
 VECTOR_HP=(
     --vec-fea-len 256
     --cat-fea-len 64
-    --n-vec 1
+    --n-vec 0
 )
 
 failed_runs=()

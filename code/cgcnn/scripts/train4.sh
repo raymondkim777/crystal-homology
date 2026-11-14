@@ -1,0 +1,18 @@
+python main.py \
+    --clear-cache --seed --seed-val 43 --delete --dims 2 \
+    --optim Adam --scheduler adapt \
+    --train-ratio 0.6 --val-ratio 0.2 --test-ratio 0.2 \
+    --epochs 200 --lr 0.001 --batch-size 32 \
+    --id mt_b32_mae_loss_s43 \
+    --loss-reg mae --val-metric error \
+    --vec-source both --vector landscape \
+    --atom-fea-len 64 \
+    --n-conv 4 \
+    --h-fea-len 128 \
+    --o-fea-len 64 \
+    --n-h 1 \
+    --n-o 1 \
+    --vec-fea-len 256 \
+    --cat-fea-len 64 \
+    --n-vec 0 \
+    --train pretrain data/pretrain

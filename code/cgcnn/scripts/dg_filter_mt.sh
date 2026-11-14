@@ -1,4 +1,10 @@
-  
+# # Limit CPU threading
+# export OMP_NUM_THREADS=16
+# export MKL_NUM_THREADS=16
+# export OPENBLAS_NUM_THREADS=1
+# export NUMEXPR_NUM_THREADS=1
+
+
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -26,7 +32,7 @@ COMMON_ARGS=(
     --vec-source both --vector landscape
     --atom-fea-len 64
     --n-conv 4
-    --h-fea-len 128
+    --h-fea-len 256
     --o-fea-len 64
     --n-h 1
     --n-o 1

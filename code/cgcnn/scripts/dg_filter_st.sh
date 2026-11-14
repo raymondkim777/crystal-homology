@@ -26,7 +26,7 @@ COMMON_ARGS=(
     --vec-source both --vector landscape
     --atom-fea-len 64
     --n-conv 4
-    --h-fea-len 128
+    --h-fea-len 256
     --o-fea-len 64
     --n-h 1
     --n-o 1

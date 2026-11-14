@@ -123,10 +123,10 @@ HP_CONFIGS=(
      --n-vec 1"
 )
 
-HP_INDICES=(1 2 3 4 5 6)
+HP_INDICES=(3)
 
 # Seeds to evaluate
-SEEDS=(42)
+SEEDS=(43)
 
 failed_runs=()
 successful_runs=()
