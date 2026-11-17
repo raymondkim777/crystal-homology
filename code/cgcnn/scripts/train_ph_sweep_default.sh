@@ -12,7 +12,7 @@ mkdir -p logs
 COMMON_HP=(
     --atom-fea-len 64
     --n-conv 4
-    --h-fea-len 128
+    --h-fea-len 256
     --o-fea-len 64
     --n-h 1
     --n-o 1
@@ -80,11 +80,19 @@ run_config() {
     fi
 }
 
-for seed in 42; do
-    run_config none none "$seed"
+# for seed in 42; do
+#     run_config none none "$seed"
 
+#     for source in graph point both; do
+#         for vector in image landscape perslay; do
+#             run_config "$source" "$vector" "$seed"
+#         done
+#     done
+# done
+
+for seed in 42 43 44 45 46; do
     for source in graph point both; do
-        for vector in image landscape perslay; do
+        for vector in perslay; do
             run_config "$source" "$vector" "$seed"
         done
     done
