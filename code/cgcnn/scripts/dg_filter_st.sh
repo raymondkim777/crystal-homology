@@ -23,7 +23,7 @@ COMMON_ARGS=(
     --train-ratio 0.6 --val-ratio 0.2 --test-ratio 0.2
     --epochs 200 --lr 0.001 --batch-size 32
     --loss-reg mae --val-metric error
-    --vec-source both --vector landscape
+    --vec-source both --vector image
     --atom-fea-len 64
     --n-conv 4
     --h-fea-len 256
