@@ -89,3 +89,4 @@ code/cgcnn/data/pretrain*
 code/cgcnn/data/plqy*
 code/cgcnn/checkpoints
 code/cgcnn/out*
+code/cgcnn/zip*

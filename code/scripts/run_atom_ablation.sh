@@ -5,7 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."   # Now in code/
 
 if (( $# == 0 )); then
-    echo "Usage: bash scripts/run_atom_ablation.sh 10 15 20" >&2
+    echo "Usage: bash scripts/run_atom_ablation.sh 5 10 15 20" >&2
     exit 1
 fi
 
@@ -21,9 +21,9 @@ for pct in "$@"; do
         echo "Invalid percentage: $pct (expected 0-100)" >&2
         exit 1
     fi
-    # for seed in 42 43 44 45 46; do
-    for seed in 42; do
-        printf -v id 'bl_atom%02d_s%d' "$pct" "$seed"
+    for seed in 42 43 44 45 46; do
+    # for seed in 42; do
+        printf -v id 'hp3_bl_atom%02d_s%d' "$pct" "$seed"
         if [[ -e "cgcnn/out_$id" ]]; then
             echo "Existing output cgcnn/out_$id; refusing to overwrite." >&2
             exit 1
